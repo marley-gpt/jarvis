@@ -226,7 +226,8 @@ export class JarvisEngine extends EventEmitter {
       task.updatedAt = now();
       this.changed();
 
-      if (step.type === "navigate" && step.url) {
+      if (step.type === "navigate") {
+        if (!step.url) throw new Error(`Workflow step "${step.label}" is missing a URL.`);
         await this.action(task, step.label, "change", workflowId.includes("meta") ? "meta" : "browser", () => this.browser.navigate(step.url!, signal));
       } else if (step.type === "checkpoint") {
         await this.action(task, step.label, "read", "brain", async () => "Human checkpoint reached.");
