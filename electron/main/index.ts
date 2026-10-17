@@ -17,7 +17,7 @@ function createWindow(): void {
     backgroundColor: "#05090d",
     titleBarStyle: "hiddenInset",
     webPreferences: {
-      preload: path.join(app.getAppPath(), "dist-electron", "preload", "index.js"),
+      preload: path.join(app.getAppPath(), "dist-electron", "preload", "index.cjs"),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -28,7 +28,6 @@ function createWindow(): void {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
   });
-
   window.webContents.on("will-navigate", (event) => event.preventDefault());
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
