@@ -2,6 +2,7 @@ import path from "node:path";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import dotenv from "dotenv";
 import { JarvisEngine } from "./engine.js";
+import { assertAllowedUrl } from "./security.js";
 
 dotenv.config();
 
@@ -25,10 +26,18 @@ function createWindow(): void {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
+    try {
+      assertAllowedUrl(url);
+      void shell.openExternal(url);
+    } catch {
+      // Ignore renderer attempts to open an unapproved origin.
+    }
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
+  window.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(permission === "media" && process.env.VITE_ENABLE_VOICE === "true");
+  });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void window.loadURL(devUrl);
