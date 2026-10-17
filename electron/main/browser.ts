@@ -24,11 +24,14 @@ export class BrowserController {
     if (signal?.aborted) throw new Error("Task was cancelled.");
     const target = assertAllowedUrl(rawUrl);
     const page = await this.ensurePage();
-    if (signal) {
-      signal.addEventListener("abort", () => void page.stopLoading().catch(() => undefined), { once: true });
+    const cancel = () => void page.evaluate(() => window.stop()).catch(() => undefined);
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      return `Opened ${target.href}`;
+    } finally {
+      signal?.removeEventListener("abort", cancel);
     }
-    await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    return `Opened ${target.href}`;
   }
 
   async stop(): Promise<void> {
