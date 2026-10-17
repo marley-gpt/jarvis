@@ -76,6 +76,15 @@ export class JarvisEngine extends EventEmitter {
     const handler = this.approvalHandlers.get(approvalId);
     this.approvalHandlers.delete(approvalId);
 
+    if (Date.now() > new Date(approval.expiresAt).getTime()) {
+      task.status = "cancelled";
+      task.error = "Approval expired. Submit the command again to create a fresh request.";
+      task.updatedAt = now();
+      this.log("warning", "brain", `Expired: ${approval.summary}`);
+      this.changed();
+      return;
+    }
+
     if (!allow) {
       task.status = "cancelled";
       task.error = "Action declined by operator.";
@@ -90,7 +99,17 @@ export class JarvisEngine extends EventEmitter {
     task.updatedAt = now();
     this.log("info", "brain", `Approved: ${approval.summary}`);
     this.changed();
-    await handler?.();
+    try {
+      if (!handler) throw new Error("Approval handler is no longer available.");
+      await handler();
+    } catch (error) {
+      task.status = "failed";
+      task.error = error instanceof Error ? error.message : String(error);
+      task.progress = 100;
+      task.updatedAt = now();
+      this.log("error", "brain", task.error);
+      this.changed();
+    }
   }
 
   async emergencyStop(): Promise<void> {
@@ -212,6 +231,9 @@ export class JarvisEngine extends EventEmitter {
       } else if (step.type === "checkpoint") {
         await this.action(task, step.label, "read", "brain", async () => "Human checkpoint reached.");
       } else {
+        if (step.type === "spend" && (step.amountAud ?? 0) > 50 - this.spentAud) {
+          throw new Error("Blocked: the proposed spend would exceed the A$50 monthly ceiling.");
+        }
         return this.requestApproval(task, {
           kind: step.type,
           summary: step.label,
