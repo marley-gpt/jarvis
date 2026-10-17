@@ -24,7 +24,7 @@ JARVIS never silently publishes, spends money, deletes files, or bypasses access
 ## Run
 
 ```powershell
-npm install
+npm install --legacy-peer-deps
 npx playwright install chromium
 Copy-Item .env.example .env
 npm run dev
