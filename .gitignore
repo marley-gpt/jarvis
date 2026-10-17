@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-electron/
+.env
+.jarvis/
+playwright-report/
+test-results/
+*.log
