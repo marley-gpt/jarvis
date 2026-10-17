@@ -5,7 +5,7 @@ Write-Host ""
 Write-Host "JARVIS Windows setup" -ForegroundColor Cyan
 Write-Host "====================" -ForegroundColor DarkCyan
 
-if (-not $IsWindows) {
+if ($env:OS -ne "Windows_NT") {
   throw "JARVIS computer control currently requires Windows."
 }
 
