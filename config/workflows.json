@@ -1,0 +1,38 @@
+{
+  "workflows": [
+    {
+      "id": "product-listing-draft",
+      "label": "Product listing draft",
+      "description": "Opens the store admin and prepares a draft. Publishing remains approval-gated.",
+      "costAud": 0,
+      "steps": [
+        {
+          "type": "navigate",
+          "url": "https://admin.shopify.com",
+          "label": "Open store admin"
+        },
+        {
+          "type": "checkpoint",
+          "label": "Await product details and human review"
+        }
+      ]
+    },
+    {
+      "id": "meta-ads-review",
+      "label": "Meta Ads review",
+      "description": "Opens Meta Ads Manager for human review; changes to publishing or budget remain approval-gated.",
+      "costAud": 0,
+      "steps": [
+        {
+          "type": "navigate",
+          "url": "https://business.facebook.com/adsmanager",
+          "label": "Open Ads Manager"
+        },
+        {
+          "type": "checkpoint",
+          "label": "Await human review"
+        }
+      ]
+    }
+  ]
+}
