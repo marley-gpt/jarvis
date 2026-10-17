@@ -14,7 +14,6 @@
     "resolveJsonModule": true
   },
   "include": [
-    "electron/**/*.ts",
-    "config/**/*.json"
+    "electron/**/*"
   ]
 }
