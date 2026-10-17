@@ -42,7 +42,7 @@ async function canonicalise(target: string): Promise<string> {
   }
 }
 
-function isWithin(candidate: string, root: string): boolean {
+export function isPathWithinRoot(candidate: string, root: string): boolean {
   const item = path.resolve(candidate).toLocaleLowerCase();
   const base = path.resolve(root).toLocaleLowerCase();
   return item === base || item.startsWith(base + path.sep);
@@ -52,23 +52,31 @@ export async function resolveAllowedPath(target: string): Promise<string> {
   if (!target.trim()) throw new Error("A file or folder path is required.");
   const candidate = await canonicalise(target);
   const canonicalRoots = await Promise.all(allowedRoots.map(canonicalise));
-  if (!canonicalRoots.some((root) => isWithin(candidate, root))) {
+  if (!canonicalRoots.some((root) => isPathWithinRoot(candidate, root))) {
     throw new Error("Access denied: target is outside the configured JARVIS roots.");
   }
   return candidate;
 }
 
-export function assertAllowedUrl(rawUrl: string): URL {
-  const input = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
-  const target = new URL(input);
-  if (!["http:", "https:"].includes(target.protocol)) throw new Error("Only HTTP and HTTPS navigation is supported.");
-
-  const ok = allowedOrigins.some((rawOrigin) => {
+export function isUrlAllowed(rawUrl: string, origins: string[] = allowedOrigins): boolean {
+  let target: URL;
+  try {
+    target = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:"].includes(target.protocol)) return false;
+  return origins.some((rawOrigin) => {
     const allowed = new URL(rawOrigin);
     return target.protocol === allowed.protocol &&
       (target.hostname === allowed.hostname || target.hostname.endsWith(`.${allowed.hostname}`));
   });
-  if (!ok) throw new Error(`Navigation blocked: ${target.origin} is not in JARVIS_ALLOWED_ORIGINS.`);
+}
+
+export function assertAllowedUrl(rawUrl: string): URL {
+  const input = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+  const target = new URL(input);
+  if (!isUrlAllowed(target.href)) throw new Error(`Navigation blocked: ${target.origin} is not in JARVIS_ALLOWED_ORIGINS.`);
   return target;
 }
 
