@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.electron.json && vite build",
     "start": "electron .",
     "test": "vitest run",
+    "test:live": "node tests/live-smoke.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
@@ -33,4 +34,5 @@
     "wait-on": "latest"
   }
 }
+
 
