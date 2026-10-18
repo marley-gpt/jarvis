@@ -7,7 +7,12 @@ import { assertAllowedUrl } from "./security.js";
 dotenv.config();
 
 let window: BrowserWindow | null = null;
-const engine = new JarvisEngine();
+let engine: JarvisEngine | null = null;
+
+function getEngine(): JarvisEngine {
+  if (!engine) throw new Error("JARVIS is still starting.");
+  return engine;
+}
 
 function createWindow(): void {
   window = new BrowserWindow({
@@ -44,21 +49,27 @@ function createWindow(): void {
   else void window.loadFile(path.join(app.getAppPath(), "dist", "index.html"));
 }
 
-ipcMain.handle("jarvis:get-snapshot", () => engine.snapshot());
+ipcMain.handle("jarvis:get-snapshot", () => getEngine().snapshot());
 ipcMain.handle("jarvis:submit", (_event, command: unknown) => {
   if (typeof command !== "string" || command.length > 2_000) throw new Error("Invalid command.");
-  return engine.submit(command);
+  return getEngine().submit(command);
 });
 ipcMain.handle("jarvis:approval", (_event, approvalId: unknown, allow: unknown) => {
   if (typeof approvalId !== "string" || typeof allow !== "boolean") throw new Error("Invalid approval response.");
-  return engine.respondToApproval(approvalId, allow);
+  return getEngine().respondToApproval(approvalId, allow);
 });
-ipcMain.handle("jarvis:emergency-stop", () => engine.emergencyStop());
-ipcMain.handle("jarvis:reset-stop", () => engine.resetEmergencyStop());
+ipcMain.handle("jarvis:emergency-stop", () => getEngine().emergencyStop());
+ipcMain.handle("jarvis:reset-stop", () => getEngine().resetEmergencyStop());
+ipcMain.handle("jarvis:configure-brain", (_event, apiKey: unknown) => {
+  if (apiKey !== null && (typeof apiKey !== "string" || apiKey.length > 500)) throw new Error("Invalid API key.");
+  return getEngine().configureBrain(apiKey);
+});
+ipcMain.handle("jarvis:check-updates", () => getEngine().checkForUpdates());
 
-engine.on("changed", (snapshot) => window?.webContents.send("jarvis:snapshot", snapshot));
-
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  engine = new JarvisEngine();
+  engine.on("changed", (snapshot) => window?.webContents.send("jarvis:snapshot", snapshot));
+  await engine.initialize();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -68,3 +79,4 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+

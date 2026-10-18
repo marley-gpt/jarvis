@@ -80,10 +80,11 @@ export function assertAllowedUrl(rawUrl: string): URL {
   return target;
 }
 
-export const APP_ALLOWLIST: Record<string, { command: string; args: string[]; label: string }> = {
-  notepad: { command: "notepad.exe", args: [], label: "Notepad" },
-  calculator: { command: "calc.exe", args: [], label: "Calculator" },
-  explorer: { command: "explorer.exe", args: [], label: "File Explorer" },
-  paint: { command: "mspaint.exe", args: [], label: "Paint" },
-  terminal: { command: "wt.exe", args: [], label: "Windows Terminal" },
+export const APP_ALLOWLIST: Record<string, { command: string; args: string[]; label: string; processes: string[]; closable: boolean }> = {
+  notepad: { command: "notepad.exe", args: [], label: "Notepad", processes: ["notepad.exe"], closable: true },
+  calculator: { command: "calc.exe", args: [], label: "Calculator", processes: ["calculatorapp.exe", "calculator.exe"], closable: true },
+  explorer: { command: "explorer.exe", args: [], label: "File Explorer", processes: ["explorer.exe"], closable: false },
+  paint: { command: "mspaint.exe", args: [], label: "Paint", processes: ["mspaint.exe"], closable: true },
+  terminal: { command: "wt.exe", args: [], label: "Windows Terminal", processes: ["windowsterminal.exe", "wt.exe"], closable: false },
 };
+

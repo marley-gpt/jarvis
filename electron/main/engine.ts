@@ -2,9 +2,12 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
+import { BrainController } from "./brain.js";
 import { BrowserController } from "./browser.js";
 import { DesktopController } from "./desktop.js";
+import { parseLocalIntent, type JarvisIntent } from "./intent.js";
 import { allowedOrigins, allowedRoots } from "./security.js";
+import { UpdateController } from "./updater.js";
 import type { ActionEvent, ActivityEvent, Approval, JarvisTask, Risk, Snapshot, Workflow } from "./types.js";
 
 const now = () => new Date().toISOString();
@@ -13,22 +16,35 @@ const id = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.rand
 export class JarvisEngine extends EventEmitter {
   private readonly browser = new BrowserController();
   private readonly desktop = new DesktopController();
+  private readonly brain = new BrainController();
+  private readonly updater = new UpdateController();
   private readonly tasks: JarvisTask[] = [];
   private readonly approvals: Approval[] = [];
   private readonly activity: ActivityEvent[] = [];
   private readonly controllers = new Map<string, AbortController>();
   private readonly approvalHandlers = new Map<string, () => Promise<void>>();
   private stopped = false;
-  private spentAud = 0;
+  private workflowSpentAud = 0;
 
   constructor() {
     super();
+    this.updater.on("changed", () => this.changed());
     this.log("info", "brain", "JARVIS core initialised. Safety interlocks are active.");
+  }
+
+  async initialize(): Promise<void> {
+    await this.brain.initialize();
+    await this.updater.initialize();
+    this.log("success", "system", this.brain.status().configured
+      ? "Conversational brain connected."
+      : "Basic controls ready. Connect OpenAI in Settings for conversational commands.");
+    this.changed();
   }
 
   snapshot(): Snapshot {
     const active = this.tasks.some((task) => task.status === "running");
     const waiting = this.approvals.length > 0;
+    const brain = this.brain.status();
     return {
       system: {
         status: this.stopped ? "stopped" : waiting ? "awaiting_approval" : active ? "active" : "idle",
@@ -37,12 +53,30 @@ export class JarvisEngine extends EventEmitter {
         allowedRoots,
         allowedOrigins,
         budgetAud: 50,
-        spentAud: this.spentAud,
+        spentAud: this.workflowSpentAud + brain.spentAud,
+        brainConfigured: brain.configured,
+        brainModel: brain.model,
+        brainSpentAud: brain.spentAud,
+        brainMonthlyLimitAud: brain.monthlyLimitAud,
+        update: this.updater.snapshot(),
       },
       tasks: structuredClone(this.tasks.slice(0, 30)),
       approvals: structuredClone(this.approvals),
       activity: structuredClone(this.activity.slice(0, 150)),
     };
+  }
+
+  async configureBrain(apiKey: string | null): Promise<Snapshot> {
+    const status = await this.brain.configure(apiKey);
+    this.log("success", "brain", status.configured ? "OpenAI brain connected securely." : "OpenAI brain disconnected.");
+    this.changed();
+    return this.snapshot();
+  }
+
+  async checkForUpdates(): Promise<void> {
+    await this.updater.check();
+    this.log("info", "system", this.updater.snapshot().message);
+    this.changed();
   }
 
   async submit(command: string): Promise<{ taskId: string }> {
@@ -84,7 +118,6 @@ export class JarvisEngine extends EventEmitter {
       this.changed();
       return;
     }
-
     if (!allow) {
       task.status = "cancelled";
       task.error = "Action declined by operator.";
@@ -93,8 +126,8 @@ export class JarvisEngine extends EventEmitter {
       this.changed();
       return;
     }
-
     if (this.stopped) throw new Error("Emergency stop is active.");
+
     task.status = "running";
     task.updatedAt = now();
     this.log("info", "brain", `Approved: ${approval.summary}`);
@@ -141,64 +174,15 @@ export class JarvisEngine extends EventEmitter {
     this.changed();
 
     try {
-      const command = task.command;
-      let match: RegExpMatchArray | null;
-
-      if ((match = command.match(/^open\s+(notepad|calculator|explorer|paint|terminal)$/i))) {
-        await this.action(task, `Open ${match[1]}`, "change", "skills", async () => this.desktop.openApp(match![1]));
-        return this.complete(task, `Opened ${match[1]}.`);
+      let intent = parseLocalIntent(task.command);
+      if (!intent) {
+        if (!this.brain.status().configured) {
+          throw new Error("I do not understand that yet. Connect the OpenAI brain in Settings, or say “help” for local commands.");
+        }
+        intent = await this.action(task, "Understand natural-language request", "read", "brain", () =>
+          this.brain.interpret(task.command, this.brainContext(), signal));
       }
-
-      if ((match = command.match(/^open\s+(.+)$/i))) {
-        await this.action(task, "Navigate browser", "change", "browser", () => this.browser.navigate(match![1], signal));
-        return this.complete(task, `Browser navigation completed.`);
-      }
-
-      if ((match = command.match(/^list files(?: in)?\s+(.+)$/i))) {
-        const entries = await this.action(task, "Read folder contents", "read", "files", () => this.desktop.listFiles(match![1]));
-        const preview = entries.slice(0, 12).map((entry) => `${entry.kind === "folder" ? "Folder" : "File"}: ${entry.name}`).join("\n");
-        return this.complete(task, entries.length ? `${entries.length} item(s) found.\n${preview}` : "The folder is empty.");
-      }
-
-      if ((match = command.match(/^create folder\s+(.+)$/i))) {
-        const result = await this.action(task, "Create folder", "change", "files", () => this.desktop.createFolder(match![1]));
-        return this.complete(task, result);
-      }
-
-      if ((match = command.match(/^organise files(?: in)?\s+(.+)$/i))) {
-        const plan = await this.action(task, "Build organisation plan", "read", "files", () => this.desktop.planOrganisation(match![1]));
-        if (!plan.length) return this.complete(task, "No files need organising.");
-        return this.requestApproval(task, {
-          kind: "significant_change",
-          summary: `Organise ${plan.length} file(s)`,
-          detail: plan.slice(0, 20).map((item) => `${path.basename(item.from)} → ${item.category}`).join("\n"),
-        }, async () => {
-          const result = await this.action(task, "Move files into category folders", "critical", "files", () => this.desktop.applyOrganisation(plan));
-          this.complete(task, result);
-        });
-      }
-
-      if ((match = command.match(/^delete\s+(.+)$/i))) {
-        const target = match[1];
-        return this.requestApproval(task, {
-          kind: "delete",
-          summary: `Delete ${path.basename(target)}`,
-          detail: `Permanent file deletion requested for: ${target}`,
-        }, async () => {
-          const result = await this.action(task, "Delete file", "critical", "files", () => this.desktop.deleteFile(target));
-          this.complete(task, result);
-        });
-      }
-
-      if ((match = command.match(/^run workflow\s+([\w-]+)$/i))) {
-        return await this.runWorkflow(task, match[1], signal);
-      }
-
-      if (/^(status|what are you doing)$/i.test(command)) {
-        return this.complete(task, "JARVIS is online. Permission controls and emergency stop are active.");
-      }
-
-      throw new Error("Command not recognised. Try opening an app or URL, listing files, creating a folder, organising files, deleting a file, or running a workflow.");
+      await this.executeIntent(task, intent, signal);
     } catch (error) {
       if (signal.aborted || this.stopped) return;
       task.status = "failed";
@@ -209,6 +193,101 @@ export class JarvisEngine extends EventEmitter {
       this.changed();
     } finally {
       if (!["waiting_approval", "running"].includes(task.status)) this.controllers.delete(task.id);
+    }
+  }
+
+  private async executeIntent(task: JarvisTask, intent: JarvisIntent, signal: AbortSignal): Promise<void> {
+    switch (intent.type) {
+      case "open_app": {
+        const result = await this.action(task, `Open ${intent.app}`, "change", "skills", () => this.desktop.openApp(intent.app));
+        return this.complete(task, result);
+      }
+      case "close_app": {
+        if (intent.app.toLowerCase() === "browser") {
+          await this.action(task, "Close controlled browser", "change", "browser", () => this.browser.stop());
+          return this.complete(task, "Closed the controlled browser.");
+        }
+        const plan = await this.action(task, `Find running ${intent.app}`, "read", "skills", () => this.desktop.planCloseApp(intent.app));
+        if (plan.requiresApproval) {
+          return this.requestApproval(task, {
+            kind: "close_app",
+            summary: `Close ${plan.label}`,
+            detail: `JARVIS will ask these process groups to close: ${plan.processImages.join(", ")}. Unsaved work may prompt inside the app.`,
+          }, async () => {
+            const result = await this.action(task, `Close ${plan.label}`, "critical", "skills", () => this.desktop.closeApp(plan));
+            this.complete(task, result);
+          });
+        }
+        const result = await this.action(task, `Close ${plan.label}`, "change", "skills", () => this.desktop.closeApp(plan));
+        return this.complete(task, result);
+      }
+      case "open_website":
+        await this.action(task, "Navigate controlled browser", "change", "browser", () => this.browser.navigate(intent.url, signal));
+        return this.complete(task, "Browser navigation completed.");
+      case "list_files": {
+        const entries = await this.action(task, "Read folder contents", "read", "files", () => this.desktop.listFiles(intent.path));
+        const preview = entries.slice(0, 12).map((entry) => `${entry.kind === "folder" ? "Folder" : "File"}: ${entry.name}`).join("\n");
+        return this.complete(task, entries.length ? `${entries.length} item(s) found.\n${preview}` : "The folder is empty.");
+      }
+      case "create_folder": {
+        const result = await this.action(task, "Create folder", "change", "files", () => this.desktop.createFolder(intent.path));
+        return this.complete(task, result);
+      }
+      case "organise_files": {
+        const plan = await this.action(task, "Build organisation plan", "read", "files", () => this.desktop.planOrganisation(intent.path));
+        if (!plan.length) return this.complete(task, "No files need organising.");
+        return this.requestApproval(task, {
+          kind: "significant_change",
+          summary: `Organise ${plan.length} file(s)`,
+          detail: plan.slice(0, 20).map((item) => `${path.basename(item.from)} → ${item.category}`).join("\n"),
+        }, async () => {
+          const result = await this.action(task, "Move files into category folders", "critical", "files", () => this.desktop.applyOrganisation(plan));
+          this.complete(task, result);
+        });
+      }
+      case "delete_file":
+        return this.requestApproval(task, {
+          kind: "delete",
+          summary: `Delete ${path.basename(intent.path)}`,
+          detail: `Permanent file deletion requested for: ${intent.path}`,
+        }, async () => {
+          const result = await this.action(task, "Delete file", "critical", "files", () => this.desktop.deleteFile(intent.path));
+          this.complete(task, result);
+        });
+      case "run_workflow":
+        return this.runWorkflow(task, intent.workflowId, signal);
+      case "status": {
+        const brain = this.brain.status();
+        return this.complete(task, `JARVIS is online. AI brain: ${brain.configured ? "connected" : "not connected"}. ${this.updater.snapshot().message}`);
+      }
+      case "help":
+        return this.complete(task, [
+          "Speak normally. Examples:",
+          "• Open Chrome",
+          "• Close Spotify",
+          "• Show files in %USERPROFILE%\\Documents\\JarvisWorkspace",
+          "• Organise files in %USERPROFILE%\\Documents\\JarvisWorkspace\\Inbox",
+          "• Open github.com",
+          "• Check for updates",
+        ].join("\n"));
+      case "check_updates":
+        await this.action(task, "Check for JARVIS updates", "read", "system", () => this.updater.check());
+        return this.complete(task, this.updater.snapshot().message);
+      case "install_update": {
+        const update = this.updater.snapshot();
+        if (!update.available) return this.complete(task, "No update is waiting to be installed.");
+        if (!update.canInstall) throw new Error(update.message);
+        return this.requestApproval(task, {
+          kind: "update",
+          summary: `Install JARVIS ${update.latestVersion ?? "update"}`,
+          detail: "JARVIS will close, pull the trusted GitHub branch, install dependencies, rebuild, and restart. A local log is retained if anything fails.",
+        }, async () => {
+          this.complete(task, "Update approved. JARVIS will restart when installation finishes.");
+          await this.updater.installAndRestart();
+        });
+      }
+      case "reply":
+        return this.complete(task, intent.text);
     }
   }
 
@@ -232,7 +311,8 @@ export class JarvisEngine extends EventEmitter {
       } else if (step.type === "checkpoint") {
         await this.action(task, step.label, "read", "brain", async () => "Human checkpoint reached.");
       } else {
-        if (step.type === "spend" && (step.amountAud ?? 0) > 50 - this.spentAud) {
+        const brainSpend = this.brain.status().spentAud;
+        if (step.type === "spend" && (step.amountAud ?? 0) > 50 - this.workflowSpentAud - brainSpend) {
           throw new Error("Blocked: the proposed spend would exceed the A$50 monthly ceiling.");
         }
         return this.requestApproval(task, {
@@ -240,7 +320,7 @@ export class JarvisEngine extends EventEmitter {
           summary: step.label,
           detail: step.type === "spend" ? `Proposed spend: A$${step.amountAud ?? 0}` : "External publishing action requested.",
         }, async () => {
-          if (step.type === "spend") this.spentAud += step.amountAud ?? 0;
+          if (step.type === "spend") this.workflowSpentAud += step.amountAud ?? 0;
           this.complete(task, `${workflow.label}: approved checkpoint recorded. Configure a site-specific adapter before external mutation.`);
         });
       }
@@ -248,13 +328,16 @@ export class JarvisEngine extends EventEmitter {
     this.complete(task, `${workflow.label} completed in review mode. No publishing or spend occurred.`);
   }
 
-  private async action<T>(
-    task: JarvisTask,
-    label: string,
-    risk: Risk,
-    source: ActivityEvent["source"],
-    work: () => Promise<T> | T,
-  ): Promise<T> {
+  private brainContext(): string {
+    return [
+      `Authorised file roots: ${allowedRoots.join("; ")}`,
+      `Authorised web origins: ${allowedOrigins.join(", ")}`,
+      "Installed workflows: product-listing-draft, meta-ads-review.",
+      "Opening apps is broad. File access and browser navigation remain restricted by the local engine.",
+    ].join("\n");
+  }
+
+  private async action<T>(task: JarvisTask, label: string, risk: Risk, source: ActivityEvent["source"], work: () => Promise<T> | T): Promise<T> {
     const event: ActionEvent = { id: id("action"), taskId: task.id, label, status: "running", risk, startedAt: now() };
     task.actions.unshift(event);
     task.updatedAt = now();
@@ -276,11 +359,7 @@ export class JarvisEngine extends EventEmitter {
     }
   }
 
-  private requestApproval(
-    task: JarvisTask,
-    input: Pick<Approval, "kind" | "summary" | "detail">,
-    handler: () => Promise<void>,
-  ): void {
+  private requestApproval(task: JarvisTask, input: Pick<Approval, "kind" | "summary" | "detail">, handler: () => Promise<void>): void {
     const approval: Approval = {
       id: id("approval"),
       taskId: task.id,
@@ -322,3 +401,4 @@ export class JarvisEngine extends EventEmitter {
     this.emit("changed", this.snapshot());
   }
 }
+

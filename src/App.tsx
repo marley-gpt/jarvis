@@ -2,7 +2,20 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityEvent, JarvisTask, Snapshot } from "./types";
 
 const emptySnapshot: Snapshot = {
-  system: { status: "idle", emergencyStop: false, voiceAvailable: false, allowedRoots: [], allowedOrigins: [], budgetAud: 50, spentAud: 0 },
+  system: {
+    status: "idle",
+    emergencyStop: false,
+    voiceAvailable: false,
+    allowedRoots: [],
+    allowedOrigins: [],
+    budgetAud: 50,
+    spentAud: 0,
+    brainConfigured: false,
+    brainModel: "gpt-6-luna",
+    brainSpentAud: 0,
+    brainMonthlyLimitAud: 45,
+    update: { checking: false, available: false, canInstall: false, currentVersion: "0.2.0", message: "Checking updates…" },
+  },
   tasks: [], approvals: [], activity: [],
 };
 
@@ -26,8 +39,8 @@ const quickCommands: Record<Section, { label: string; command: string; note: str
     { label: "Organise inbox", command: "organise files in %USERPROFILE%\\Documents\\JarvisWorkspace\\Inbox", note: "Confirmation required before moving" },
   ],
   skills: [
-    { label: "Open Notepad", command: "open notepad", note: "Allowlisted Windows application" },
-    { label: "Open Terminal", command: "open terminal", note: "Launch only; commands are never injected" },
+    { label: "Open any app", command: "open notepad", note: "Try Chrome, Spotify, Excel, or another Start-menu app" },
+    { label: "Close an app", command: "close notepad", note: "Unknown apps ask once to protect unsaved work" },
   ],
   creative: [
     { label: "Product listing draft", command: "run workflow product-listing-draft", note: "Review-only listing workflow" },
@@ -73,6 +86,9 @@ export default function App() {
   const [listening, setListening] = useState(false);
   const [error, setError] = useState("");
   const [clock, setClock] = useState(new Date());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
   const recognition = useRef<{ stop(): void } | null>(null);
 
   useEffect(() => {
@@ -146,6 +162,39 @@ export default function App() {
     }
   }
 
+  async function saveBrain() {
+    if (!apiKey.trim()) {
+      setError("Paste your OpenAI API key first.");
+      return;
+    }
+    setSavingSettings(true);
+    setError("");
+    try {
+      const next = await window.jarvis.configureBrain(apiKey.trim());
+      setSnapshot(next);
+      setApiKey("");
+      setSettingsOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  async function disconnectBrain() {
+    setSavingSettings(true);
+    setError("");
+    try {
+      const next = await window.jarvis.configureBrain(null);
+      setSnapshot(next);
+      setApiKey("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
   const sectionName = navItems.find((item) => item.id === section)?.label ?? "Brain";
   const headline = listening
     ? "VOICE CHANNEL ACTIVE"
@@ -177,8 +226,8 @@ export default function App() {
         </nav>
 
         <div className="trust-card">
-          <div className="trust-card__top"><span>TRUST BOUNDARY</span><strong>LOCAL</strong></div>
-          <p>{snapshot.system.allowedRoots.length} file root{snapshot.system.allowedRoots.length === 1 ? "" : "s"} · {snapshot.system.allowedOrigins.length} web origins</p>
+          <div className="trust-card__top"><span>AI BRAIN</span><strong>{snapshot.system.brainConfigured ? "CONNECTED" : "SETUP NEEDED"}</strong></div>
+          <p>{snapshot.system.brainConfigured ? snapshot.system.brainModel + " · protected local actions" : "Basic commands work now. Connect OpenAI for natural conversation."}</p>
           <div className="budget"><span>Monthly ceiling</span><strong>{"A$" + snapshot.system.budgetAud}</strong></div>
           <div className="budget__track"><i style={{ width: String(Math.min(100, snapshot.system.spentAud / snapshot.system.budgetAud * 100)) + "%" }}/></div>
           <small>{"A$" + snapshot.system.spentAud.toFixed(2) + " recorded spend"}</small>
@@ -201,7 +250,15 @@ export default function App() {
             <strong>{clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>
             <small>{clock.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }).toUpperCase()}</small>
           </div>
+          <button className="settings-button" onClick={() => setSettingsOpen(true)}>⚙ Settings</button>
         </header>
+
+        {!snapshot.system.brainConfigured && (
+          <section className="setup-banner">
+            <div><strong>Make JARVIS conversational</strong><span>Add your OpenAI API key once. It is encrypted on this Windows account.</span></div>
+            <button onClick={() => setSettingsOpen(true)}>Connect brain</button>
+          </section>
+        )}
 
         <section className="hero">
           <div className="hero__eyebrow"><span>{navItems.find((item) => item.id === section)?.icon}</span>{section === "brain" ? "NEURAL COMMAND CORE" : sectionName.toUpperCase()}</div>
@@ -237,8 +294,8 @@ export default function App() {
         <form className="command-bar" onSubmit={onSubmit}>
           <button type="button" className={listening ? "voice voice--active" : "voice"} onClick={toggleVoice} aria-label="Toggle voice command">◉</button>
           <div>
-            <label htmlFor="command">COMMAND JARVIS</label>
-            <input id="command" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Type an instruction, e.g. open notepad" disabled={snapshot.system.emergencyStop}/>
+            <label htmlFor="command">ASK JARVIS</label>
+            <input id="command" value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Tell me what you want, e.g. “close Spotify”" disabled={snapshot.system.emergencyStop} autoFocus/>
           </div>
           <button type="submit" disabled={!command.trim() || snapshot.system.emergencyStop}>EXECUTE <span>↗</span></button>
         </form>
@@ -275,10 +332,43 @@ export default function App() {
 
         <div className="access-summary">
           <div><span>FILE ACCESS</span><strong>{snapshot.system.allowedRoots.length ? "RESTRICTED" : "LOCKED"}</strong></div>
-          <div><span>APP CONTROL</span><strong>ALLOWLISTED</strong></div>
+          <div><span>APP CONTROL</span><strong>START MENU</strong></div>
           <div><span>PUBLISH / SPEND</span><strong>CONFIRM</strong></div>
         </div>
       </aside>
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSettingsOpen(false)}>
+          <section className="settings-modal" role="dialog" aria-modal="true" aria-label="JARVIS settings">
+            <div className="settings-modal__header">
+              <div><small>JARVIS SETUP</small><h2>Settings</h2></div>
+              <button onClick={() => setSettingsOpen(false)} aria-label="Close settings">×</button>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__title"><span className={snapshot.system.brainConfigured ? "connected-dot" : "connected-dot off"}/><div><strong>OpenAI brain</strong><small>{snapshot.system.brainConfigured ? "Connected · " + snapshot.system.brainModel : "Not connected"}</small></div></div>
+              <p>Your key stays encrypted on this Windows account. JARVIS sends only the instruction and a short capability summary to OpenAI.</p>
+              <label htmlFor="api-key">OpenAI API key</label>
+              <input id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.system.brainConfigured ? "Key saved securely" : "sk-…"} autoComplete="off"/>
+              <div className="settings-actions">
+                {snapshot.system.brainConfigured && <button className="secondary" onClick={() => void disconnectBrain()} disabled={savingSettings}>Disconnect</button>}
+                <button className="primary" onClick={() => void saveBrain()} disabled={savingSettings || !apiKey.trim()}>{savingSettings ? "Saving…" : "Save key"}</button>
+              </div>
+              <small className="cost-note">AI usage this month: A${snapshot.system.brainSpentAud.toFixed(4)} · JARVIS pauses AI at A${snapshot.system.brainMonthlyLimitAud.toFixed(0)}.</small>
+            </div>
+
+            <div className="settings-card">
+              <div className="settings-card__title"><span className={snapshot.system.update.available ? "update-dot ready" : "update-dot"}/><div><strong>Automatic updates</strong><small>Current version {snapshot.system.update.currentVersion}</small></div></div>
+              <p>{snapshot.system.update.message}</p>
+              <div className="settings-actions">
+                <button className="secondary" onClick={() => void window.jarvis.checkForUpdates()} disabled={snapshot.system.update.checking}>{snapshot.system.update.checking ? "Checking…" : "Check now"}</button>
+                {snapshot.system.update.available && snapshot.system.update.canInstall && <button className="primary" onClick={() => { setSettingsOpen(false); void submit("install update"); }}>Install update</button>}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
+

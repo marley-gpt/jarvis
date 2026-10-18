@@ -44,10 +44,11 @@ npx playwright install chromium
 if ($LASTEXITCODE -ne 0) { throw "Playwright browser installation failed." }
 
 Write-Host ""
-Write-Host "Compiling JARVIS..." -ForegroundColor Cyan
+Write-Host "Building JARVIS..." -ForegroundColor Cyan
 npm run build
 if ($LASTEXITCODE -ne 0) { throw "JARVIS build failed." }
 
 Write-Host ""
 Write-Host "Setup complete. Starting JARVIS..." -ForegroundColor Green
 npm run dev
+

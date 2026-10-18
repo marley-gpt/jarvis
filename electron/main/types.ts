@@ -30,7 +30,7 @@ export interface JarvisTask {
 export interface Approval {
   id: string;
   taskId: string;
-  kind: "delete" | "publish" | "spend" | "significant_change";
+  kind: "delete" | "publish" | "spend" | "significant_change" | "close_app" | "update";
   summary: string;
   detail: string;
   createdAt: string;
@@ -41,7 +41,7 @@ export interface ActivityEvent {
   id: string;
   time: string;
   level: "info" | "success" | "warning" | "error";
-  source: "brain" | "browser" | "files" | "skills" | "creative" | "meta";
+  source: "brain" | "browser" | "files" | "skills" | "creative" | "meta" | "system";
   message: string;
 }
 
@@ -54,6 +54,19 @@ export interface Snapshot {
     allowedOrigins: string[];
     budgetAud: number;
     spentAud: number;
+    brainConfigured: boolean;
+    brainModel: string;
+    brainSpentAud: number;
+    brainMonthlyLimitAud: number;
+    update: {
+      checking: boolean;
+      available: boolean;
+      canInstall: boolean;
+      currentVersion: string;
+      latestVersion?: string;
+      message: string;
+      lastCheckedAt?: string;
+    };
   };
   tasks: JarvisTask[];
   approvals: Approval[];
@@ -74,3 +87,4 @@ export interface Workflow {
   costAud: number;
   steps: WorkflowStep[];
 }
+
