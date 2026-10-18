@@ -25,6 +25,7 @@ export interface ClosePlan {
   label: string;
   processImages: string[];
   requiresApproval: boolean;
+  allowForceClose: boolean;
 }
 
 interface InstalledShortcut {
@@ -107,14 +108,24 @@ export class DesktopController {
       label: builtIn?.label ?? appName,
       processImages: images,
       requiresApproval: !builtIn,
+      allowForceClose: !builtIn || builtIn.label === "Calculator",
     };
   }
 
   async closeApp(plan: ClosePlan): Promise<string> {
+    let forced = false;
     for (const image of plan.processImages) {
-      await execFileAsync("taskkill.exe", ["/IM", image, "/T"], { windowsHide: true });
+      try {
+        await execFileAsync("taskkill.exe", ["/IM", image, "/T"], { windowsHide: true });
+      } catch (error) {
+        if (!plan.allowForceClose) {
+          throw new Error(`Windows would not close ${plan.label} normally. JARVIS refused to force it because unsaved work could be lost.`, { cause: error });
+        }
+        await execFileAsync("taskkill.exe", ["/IM", image, "/T", "/F"], { windowsHide: true });
+        forced = true;
+      }
     }
-    return `Asked ${plan.label} to close.`;
+    return forced ? `Force-closed ${plan.label} after Windows refused a normal close.` : `Asked ${plan.label} to close.`;
   }
 
   async listFiles(target: string): Promise<FileEntry[]> {

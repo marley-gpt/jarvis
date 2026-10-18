@@ -3,11 +3,13 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("jarvis", {
   getSnapshot: () => ipcRenderer.invoke("jarvis:get-snapshot"),
   submit: (command: string) => ipcRenderer.invoke("jarvis:submit", command),
+  cancelTask: (taskId: string) => ipcRenderer.invoke("jarvis:cancel-task", taskId),
   respondToApproval: (approvalId: string, allow: boolean) => ipcRenderer.invoke("jarvis:approval", approvalId, allow),
   emergencyStop: () => ipcRenderer.invoke("jarvis:emergency-stop"),
   resetEmergencyStop: () => ipcRenderer.invoke("jarvis:reset-stop"),
   configureBrain: (apiKey: string | null) => ipcRenderer.invoke("jarvis:configure-brain", apiKey),
   testBrain: () => ipcRenderer.invoke("jarvis:test-brain"),
+  transcribeAudio: (audio: ArrayBuffer, mimeType: string, durationMs: number) => ipcRenderer.invoke("jarvis:transcribe-audio", audio, mimeType, durationMs),
   checkForUpdates: () => ipcRenderer.invoke("jarvis:check-updates"),
   onSnapshot: (listener: (snapshot: unknown) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, snapshot: unknown) => listener(snapshot);

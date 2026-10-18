@@ -41,7 +41,7 @@ function createWindow(): void {
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(permission === "media" && process.env.VITE_ENABLE_VOICE === "true");
+    callback(permission === "media");
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -54,6 +54,10 @@ ipcMain.handle("jarvis:submit", (_event, command: unknown) => {
   if (typeof command !== "string" || command.length > 2_000) throw new Error("Invalid command.");
   return getEngine().submit(command);
 });
+ipcMain.handle("jarvis:cancel-task", (_event, taskId: unknown) => {
+  if (typeof taskId !== "string" || taskId.length > 100) throw new Error("Invalid task.");
+  return getEngine().cancelTask(taskId);
+});
 ipcMain.handle("jarvis:approval", (_event, approvalId: unknown, allow: unknown) => {
   if (typeof approvalId !== "string" || typeof allow !== "boolean") throw new Error("Invalid approval response.");
   return getEngine().respondToApproval(approvalId, allow);
@@ -65,6 +69,18 @@ ipcMain.handle("jarvis:configure-brain", (_event, apiKey: unknown) => {
   return getEngine().configureBrain(apiKey);
 });
 ipcMain.handle("jarvis:test-brain", () => getEngine().testBrain());
+ipcMain.handle("jarvis:transcribe-audio", (_event, audio: unknown, mimeType: unknown, durationMs: unknown) => {
+  if (!(audio instanceof ArrayBuffer) || audio.byteLength === 0 || audio.byteLength > 10 * 1024 * 1024) {
+    throw new Error("Invalid microphone recording.");
+  }
+  if (typeof mimeType !== "string" || mimeType.length > 100 || !/^audio\/(webm|ogg|mp4|wav)/i.test(mimeType)) {
+    throw new Error("Unsupported microphone audio format.");
+  }
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 250 || durationMs > 31_000) {
+    throw new Error("Voice recordings must be between 0.25 and 30 seconds.");
+  }
+  return getEngine().transcribeAudio(new Uint8Array(audio), mimeType, durationMs);
+});
 ipcMain.handle("jarvis:check-updates", () => getEngine().checkForUpdates());
 
 app.whenReady().then(async () => {

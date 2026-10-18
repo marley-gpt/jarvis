@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { app } from "electron";
 import type { JarvisIntent } from "./intent.js";
 import { SettingsStore } from "./settings.js";
@@ -10,6 +10,7 @@ interface UsageLedger {
   spentAud: number;
   inputTokens: number;
   outputTokens: number;
+  audioSeconds: number;
 }
 
 export interface BrainStatus {
@@ -23,12 +24,13 @@ export interface BrainStatus {
 const MODEL = "gpt-6-luna";
 const INPUT_USD_PER_MILLION = 0.10;
 const OUTPUT_USD_PER_MILLION = 0.50;
+const TRANSCRIPTION_USD_PER_MINUTE = 0.0045;
 const USD_TO_AUD_BUFFERED = 1.65;
 
 export class BrainController {
   private readonly settings = new SettingsStore();
   private readonly monthlyLimitAud = 45;
-  private ledger: UsageLedger = { month: this.monthKey(), spentAud: 0, inputTokens: 0, outputTokens: 0 };
+  private ledger: UsageLedger = { month: this.monthKey(), spentAud: 0, inputTokens: 0, outputTokens: 0, audioSeconds: 0 };
   private configured = false;
   private verified = false;
 
@@ -142,6 +144,36 @@ export class BrainController {
     }
   }
 
+  async transcribeAudio(audio: Uint8Array, mimeType: string, durationMs: number): Promise<string> {
+    const apiKey = await this.settings.getApiKey();
+    if (!apiKey) throw new Error("Connect and test an OpenAI API key in Settings before using voice.");
+    this.rollMonth();
+    if (this.ledger.spentAud >= this.monthlyLimitAud) {
+      throw new Error(`AI budget paused at A$${this.monthlyLimitAud.toFixed(2)} for this month. Type a local command instead.`);
+    }
+    if (!audio.byteLength) throw new Error("No microphone audio was captured. Hold the button while you speak.");
+
+    const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : "webm";
+    const contentType = extension === "webm" ? "audio/webm" : mimeType.split(";")[0];
+    const client = new OpenAI({ apiKey, maxRetries: 1, timeout: 30_000 });
+    try {
+      const file = await toFile(audio, `jarvis-voice.${extension}`, { type: contentType });
+      const response = await client.audio.transcriptions.create({
+        file,
+        model: "gpt-transcribe",
+        response_format: "json",
+        prompt: "JARVIS Windows computer control and ecommerce assistant. Australian English.",
+      });
+      const transcript = response.text.trim();
+      if (!transcript) throw new Error("I could not hear a clear instruction. Try again closer to the microphone.");
+      await this.recordAudioUsage(Math.min(30, Math.max(0, durationMs / 1_000)));
+      return transcript;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("I could not hear")) throw error;
+      throw new Error(this.explainApiError(error, "gpt-transcribe"));
+    }
+  }
+
   private tool(name: string, description: string, properties: Record<string, object>) {
     return {
       type: "function" as const,
@@ -177,7 +209,7 @@ export class BrainController {
     }
   }
 
-  private explainApiError(error: unknown): string {
+  private explainApiError(error: unknown, targetModel = MODEL): string {
     if (error instanceof OpenAI.AuthenticationError || (error instanceof OpenAI.APIError && error.status === 401)) {
       return "OpenAI rejected this key (401). Create a fresh API key at platform.openai.com/api-keys, then paste the complete key with no spaces.";
     }
@@ -185,7 +217,7 @@ export class BrainController {
       return "The key is valid, but its project or region does not allow this request (403). Check the key's project permissions and API access.";
     }
     if (error instanceof OpenAI.NotFoundError || (error instanceof OpenAI.APIError && error.status === 404)) {
-      return `The key cannot access ${MODEL} (404). Create the key in a project that has access to this model.`;
+      return `The key cannot access ${targetModel} (404). Create the key in a project that has access to this model.`;
     }
     if (error instanceof OpenAI.RateLimitError || (error instanceof OpenAI.APIError && error.status === 429)) {
       const code = error instanceof OpenAI.APIError ? String(error.code ?? "") : "";
@@ -217,14 +249,21 @@ export class BrainController {
 
   private rollMonth(): void {
     const current = this.monthKey();
-    if (this.ledger.month !== current) this.ledger = { month: current, spentAud: 0, inputTokens: 0, outputTokens: 0 };
+    if (this.ledger.month !== current) this.ledger = { month: current, spentAud: 0, inputTokens: 0, outputTokens: 0, audioSeconds: 0 };
   }
 
   private async loadLedger(): Promise<void> {
     try {
-      this.ledger = JSON.parse(await fs.readFile(this.ledgerPath(), "utf8")) as UsageLedger;
+      const parsed = JSON.parse(await fs.readFile(this.ledgerPath(), "utf8")) as Partial<UsageLedger>;
+      this.ledger = {
+        month: parsed.month ?? this.monthKey(),
+        spentAud: parsed.spentAud ?? 0,
+        inputTokens: parsed.inputTokens ?? 0,
+        outputTokens: parsed.outputTokens ?? 0,
+        audioSeconds: parsed.audioSeconds ?? 0,
+      };
     } catch {
-      this.ledger = { month: this.monthKey(), spentAud: 0, inputTokens: 0, outputTokens: 0 };
+      this.ledger = { month: this.monthKey(), spentAud: 0, inputTokens: 0, outputTokens: 0, audioSeconds: 0 };
     }
     this.rollMonth();
   }
@@ -233,6 +272,14 @@ export class BrainController {
     const usd = inputTokens / 1_000_000 * INPUT_USD_PER_MILLION + outputTokens / 1_000_000 * OUTPUT_USD_PER_MILLION;
     this.ledger.inputTokens += inputTokens;
     this.ledger.outputTokens += outputTokens;
+    this.ledger.spentAud += usd * USD_TO_AUD_BUFFERED;
+    await fs.mkdir(path.dirname(this.ledgerPath()), { recursive: true });
+    await fs.writeFile(this.ledgerPath(), JSON.stringify(this.ledger, null, 2), "utf8");
+  }
+
+  private async recordAudioUsage(seconds: number): Promise<void> {
+    const usd = seconds / 60 * TRANSCRIPTION_USD_PER_MINUTE;
+    this.ledger.audioSeconds += seconds;
     this.ledger.spentAud += usd * USD_TO_AUD_BUFFERED;
     await fs.mkdir(path.dirname(this.ledgerPath()), { recursive: true });
     await fs.writeFile(this.ledgerPath(), JSON.stringify(this.ledger, null, 2), "utf8");

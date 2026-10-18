@@ -23,16 +23,18 @@ export class JarvisEngine extends EventEmitter {
   private readonly activity: ActivityEvent[] = [];
   private readonly controllers = new Map<string, AbortController>();
   private readonly approvalHandlers = new Map<string, () => Promise<void>>();
+  private auditQueue: Promise<void> = Promise.resolve();
   private stopped = false;
   private workflowSpentAud = 0;
 
   constructor() {
     super();
     this.updater.on("changed", () => this.changed());
-    this.log("info", "brain", "JARVIS core initialised. Safety interlocks are active.");
   }
 
   async initialize(): Promise<void> {
+    await this.loadAudit();
+    this.log("info", "brain", "JARVIS core initialised. Safety interlocks and local audit logging are active.");
     await this.brain.initialize();
     await this.updater.initialize();
     this.log("success", "system", this.brain.status().configured
@@ -49,7 +51,7 @@ export class JarvisEngine extends EventEmitter {
       system: {
         status: this.stopped ? "stopped" : waiting ? "awaiting_approval" : active ? "active" : "idle",
         emergencyStop: this.stopped,
-        voiceAvailable: process.env.VITE_ENABLE_VOICE === "true",
+        voiceAvailable: true,
         allowedRoots,
         allowedOrigins,
         budgetAud: 50,
@@ -99,6 +101,21 @@ export class JarvisEngine extends EventEmitter {
     this.changed();
   }
 
+  async transcribeAudio(audio: Uint8Array, mimeType: string, durationMs: number): Promise<string> {
+    this.log("info", "brain", "Transcribing microphone input…");
+    this.changed();
+    try {
+      const transcript = await this.brain.transcribeAudio(audio, mimeType, durationMs);
+      this.log("success", "brain", `Heard: ${transcript}`);
+      this.changed();
+      return transcript;
+    } catch (error) {
+      this.log("error", "brain", error instanceof Error ? error.message : String(error));
+      this.changed();
+      throw error;
+    }
+  }
+
   async submit(command: string): Promise<{ taskId: string }> {
     const clean = command.trim();
     if (!clean) throw new Error("Enter a command.");
@@ -120,6 +137,25 @@ export class JarvisEngine extends EventEmitter {
     this.changed();
     void this.execute(task, controller.signal);
     return { taskId: task.id };
+  }
+
+  cancelTask(taskId: string): void {
+    const task = this.getTask(taskId);
+    if (["completed", "failed", "cancelled"].includes(task.status)) return;
+    this.controllers.get(taskId)?.abort();
+    this.controllers.delete(taskId);
+    for (let index = this.approvals.length - 1; index >= 0; index -= 1) {
+      if (this.approvals[index].taskId === taskId) {
+        this.approvalHandlers.delete(this.approvals[index].id);
+        this.approvals.splice(index, 1);
+      }
+    }
+    task.status = "cancelled";
+    task.progress = 100;
+    task.error = "Cancelled by operator.";
+    task.updatedAt = now();
+    this.log("warning", "brain", `Cancelled: ${task.title}`);
+    this.changed();
   }
 
   async respondToApproval(approvalId: string, allow: boolean): Promise<void> {
@@ -232,7 +268,7 @@ export class JarvisEngine extends EventEmitter {
           return this.requestApproval(task, {
             kind: "close_app",
             summary: `Close ${plan.label}`,
-            detail: `JARVIS will ask these process groups to close: ${plan.processImages.join(", ")}. Unsaved work may prompt inside the app.`,
+            detail: `JARVIS will ask these process groups to close: ${plan.processImages.join(", ")}. If Windows refuses, this one-time approval permits a force-close. Unsaved work could be lost.`,
           }, async () => {
             const result = await this.action(task, `Close ${plan.label}`, "critical", "skills", () => this.desktop.closeApp(plan));
             this.complete(task, result);
@@ -360,6 +396,7 @@ export class JarvisEngine extends EventEmitter {
   private async action<T>(task: JarvisTask, label: string, risk: Risk, source: ActivityEvent["source"], work: () => Promise<T> | T): Promise<T> {
     const event: ActionEvent = { id: id("action"), taskId: task.id, label, status: "running", risk, startedAt: now() };
     task.actions.unshift(event);
+    task.progress = Math.max(task.progress, Math.min(84, 18 + (task.actions.length - 1) * 24));
     task.updatedAt = now();
     this.log("info", source, label);
     this.changed();
@@ -367,6 +404,8 @@ export class JarvisEngine extends EventEmitter {
       const result = await work();
       event.status = "completed";
       event.finishedAt = now();
+      task.progress = Math.max(task.progress, Math.min(94, 38 + (task.actions.length - 1) * 24));
+      task.updatedAt = now();
       this.log("success", source, `${label} completed.`);
       this.changed();
       return result;
@@ -413,8 +452,27 @@ export class JarvisEngine extends EventEmitter {
   }
 
   private log(level: ActivityEvent["level"], source: ActivityEvent["source"], message: string): void {
-    this.activity.unshift({ id: id("log"), time: now(), level, source, message });
+    const event: ActivityEvent = { id: id("log"), time: now(), level, source, message };
+    this.activity.unshift(event);
     if (this.activity.length > 250) this.activity.length = 250;
+    this.auditQueue = this.auditQueue
+      .then(async () => {
+        const file = path.join(app.getPath("userData"), "audit-log.jsonl");
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.appendFile(file, JSON.stringify(event) + "\n", "utf8");
+      })
+      .catch(() => undefined);
+  }
+
+  private async loadAudit(): Promise<void> {
+    try {
+      const file = path.join(app.getPath("userData"), "audit-log.jsonl");
+      const lines = (await fs.readFile(file, "utf8")).trim().split(/\r?\n/).filter(Boolean).slice(-150);
+      const previous = lines.map((line) => JSON.parse(line) as ActivityEvent).reverse();
+      this.activity.splice(0, this.activity.length, ...previous);
+    } catch {
+      // A missing or malformed audit file must never prevent JARVIS from starting.
+    }
   }
 
   private changed(): void {

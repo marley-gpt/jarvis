@@ -76,23 +76,15 @@ declare global {
     jarvis: {
       getSnapshot(): Promise<Snapshot>;
       submit(command: string): Promise<{ taskId: string }>;
+      cancelTask(taskId: string): Promise<void>;
       respondToApproval(approvalId: string, allow: boolean): Promise<void>;
       emergencyStop(): Promise<void>;
       resetEmergencyStop(): Promise<void>;
       configureBrain(apiKey: string | null): Promise<Snapshot>;
       testBrain(): Promise<Snapshot>;
+      transcribeAudio(audio: ArrayBuffer, mimeType: string, durationMs: number): Promise<string>;
       checkForUpdates(): Promise<void>;
       onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
-    };
-    webkitSpeechRecognition?: new () => {
-      continuous: boolean;
-      interimResults: boolean;
-      lang: string;
-      start(): void;
-      stop(): void;
-      onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null;
-      onend: (() => void) | null;
-      onerror: ((event: { error: string }) => void) | null;
     };
   }
 }

@@ -4,13 +4,14 @@ JARVIS is a local-first Windows control agent with a live Electron dashboard. It
 
 ## Capabilities
 
-- Live Brain, Files, Skills, Creative Studio, and Meta Ads views
-- Natural text commands, an optional OpenAI brain, and opt-in browser speech recognition
+- Live Brain, Files, Skills, Creative Studio, Meta Ads, and Connections views
+- Natural text commands plus bounded push-to-talk transcription and spoken Windows replies
 - Playwright-powered browser navigation using a persistent local profile
 - Launch normal apps discovered from the Windows Start menu
 - Close running apps by name, with protected-process blocks and confirmation for arbitrary apps
 - Restricted file listing, folder creation, organisation, move, and delete
-- Real-time task status, action log, results, and errors
+- Real-time task stages, elapsed time, progress, results, and errors
+- Persistent local audit history that survives restarts
 - Approval queue for deletes, publishing, paid actions, and significant changes
 - Emergency stop that aborts active tasks and closes the automation browser
 - Dry-run-first ecommerce workflows
@@ -56,6 +57,14 @@ check for updates
 The renderer is isolated, user text is never passed to a shell, app names are resolved through the Windows Start menu or a small built-in map, protected processes cannot be closed, paths are canonicalised against configured roots, and browser origins are checked before navigation. High-impact actions require a one-time human approval.
 
 The optional brain uses `gpt-6-luna` with short responses and a local A$45 monthly AI pause, leaving headroom inside the overall A$50 target. API billing remains controlled by your OpenAI account, so also set an account-side usage limit. Enter the key in Settings; JARVIS encrypts it with Windows secure storage and never displays it again.
+
+Voice recordings are capped at 30 seconds, sent directly through the encrypted backend for `gpt-transcribe`, and not saved by JARVIS. The result is passed through the same task engine and approval gates as typed commands.
+
+## Honest boundaries
+
+JARVIS can launch installed apps, operate its controlled browser, work inside authorised folders, interpret conversational commands, and run the included review-first ecommerce workflows. The Connections page opens GitHub, Shopify, Meta, and Google in the persistent controlled-browser profile so you can sign in without putting passwords in JARVIS.
+
+Those browser connections are not yet deep service API adapters. JARVIS does not claim that a store, ad account, email account, payment system, or social account is connected until a dedicated adapter has been implemented and verified. It will not bypass CAPTCHAs, multi-factor authentication, Windows privacy controls, administrator prompts, or the approval gates for publishing, spending, deletion, and significant changes.
 
 Run `npm test` and `npm run build` to verify the project.
 
