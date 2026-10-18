@@ -55,6 +55,7 @@ export class JarvisEngine extends EventEmitter {
         budgetAud: 50,
         spentAud: this.workflowSpentAud + brain.spentAud,
         brainConfigured: brain.configured,
+        brainVerified: brain.verified,
         brainModel: brain.model,
         brainSpentAud: brain.spentAud,
         brainMonthlyLimitAud: brain.monthlyLimitAud,
@@ -67,10 +68,29 @@ export class JarvisEngine extends EventEmitter {
   }
 
   async configureBrain(apiKey: string | null): Promise<Snapshot> {
-    const status = await this.brain.configure(apiKey);
-    this.log("success", "brain", status.configured ? "OpenAI brain connected securely." : "OpenAI brain disconnected.");
-    this.changed();
-    return this.snapshot();
+    try {
+      const status = await this.brain.configure(apiKey);
+      this.log("success", "brain", status.configured ? "OpenAI brain tested and connected securely." : "OpenAI brain disconnected.");
+      this.changed();
+      return this.snapshot();
+    } catch (error) {
+      this.log("error", "brain", error instanceof Error ? error.message : String(error));
+      this.changed();
+      throw error;
+    }
+  }
+
+  async testBrain(): Promise<Snapshot> {
+    try {
+      await this.brain.testConnection();
+      this.log("success", "brain", "OpenAI connection test passed.");
+      this.changed();
+      return this.snapshot();
+    } catch (error) {
+      this.log("error", "brain", error instanceof Error ? error.message : String(error));
+      this.changed();
+      throw error;
+    }
   }
 
   async checkForUpdates(): Promise<void> {

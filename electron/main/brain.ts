@@ -14,6 +14,7 @@ interface UsageLedger {
 
 export interface BrainStatus {
   configured: boolean;
+  verified: boolean;
   model: string;
   spentAud: number;
   monthlyLimitAud: number;
@@ -29,6 +30,7 @@ export class BrainController {
   private readonly monthlyLimitAud = 45;
   private ledger: UsageLedger = { month: this.monthKey(), spentAud: 0, inputTokens: 0, outputTokens: 0 };
   private configured = false;
+  private verified = false;
 
   async initialize(): Promise<void> {
     this.configured = await this.settings.hasApiKey();
@@ -39,6 +41,7 @@ export class BrainController {
     this.rollMonth();
     return {
       configured: this.configured,
+      verified: this.verified,
       model: MODEL,
       spentAud: this.ledger.spentAud,
       monthlyLimitAud: this.monthlyLimitAud,
@@ -46,8 +49,28 @@ export class BrainController {
   }
 
   async configure(apiKey: string | null): Promise<BrainStatus> {
-    await this.settings.saveApiKey(apiKey);
-    this.configured = await this.settings.hasApiKey();
+    if (!apiKey) {
+      await this.settings.saveApiKey(null);
+      this.configured = false;
+      this.verified = false;
+      return this.status();
+    }
+
+    const clean = apiKey.trim();
+    if (!clean) throw new Error("Paste your complete OpenAI API key first.");
+    await this.verifyKey(clean);
+    await this.settings.saveApiKey(clean);
+    this.configured = true;
+    this.verified = true;
+    return this.status();
+  }
+
+  async testConnection(): Promise<BrainStatus> {
+    const apiKey = await this.settings.getApiKey();
+    if (!apiKey) throw new Error("No OpenAI API key is saved. Paste one below and choose Connect & test.");
+    await this.verifyKey(apiKey);
+    this.configured = true;
+    this.verified = true;
     return this.status();
   }
 
@@ -60,7 +83,9 @@ export class BrainController {
     }
 
     const client = new OpenAI({ apiKey });
-    const response = await client.responses.create({
+    let response;
+    try {
+      response = await client.responses.create({
       model: MODEL,
       reasoning: { effort: "low" },
       max_output_tokens: 400,
@@ -87,7 +112,10 @@ export class BrainController {
         this.tool("system_status", "Report current JARVIS status.", {}),
         this.tool("check_updates", "Check the trusted JARVIS repository for an update.", {}),
       ],
-    }, { signal });
+      }, { signal });
+    } catch (error) {
+      throw new Error(this.explainApiError(error));
+    }
 
     await this.recordUsage(response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0);
     const call = response.output.find((item) => item.type === "function_call");
@@ -129,6 +157,52 @@ export class BrainController {
 
   private stringProperty(description: string): object {
     return { type: "string", description };
+  }
+
+  private async verifyKey(apiKey: string): Promise<void> {
+    const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 20_000 });
+    try {
+      const response = await client.responses.create({
+        model: MODEL,
+        reasoning: { effort: "none" },
+        max_output_tokens: 16,
+        input: "Reply with OK.",
+      });
+      await this.recordUsage(response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0);
+    } catch (error) {
+      this.verified = false;
+      throw new Error(this.explainApiError(error));
+    }
+  }
+
+  private explainApiError(error: unknown): string {
+    if (error instanceof OpenAI.AuthenticationError || (error instanceof OpenAI.APIError && error.status === 401)) {
+      return "OpenAI rejected this key (401). Create a fresh API key at platform.openai.com/api-keys, then paste the complete key with no spaces.";
+    }
+    if (error instanceof OpenAI.PermissionDeniedError || (error instanceof OpenAI.APIError && error.status === 403)) {
+      return "The key is valid, but its project or region does not allow this request (403). Check the key's project permissions and API access.";
+    }
+    if (error instanceof OpenAI.NotFoundError || (error instanceof OpenAI.APIError && error.status === 404)) {
+      return `The key cannot access ${MODEL} (404). Create the key in a project that has access to this model.`;
+    }
+    if (error instanceof OpenAI.RateLimitError || (error instanceof OpenAI.APIError && error.status === 429)) {
+      const code = error instanceof OpenAI.APIError ? String(error.code ?? "") : "";
+      if (code === "credit_balance_exhausted") {
+        return "The key is valid, but the API credit balance is empty. Add API credits in OpenAI billing, then test again.";
+      }
+      if (code.includes("spend_limit") || code.includes("usage_limit")) {
+        return "The key is valid, but its OpenAI project or organisation spending limit has been reached. Raise the API limit, then test again.";
+      }
+      return "OpenAI is rate-limiting this project (429). Wait a moment, then test again.";
+    }
+    if (error instanceof OpenAI.APIConnectionError) {
+      return "JARVIS could not reach the OpenAI API. Check the internet connection, firewall, VPN, or proxy, then test again.";
+    }
+    if (error instanceof OpenAI.APIError) {
+      const suffix = error.status ? ` (HTTP ${error.status})` : "";
+      return `OpenAI could not verify the connection${suffix}. ${error.message}`;
+    }
+    return error instanceof Error ? error.message : "OpenAI could not verify the connection.";
   }
 
   private monthKey(): string {

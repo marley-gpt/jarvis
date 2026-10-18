@@ -64,6 +64,7 @@ ipcMain.handle("jarvis:configure-brain", (_event, apiKey: unknown) => {
   if (apiKey !== null && (typeof apiKey !== "string" || apiKey.length > 500)) throw new Error("Invalid API key.");
   return getEngine().configureBrain(apiKey);
 });
+ipcMain.handle("jarvis:test-brain", () => getEngine().testBrain());
 ipcMain.handle("jarvis:check-updates", () => getEngine().checkForUpdates());
 
 app.whenReady().then(async () => {

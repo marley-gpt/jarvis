@@ -52,6 +52,7 @@ export interface Snapshot {
     budgetAud: number;
     spentAud: number;
     brainConfigured: boolean;
+    brainVerified: boolean;
     brainModel: string;
     brainSpentAud: number;
     brainMonthlyLimitAud: number;
@@ -79,6 +80,7 @@ declare global {
       emergencyStop(): Promise<void>;
       resetEmergencyStop(): Promise<void>;
       configureBrain(apiKey: string | null): Promise<Snapshot>;
+      testBrain(): Promise<Snapshot>;
       checkForUpdates(): Promise<void>;
       onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
     };

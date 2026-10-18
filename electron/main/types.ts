@@ -55,6 +55,7 @@ export interface Snapshot {
     budgetAud: number;
     spentAud: number;
     brainConfigured: boolean;
+    brainVerified: boolean;
     brainModel: string;
     brainSpentAud: number;
     brainMonthlyLimitAud: number;

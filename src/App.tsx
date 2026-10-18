@@ -11,6 +11,7 @@ const emptySnapshot: Snapshot = {
     budgetAud: 50,
     spentAud: 0,
     brainConfigured: false,
+    brainVerified: false,
     brainModel: "gpt-6-luna",
     brainSpentAud: 0,
     brainMonthlyLimitAud: 45,
@@ -56,6 +57,11 @@ function displayTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value));
 }
 
+function errorMessage(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return message.replace(/^Error invoking remote method '[^']+': Error:\s*/, "");
+}
+
 function Brain({ state, listening }: { state: Snapshot["system"]["status"]; listening: boolean }) {
   return (
     <div className={"brain brain--" + state + (listening ? " brain--listening" : "")} aria-label={"JARVIS brain: " + state}>
@@ -89,6 +95,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
   const recognition = useRef<{ stop(): void } | null>(null);
 
   useEffect(() => {
@@ -117,7 +124,7 @@ export default function App() {
       await window.jarvis.submit(clean);
       setCommand("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorMessage(reason));
     }
   }
 
@@ -158,24 +165,37 @@ export default function App() {
       if (snapshot.system.emergencyStop) await window.jarvis.resetEmergencyStop();
       else await window.jarvis.emergencyStop();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorMessage(reason));
     }
   }
 
   async function saveBrain() {
     if (!apiKey.trim()) {
-      setError("Paste your OpenAI API key first.");
+      setSettingsError("Paste your complete OpenAI API key first.");
       return;
     }
     setSavingSettings(true);
-    setError("");
+    setSettingsError("");
     try {
       const next = await window.jarvis.configureBrain(apiKey.trim());
       setSnapshot(next);
       setApiKey("");
       setSettingsOpen(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setSettingsError(errorMessage(reason));
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  async function testBrain() {
+    setSavingSettings(true);
+    setSettingsError("");
+    try {
+      const next = await window.jarvis.testBrain();
+      setSnapshot(next);
+    } catch (reason) {
+      setSettingsError(errorMessage(reason));
     } finally {
       setSavingSettings(false);
     }
@@ -183,13 +203,13 @@ export default function App() {
 
   async function disconnectBrain() {
     setSavingSettings(true);
-    setError("");
+    setSettingsError("");
     try {
       const next = await window.jarvis.configureBrain(null);
       setSnapshot(next);
       setApiKey("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setSettingsError(errorMessage(reason));
     } finally {
       setSavingSettings(false);
     }
@@ -226,8 +246,8 @@ export default function App() {
         </nav>
 
         <div className="trust-card">
-          <div className="trust-card__top"><span>AI BRAIN</span><strong>{snapshot.system.brainConfigured ? "CONNECTED" : "SETUP NEEDED"}</strong></div>
-          <p>{snapshot.system.brainConfigured ? snapshot.system.brainModel + " · protected local actions" : "Basic commands work now. Connect OpenAI for natural conversation."}</p>
+          <div className="trust-card__top"><span>AI BRAIN</span><strong>{snapshot.system.brainVerified ? "CONNECTED" : snapshot.system.brainConfigured ? "CHECK NEEDED" : "SETUP NEEDED"}</strong></div>
+          <p>{snapshot.system.brainVerified ? snapshot.system.brainModel + " · tested and ready" : snapshot.system.brainConfigured ? "A key is saved. Test it in Settings." : "Basic commands work now. Connect OpenAI for natural conversation."}</p>
           <div className="budget"><span>Monthly ceiling</span><strong>{"A$" + snapshot.system.budgetAud}</strong></div>
           <div className="budget__track"><i style={{ width: String(Math.min(100, snapshot.system.spentAud / snapshot.system.budgetAud * 100)) + "%" }}/></div>
           <small>{"A$" + snapshot.system.spentAud.toFixed(2) + " recorded spend"}</small>
@@ -250,13 +270,13 @@ export default function App() {
             <strong>{clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>
             <small>{clock.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }).toUpperCase()}</small>
           </div>
-          <button className="settings-button" onClick={() => setSettingsOpen(true)}>⚙ Settings</button>
+          <button className="settings-button" onClick={() => { setSettingsError(""); setSettingsOpen(true); }}>⚙ Settings</button>
         </header>
 
-        {!snapshot.system.brainConfigured && (
+        {!snapshot.system.brainVerified && (
           <section className="setup-banner">
-            <div><strong>Make JARVIS conversational</strong><span>Add your OpenAI API key once. It is encrypted on this Windows account.</span></div>
-            <button onClick={() => setSettingsOpen(true)}>Connect brain</button>
+            <div><strong>{snapshot.system.brainConfigured ? "Verify the saved OpenAI connection" : "Make JARVIS conversational"}</strong><span>{snapshot.system.brainConfigured ? "The saved key has not passed a live API test yet." : "Add your OpenAI API key once. It is encrypted on this Windows account."}</span></div>
+            <button onClick={() => { setSettingsError(""); setSettingsOpen(true); }}>{snapshot.system.brainConfigured ? "Test brain" : "Connect brain"}</button>
           </section>
         )}
 
@@ -346,13 +366,15 @@ export default function App() {
             </div>
 
             <div className="settings-card">
-              <div className="settings-card__title"><span className={snapshot.system.brainConfigured ? "connected-dot" : "connected-dot off"}/><div><strong>OpenAI brain</strong><small>{snapshot.system.brainConfigured ? "Connected · " + snapshot.system.brainModel : "Not connected"}</small></div></div>
-              <p>Your key stays encrypted on this Windows account. JARVIS sends only the instruction and a short capability summary to OpenAI.</p>
+              <div className="settings-card__title"><span className={snapshot.system.brainVerified ? "connected-dot" : "connected-dot off"}/><div><strong>OpenAI brain</strong><small>{snapshot.system.brainVerified ? "Tested · " + snapshot.system.brainModel : snapshot.system.brainConfigured ? "Saved, not tested" : "Not connected"}</small></div></div>
+              <p>Your key stays encrypted on this Windows account. Connect & test makes one tiny API request before the key is saved. A ChatGPT subscription does not automatically include API credits.</p>
               <label htmlFor="api-key">OpenAI API key</label>
               <input id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={snapshot.system.brainConfigured ? "Key saved securely" : "sk-…"} autoComplete="off"/>
+              {settingsError && <div className="settings-error"><span>!</span><p>{settingsError}</p></div>}
               <div className="settings-actions">
                 {snapshot.system.brainConfigured && <button className="secondary" onClick={() => void disconnectBrain()} disabled={savingSettings}>Disconnect</button>}
-                <button className="primary" onClick={() => void saveBrain()} disabled={savingSettings || !apiKey.trim()}>{savingSettings ? "Saving…" : "Save key"}</button>
+                {snapshot.system.brainConfigured && <button className="secondary" onClick={() => void testBrain()} disabled={savingSettings}>Test saved key</button>}
+                <button className="primary" onClick={() => void saveBrain()} disabled={savingSettings || !apiKey.trim()}>{savingSettings ? "Testing…" : "Connect & test"}</button>
               </div>
               <small className="cost-note">AI usage this month: A${snapshot.system.brainSpentAud.toFixed(4)} · JARVIS pauses AI at A${snapshot.system.brainMonthlyLimitAud.toFixed(0)}.</small>
             </div>

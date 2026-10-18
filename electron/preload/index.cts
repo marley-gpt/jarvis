@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("jarvis", {
   emergencyStop: () => ipcRenderer.invoke("jarvis:emergency-stop"),
   resetEmergencyStop: () => ipcRenderer.invoke("jarvis:reset-stop"),
   configureBrain: (apiKey: string | null) => ipcRenderer.invoke("jarvis:configure-brain", apiKey),
+  testBrain: () => ipcRenderer.invoke("jarvis:test-brain"),
   checkForUpdates: () => ipcRenderer.invoke("jarvis:check-updates"),
   onSnapshot: (listener: (snapshot: unknown) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, snapshot: unknown) => listener(snapshot);

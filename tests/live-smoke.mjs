@@ -26,9 +26,15 @@ try {
   await execute.click();
   await page.waitForFunction(() => document.body.innerText.includes("Asked Calculator to close."), undefined, { timeout: 15_000 });
 
+  await page.getByRole("button", { name: /settings/i }).click();
+  await page.getByLabel("OpenAI API key").fill("sk-not-a-real-jarvis-smoke-test-key-0000000000");
+  await page.getByRole("button", { name: /connect & test/i }).click();
+  await page.waitForFunction(() => document.body.innerText.includes("OpenAI rejected this key (401)"), undefined, { timeout: 25_000 });
+  const apiError = await page.locator(".settings-error").innerText();
+
   const snapshot = await page.evaluate(() => window.jarvis.getSnapshot());
   const results = snapshot.tasks.slice(0, 2).map((task) => ({ command: task.command, status: task.status, result: task.result }));
-  const report = JSON.stringify({ title: await page.title(), results }, null, 2);
+  const report = JSON.stringify({ title: await page.title(), results, apiError }, null, 2);
   if (process.env.JARVIS_SMOKE_RESULT) await writeFile(process.env.JARVIS_SMOKE_RESULT, report, "utf8");
   console.log(report);
 } catch (error) {
