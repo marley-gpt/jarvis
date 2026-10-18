@@ -115,7 +115,8 @@ export class UpdateController extends EventEmitter {
       "  if ($LASTEXITCODE -ne 0) { throw ''npm install failed'' }",
       "  & $Npm run build *>> $Log",
       "  if ($LASTEXITCODE -ne 0) { throw ''build failed'' }",
-      "  Start-Process -FilePath $Npm -ArgumentList @(''run'',''dev'') -WorkingDirectory $Project -WindowStyle Hidden",
+      "  $Electron = Join-Path $Project ''node_modules\\electron\\dist\\electron.exe''",
+      "  Start-Process -FilePath $Electron -ArgumentList @(''.'') -WorkingDirectory $Project -WindowStyle Hidden",
       "} catch { $_ | Out-String | Add-Content -LiteralPath $Log }",
     ].join("\r\n");
     await fs.writeFile(helper, source, "utf8");
@@ -159,4 +160,5 @@ export class UpdateController extends EventEmitter {
     this.emit("changed", this.snapshot());
   }
 }
+
 
