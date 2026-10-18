@@ -34,6 +34,7 @@ export class BrainController {
 
   async initialize(): Promise<void> {
     this.configured = await this.settings.hasApiKey();
+    this.verified = this.configured && await this.settings.hasVerifiedApiKey();
     await this.loadLedger();
   }
 
@@ -69,6 +70,7 @@ export class BrainController {
     const apiKey = await this.settings.getApiKey();
     if (!apiKey) throw new Error("No OpenAI API key is saved. Paste one below and choose Connect & test.");
     await this.verifyKey(apiKey);
+    await this.settings.markApiKeyVerified();
     this.configured = true;
     this.verified = true;
     return this.status();

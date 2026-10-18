@@ -4,6 +4,7 @@ import { app, safeStorage } from "electron";
 
 interface StoredSettings {
   encryptedApiKey?: string;
+  apiKeyVerifiedAt?: string;
 }
 
 export class SettingsStore {
@@ -24,6 +25,12 @@ export class SettingsStore {
     return Boolean((await this.read()).encryptedApiKey);
   }
 
+  async hasVerifiedApiKey(): Promise<boolean> {
+    if (process.env.OPENAI_API_KEY?.trim()) return false;
+    const current = await this.read();
+    return Boolean(current.encryptedApiKey && current.apiKeyVerifiedAt);
+  }
+
   async getApiKey(): Promise<string | null> {
     if (process.env.OPENAI_API_KEY?.trim()) return process.env.OPENAI_API_KEY.trim();
     const encrypted = (await this.read()).encryptedApiKey;
@@ -37,13 +44,23 @@ export class SettingsStore {
     const current = await this.read();
     if (!apiKey) {
       delete current.encryptedApiKey;
+      delete current.apiKeyVerifiedAt;
     } else {
       const clean = apiKey.trim();
       if (!/^sk-[A-Za-z0-9_-]{20,}$/.test(clean)) throw new Error("That does not look like an OpenAI API key.");
       if (!safeStorage.isEncryptionAvailable()) throw new Error("Windows secure storage is unavailable. Use OPENAI_API_KEY in .env instead.");
       current.encryptedApiKey = safeStorage.encryptString(clean).toString("base64");
+      current.apiKeyVerifiedAt = new Date().toISOString();
     }
     await fs.mkdir(path.dirname(this.filePath()), { recursive: true });
+    await fs.writeFile(this.filePath(), JSON.stringify(current, null, 2), { encoding: "utf8", mode: 0o600 });
+  }
+
+  async markApiKeyVerified(): Promise<void> {
+    if (process.env.OPENAI_API_KEY?.trim()) return;
+    const current = await this.read();
+    if (!current.encryptedApiKey) return;
+    current.apiKeyVerifiedAt = new Date().toISOString();
     await fs.writeFile(this.filePath(), JSON.stringify(current, null, 2), { encoding: "utf8", mode: 0o600 });
   }
 }
