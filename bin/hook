@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Entry point for Claude Code hooks (.claude/settings.json). Usage: bin/hook <event>
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/core/find-python.sh"
+exec $JARVIS_PY "$ROOT/core/jarvis_hook.py" "$@"

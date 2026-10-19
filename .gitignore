@@ -6,3 +6,8 @@ dist-electron/
 playwright-report/
 test-results/
 *.log
+__pycache__/
+*.pyc
+# JARVIS brain: private business data. This repository is public, so never commit it.
+brain/*
+!brain/README.md

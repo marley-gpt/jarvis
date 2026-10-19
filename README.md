@@ -1,4 +1,27 @@
-# JARVIS — local computer control
+# JARVIS
+
+This repository contains two parts:
+
+1. **JARVIS core** (new): the Urban Supplied AI operating system, built on Claude Code. JARVIS is the main agent (`CLAUDE.md`). Nine specialist subagents live in `.claude/agents/`. Persistent memory and records are in `brain/`, reached through `bin/jarvis`. Design notes and the build checklist are in [`docs/JARVIS.md`](docs/JARVIS.md).
+2. **Desktop control app** (existing): the Electron app described further down.
+
+## JARVIS core quick start
+
+Requirements: Claude Code, Python 3.10+ and Git Bash (Windows); ffmpeg for the mentor video work.
+
+```bash
+git clone <this repo> && cd jarvis
+bin/jarvis init        # creates brain/ and seeds the business rules (Windows cmd: bin\jarvis.cmd init)
+claude                 # open Claude Code here and accept the workspace trust prompt
+```
+
+Then talk to JARVIS, for example: *"I want to test a heated neck wrap. Research it and find the best customer angles."* To inspect what it remembers: `bin/jarvis brief`, `bin/jarvis mem search "<query>"`, `bin/jarvis task list --all`, or browse `brain/memory/`. To run the tests: `python3 -m unittest discover -s core/tests -t core/tests`.
+
+`brain/` holds private business data and is git-ignored, because this repository is public. Back it up with `bin/jarvis backup`; a daily backup is also taken automatically.
+
+---
+
+# Desktop control app (Electron)
 
 JARVIS is a local-first Windows control agent with a live Electron dashboard. It combines fast local command parsing, an optional OpenAI conversational brain, Playwright browser automation, restricted filesystem access, Windows Start-menu application discovery, and approval gates for consequential actions.
 

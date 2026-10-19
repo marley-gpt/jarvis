@@ -16,3 +16,25 @@ jobs:
       - run: npm install --legacy-peer-deps --no-audit --no-fund
       - run: npm test
       - run: npm run build
+
+  test-core:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s core/tests -t core/tests -v
+      - name: CLI and hook wrappers run under bash (Git Bash on Windows)
+        shell: bash
+        env:
+          JARVIS_HOME: ${{ runner.temp }}/jarvis-home
+        run: |
+          bin/jarvis init
+          bin/jarvis brief | grep -q "M-SEED-0001"
+          echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf brain/memory"}}' | bin/hook guard | grep -q deny
+          echo '{}' | bin/hook session_start | grep -q "JARVIS brief"

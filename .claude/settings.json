@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(bin/jarvis:*)",
+      "Bash(./bin/jarvis:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "Skill(jarvis-memory)",
+      "mcp__Shopify__get-shop-info",
+      "mcp__Shopify__get-product",
+      "mcp__Shopify__search_products",
+      "mcp__Shopify__get-collection",
+      "mcp__Shopify__search_collections",
+      "mcp__Shopify__graphql_query",
+      "mcp__Shopify__graphql_schema",
+      "mcp__Shopify__search_docs_chunks",
+      "mcp__Shopify__run-analytics-query",
+      "mcp__Shopify__get-inventory-levels"
+    ],
+    "ask": [
+      "mcp__Shopify__create-product",
+      "mcp__Shopify__update-product",
+      "mcp__Shopify__bulk-update-product-status",
+      "mcp__Shopify__graphql_mutation",
+      "mcp__Shopify__set-inventory",
+      "mcp__Shopify__create-discount",
+      "mcp__Shopify__create-collection",
+      "mcp__Shopify__update-collection",
+      "mcp__Shopify__add-to-collection"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" session_start", "timeout": 30 }] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
+        "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" guard", "timeout": 10 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" post_tool", "timeout": 10 }]
+      }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" subagent", "timeout": 10 }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" subagent", "timeout": 10 }] }
+    ]
+  }
+}

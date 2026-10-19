@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# JARVIS memory and records CLI. Usage: bin/jarvis --help
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/core/find-python.sh"
+exec $JARVIS_PY "$ROOT/core/jarvis_cli.py" "$@"
