@@ -338,6 +338,12 @@ def cmd_journal(conn, args):
         out(fmt_journal(r, n=args.width))
 
 
+def cmd_dashboard(conn, args):
+    from . import dashboard
+    conn.close()  # the server opens its own connections per request
+    dashboard.serve(port=args.port, open_browser=not args.no_open)
+
+
 def cmd_backup(conn, args):
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
@@ -542,6 +548,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--previous", action="store_true", help="only the most recent session")
     s.add_argument("-w", "--width", type=int, default=300)
     s.set_defaults(fn=cmd_journal)
+
+    s = sub.add_parser("dashboard", help="live dashboard: watch the agents and talk to JARVIS")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--no-open", action="store_true", help="don't open the browser")
+    s.set_defaults(fn=cmd_dashboard)
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")

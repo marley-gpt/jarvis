@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jarvis-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["core/jarvis_cli.py", "dashboard", "--no-open"],
+      "port": 8765
+    }
+  ]
+}

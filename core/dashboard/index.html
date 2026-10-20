@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS</title>
+<style>
+:root {
+  --bg: #070b14; --panel: #0d1424; --panel2: #111a2e; --line: #1d2a44; --text: #e6ecf7; --muted: #8796b3;
+  --accent: #38bdf8; --accent2: #818cf8; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --glow: rgba(56,189,248,.35);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+body { background: radial-gradient(1200px 600px at 20% -10%, #0f1e3a 0%, var(--bg) 60%); }
+header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0; font-size: 17px; letter-spacing: .28em; font-weight: 600; }
+header h1 span { color: var(--accent); }
+header .sub { color: var(--muted); font-size: 12px; }
+header .stats { margin-left: auto; display: flex; gap: 16px; color: var(--muted); font-size: 12px; }
+header .stats b { color: var(--text); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 6px; }
+.dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+main { display: grid; grid-template-columns: 400px 1fr 330px; gap: 16px; padding: 16px 20px; height: calc(100% - 55px); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; min-height: 0; }
+h2 { margin: 0 0 10px; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+/* JARVIS core */
+#core { display: flex; flex-direction: column; padding: 16px; }
+.orbwrap { display: flex; align-items: center; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+#orb { width: 74px; height: 74px; border-radius: 50%; flex: none; position: relative;
+  background: radial-gradient(circle at 35% 30%, #a5e8ff, var(--accent) 40%, #1e3a8a 100%);
+  box-shadow: 0 0 22px var(--glow), inset 0 0 18px rgba(255,255,255,.25); transition: transform .3s; }
+#orb::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid var(--accent); opacity: .25; }
+#orb.thinking, #orb.delegating { animation: pulse 1.1s ease-in-out infinite; }
+#orb.listening { background: radial-gradient(circle at 35% 30%, #d1fae5, var(--ok) 45%, #065f46 100%); box-shadow: 0 0 28px rgba(52,211,153,.5); animation: pulse .8s ease-in-out infinite; }
+#orb.speaking { background: radial-gradient(circle at 35% 30%, #e0e7ff, var(--accent2) 45%, #312e81 100%); animation: pulse .5s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.07); box-shadow: 0 0 40px var(--glow); } }
+#status { font-size: 15px; font-weight: 600; }
+#request { color: var(--muted); font-size: 12px; margin-top: 3px; max-height: 3.2em; overflow: hidden; }
+#chat { flex: 1; overflow-y: auto; padding: 12px 2px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+.msg { padding: 9px 12px; border-radius: 12px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
+.msg.owner { align-self: flex-end; background: #1e3a5f; border-bottom-right-radius: 4px; }
+.msg.jarvis { align-self: flex-start; background: var(--panel2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.sys { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 2px 6px; text-align: center; }
+.msg.sys.dispatch { color: var(--accent); }
+.msg.err { align-self: center; color: var(--bad); font-size: 12px; background: rgba(248,113,113,.08); }
+.msg .t { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.controls { border-top: 1px solid var(--line); padding-top: 12px; }
+.row { display: flex; gap: 8px; align-items: center; }
+#mic { width: 54px; height: 54px; border-radius: 50%; border: 0; cursor: pointer; flex: none; font-size: 22px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04101f; box-shadow: 0 0 16px var(--glow); }
+#mic.on { background: linear-gradient(135deg, var(--ok), #10b981); animation: pulse .8s infinite; }
+#text { flex: 1; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 10px;
+  padding: 11px 12px; font: inherit; resize: none; height: 44px; }
+#text:focus { outline: 1px solid var(--accent); }
+button.small { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+button.small:hover { border-color: var(--accent); }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; color: var(--muted); font-size: 12px; align-items: center; }
+.opts label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 12px; max-width: 170px; }
+
+/* Agents */
+#team { padding: 16px; overflow-y: auto; position: relative; }
+#agents { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.agent { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-height: 168px;
+  display: flex; flex-direction: column; gap: 6px; transition: border-color .3s, box-shadow .3s, transform .3s; }
+.agent .top { display: flex; align-items: center; gap: 9px; }
+.agent .ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 12px;
+  background: #18243d; color: var(--accent); flex: none; }
+.agent .nm { font-weight: 600; }
+.agent .model { margin-left: auto; font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.agent .role { color: var(--muted); font-size: 11.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pill { font-size: 10.5px; padding: 2px 8px; border-radius: 99px; background: #18243d; color: var(--muted); align-self: flex-start; }
+.agent.working { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--glow); }
+.agent.working .pill { background: rgba(56,189,248,.15); color: var(--accent); }
+.agent.working .ic { animation: pulse 1.2s infinite; }
+.agent.queued .pill { background: rgba(251,191,36,.12); color: var(--warn); }
+.agent.done { border-color: var(--ok); }
+.agent.done .pill { background: rgba(52,211,153,.14); color: var(--ok); }
+.agent.ping { transform: scale(1.03); }
+.agent .now { font-size: 12.5px; }
+.agent .feed { font-size: 11px; color: var(--muted); font-family: Consolas, ui-monospace, monospace; margin-top: auto;
+  border-top: 1px dashed var(--line); padding-top: 6px; min-height: 2.6em; }
+.agent .feed div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#beams { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+#beams line { stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 0 6px var(--accent)); stroke-dasharray: 8 6;
+  animation: beam 1.6s linear forwards; }
+@keyframes beam { from { stroke-dashoffset: 120; opacity: 1; } to { stroke-dashoffset: 0; opacity: 0; } }
+
+/* Side */
+#side { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; }
+#side .panel { padding: 14px; }
+.task { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.task:last-child { border: 0; }
+.task .tt { font-weight: 600; font-size: 13px; }
+.bar { height: 5px; background: #18243d; border-radius: 9px; margin: 6px 0 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--ok)); }
+.subs { font-size: 11.5px; color: var(--muted); }
+.subs span { display: inline-block; margin: 1px 6px 1px 0; }
+.subs .done { color: var(--ok); } .subs .in_progress { color: var(--accent); }
+.empty { color: var(--muted); font-size: 12px; }
+.ev { font-size: 12px; padding: 4px 0; border-bottom: 1px solid #142039; }
+.ev .k { color: var(--accent); }
+.ev time { color: var(--muted); font-size: 10.5px; margin-right: 5px; }
+.appr { border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.06); border-radius: 9px; padding: 8px; margin-bottom: 6px; font-size: 12.5px; }
+.cats { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.cats span { font-size: 10.5px; background: #18243d; border-radius: 6px; padding: 2px 7px; color: var(--muted); }
+.mem { font-size: 12px; padding: 3px 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mem small { color: var(--muted); }
+#banner { display: none; margin: 0 20px; margin-top: 12px; padding: 10px 14px; border-radius: 10px; font-size: 13px;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35); color: var(--warn); }
+
+@media (max-width: 1250px) { main { grid-template-columns: 380px 1fr; height: auto; } #side { grid-column: 1 / -1; } #agents { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; padding: 12px; } #core { height: 78vh; } #agents { grid-template-columns: 1fr; } header .stats { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>J<span>.</span>A<span>.</span>R<span>.</span>V<span>.</span>I<span>.</span>S</h1>
+  <div class="sub">Urban Supplied operating system</div>
+  <div class="stats">
+    <div>Memory <b id="s-mem">–</b></div>
+    <div>Open tasks <b id="s-tasks">–</b></div>
+    <div>AI spend <b id="s-cost">–</b></div>
+    <div><span id="conn" class="dot"></span><span id="conn-t">offline</span></div>
+  </div>
+</header>
+<div id="banner"></div>
+<main>
+  <section id="core" class="panel">
+    <div class="orbwrap">
+      <div id="orb"></div>
+      <div><div id="status">Idle</div><div id="request">Tap the mic and talk, or type below.</div></div>
+    </div>
+    <div id="chat"></div>
+    <div class="controls">
+      <div class="row">
+        <button id="mic" title="Talk to JARVIS">🎙</button>
+        <textarea id="text" placeholder="Talk or type to JARVIS…"></textarea>
+        <button class="small" id="send">Send</button>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="handsfree"> Hands-free conversation</label>
+        <label><input type="checkbox" id="speak" checked> Speak replies</label>
+        <select id="voice" title="JARVIS voice"></select>
+        <button class="small" id="stop">Stop</button>
+        <button class="small" id="new">New conversation</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="team" class="panel">
+    <h2>Agent team</h2>
+    <div id="agents"></div>
+  </section>
+
+  <aside id="side">
+    <div class="panel"><h2>Waiting for your approval</h2><div id="approvals"></div></div>
+    <div class="panel"><h2>Jobs JARVIS is running</h2><div id="tasks"></div></div>
+    <div class="panel"><h2>Activity</h2><div id="activity"></div></div>
+    <div class="panel"><h2>JARVIS brain</h2><div id="memory"></div></div>
+  </aside>
+</main>
+<svg id="beams"></svg>
+
+<script>
+const TOKEN = "__JARVIS_TOKEN__";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const initials = (label) => label.split(/[\s&]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+const hhmm = (ts) => (ts || "").slice(11, 16);
+const STATUS = { idle: "Idle", thinking: "Thinking…", delegating: "Delegating to the team…", listening: "Listening…", speaking: "Speaking…" };
+const PREF = (k, v) => { try { if (v === undefined) return localStorage.getItem("jarvis." + k); localStorage.setItem("jarvis." + k, v); } catch (e) { return null; } };
+
+let saidThisTurn = false, state = null, jarvisStatus = "idle", listening = false, speaking = 0, current = null, chatLoaded = false;
+const flash = {};  // agent -> "done" until timestamp
+
+// ------------------------------------------------------------ rendering
+function render(s) {
+  state = s;
+  $("s-mem").textContent = s.memory.total + (s.memory.needs_review ? ` (${s.memory.needs_review} to review)` : "");
+  $("s-tasks").textContent = s.tasks.length;
+  $("s-cost").textContent = `A$${s.cost.spent.toFixed(2)} / ${s.cost.budget.toFixed(0)}`;
+  if (!s.jarvis.claude) banner("Talking to JARVIS needs the Claude Code CLI (free with your Claude plan). Install it, then restart the dashboard. You can already watch the team.");
+  renderAgents(s.agents);
+  renderTasks(s.tasks);
+  $("approvals").innerHTML = s.approvals.length ? s.approvals.map((a) =>
+    `<div class="appr"><b>A${a.id}</b> [${esc(a.kind)}] ${esc(a.summary)}${a.amount ? ` — ${a.amount} ${esc(a.currency || "")}` : ""}</div>`).join("")
+    : `<div class="empty">Nothing waiting.</div>`;
+  $("activity").innerHTML = s.activity.length ? s.activity.slice(0, 14).map((e) =>
+    `<div class="ev"><time>${hhmm(e.ts)}</time><span class="k">${esc(e.agent || "jarvis")}</span> ${esc(e.kind.replace("status:", ""))} · T${e.task_id} ${esc(e.title)}${e.note ? " — " + esc(e.note) : ""}</div>`).join("")
+    : `<div class="empty">No task activity yet.</div>`;
+  const cats = Object.entries(s.memory.by_category).map(([c, n]) => `<span>${esc(c)} ${n}</span>`).join("");
+  $("memory").innerHTML = `<div class="cats">${cats}</div>` + s.memory.recent.map((m) =>
+    `<div class="mem" title="${esc(m.title)}">${esc(m.title)} <small>${esc(m.id)}</small></div>`).join("");
+  if (!chatLoaded) {
+    chatLoaded = true;
+    s.journal.forEach((j) => addMsg(j.role, j.text, j.ts));
+    if (!s.journal.length) addMsg("sys", "Hi, I'm JARVIS. Everything we say is remembered.");
+  }
+  if (jarvisStatus === "idle" && s.jarvis.status !== "idle") setStatus(s.jarvis.status, s.jarvis.request);
+}
+
+function renderAgents(agents) {
+  const box = $("agents");
+  agents.forEach((a) => {
+    let el = document.querySelector(`.agent[data-name="${a.name}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "agent"; el.dataset.name = a.name;
+      el.innerHTML = `<div class="top"><div class="ic">${initials(a.label)}</div><div class="nm">${esc(a.label)}</div>
+        <div class="model">${esc(a.model)}</div></div><div class="role">${esc(a.role)}</div>
+        <span class="pill"></span><div class="now"></div><div class="feed"></div>`;
+      box.appendChild(el);
+    }
+    let st = a.status;
+    if (st !== "working" && flash[a.name] > Date.now()) st = "done";
+    el.className = "agent " + st;
+    el.querySelector(".pill").textContent = { working: "Working", queued: "Queued", done: "Finished", idle: "Ready" }[st];
+    el.querySelector(".now").textContent = a.now || (a.last_done ? `Last: ${a.last_done.title}` : "");
+    if (a.activity.length) el.querySelector(".feed").innerHTML = a.activity.map((l) => `<div>${esc(l)}</div>`).join("");
+  });
+}
+
+function renderTasks(tasks) {
+  $("tasks").innerHTML = tasks.length ? tasks.map((t) => {
+    const n = t.subtasks.length, d = t.subtasks.filter((x) => x.status === "done").length;
+    return `<div class="task"><div class="tt">T${t.id} ${esc(t.title)}</div>
+      ${n ? `<div class="bar"><i style="width:${Math.round(100 * d / n)}%"></i></div>` : ""}
+      <div class="subs">${t.subtasks.map((x) => `<span class="${x.status}">● ${esc(x.agent || "?")}</span>`).join("") || esc(t.status)}</div></div>`;
+  }).join("") : `<div class="empty">No open jobs.</div>`;
+}
+
+function agentCard(name) { return document.querySelector(`.agent[data-name="${name}"]`); }
+
+function beam(name) {
+  const card = agentCard(name), orb = $("orb");
+  if (!card) return;
+  const a = orb.getBoundingClientRect(), b = card.getBoundingClientRect();
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("x1", a.left + a.width / 2); line.setAttribute("y1", a.top + a.height / 2);
+  line.setAttribute("x2", b.left + 18); line.setAttribute("y2", b.top + 18);
+  $("beams").appendChild(line);
+  setTimeout(() => line.remove(), 1700);
+  card.classList.add("ping"); setTimeout(() => card.classList.remove("ping"), 400);
+}
+
+function addMsg(role, text, ts) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.innerHTML = fmt(text) + (ts ? `<span class="t">${hhmm(ts)}</span>` : "");
+  $("chat").appendChild(el);
+  $("chat").scrollTop = $("chat").scrollHeight;
+  return el;
+}
+function fmt(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>"); }
+
+function setStatus(s, req) {
+  jarvisStatus = s;
+  const shown = speaking ? "speaking" : listening ? "listening" : s;
+  $("orb").className = shown;
+  $("status").textContent = STATUS[shown] || shown;
+  if (req !== undefined) $("request").textContent = req || "Tap the mic and talk, or type below.";
+}
+function banner(t) { const b = $("banner"); b.textContent = t; b.style.display = t ? "block" : "none"; }
+
+// ------------------------------------------------------------ server
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": TOKEN },
+    body: JSON.stringify(body || {}) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+async function refresh() { const r = await fetch("/api/state"); if (r.ok) render(await r.json()); }
+
+async function send(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  $("text").value = "";
+  addMsg("owner", text);
+  current = null; saidThisTurn = false;
+  try { await post("/api/chat", { text }); }
+  catch (e) { addMsg("err", e.message); }
+}
+
+function connect() {
+  const es = new EventSource("/api/events");
+  es.onopen = () => { $("conn").className = "dot on"; $("conn-t").textContent = "live"; refresh(); };
+  es.onerror = () => { $("conn").className = "dot"; $("conn-t").textContent = "reconnecting"; };
+  es.onmessage = (m) => onEvent(JSON.parse(m.data));
+}
+
+let refreshTimer = null;
+function onEvent(e) {
+  switch (e.type) {
+    case "changed": clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 150); break;
+    case "status": setStatus(e.status, e.request); if (e.status === "idle") afterTurn(); break;
+    case "say":
+      saidThisTurn = true;
+      if (!current) current = addMsg("jarvis", "");
+      current.innerHTML += (current.textContent ? "\n\n" : "") + fmt(e.text);
+      $("chat").scrollTop = $("chat").scrollHeight;
+      say(e.text);
+      break;
+    case "jarvis_tool": $("request").textContent = e.summary; break;
+    case "dispatch": {
+      const label = (state?.agents.find((a) => a.name === e.agent) || {}).label || e.agent;
+      addMsg("sys dispatch", `→ ${label}: ${e.description || "new job"}`);
+      setStatus("delegating");
+      beam(e.agent);
+      const card = agentCard(e.agent);
+      if (card) { card.className = "agent working"; card.querySelector(".pill").textContent = "Working";
+        card.querySelector(".now").textContent = e.description || ""; card.querySelector(".feed").innerHTML = ""; }
+      current = null;
+      break;
+    }
+    case "agent_activity": {
+      const card = agentCard(e.agent);
+      if (card) { const f = card.querySelector(".feed"); f.insertAdjacentHTML("beforeend", `<div>${esc(e.line)}</div>`);
+        while (f.children.length > 4) f.firstChild.remove(); }
+      break;
+    }
+    case "agent_done": {
+      flash[e.agent] = Date.now() + 8000;
+      const card = agentCard(e.agent);
+      if (card) { card.className = "agent done"; card.querySelector(".pill").textContent = "Finished"; }
+      const label = (state?.agents.find((a) => a.name === e.agent) || {}).label || e.agent;
+      addMsg("sys", `✓ ${label} reported back`);
+      current = null;
+      break;
+    }
+    case "reply":
+      if (!saidThisTurn && e.text && !e.is_error) { addMsg("jarvis", e.text); say(e.text); }
+      if (e.is_error) addMsg("err", e.text || "JARVIS hit an error.");
+      current = null;
+      break;
+    case "error": addMsg("err", e.text); break;
+    case "reset": $("chat").innerHTML = ""; addMsg("sys", "New conversation. Memory and history are kept."); break;
+  }
+}
+
+// ------------------------------------------------------------ voice
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+if (Rec) {
+  rec = new Rec();
+  rec.lang = navigator.language || "en-US";
+  rec.interimResults = true;
+  rec.continuous = false;
+  let finalText = "";
+  rec.onstart = () => { listening = true; finalText = ""; $("mic").classList.add("on"); setStatus(jarvisStatus); };
+  rec.onresult = (ev) => {
+    let interim = "";
+    for (const r of ev.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
+    $("text").value = finalText + interim;
+  };
+  rec.onerror = (ev) => { if (ev.error === "not-allowed") addMsg("err", "Microphone permission was blocked for this page."); };
+  rec.onend = () => {
+    listening = false; $("mic").classList.remove("on"); setStatus(jarvisStatus);
+    const t = (finalText || "").trim();
+    if (t) send(t);
+  };
+} else {
+  $("mic").title = "Voice input needs Chrome or Edge";
+}
+function listen() {
+  if (!rec) return addMsg("err", "Voice input needs Chrome or Edge. You can still type.");
+  if (listening) return rec.stop();
+  speechSynthesis.cancel(); speaking = 0;
+  try { rec.start(); } catch (e) { /* already starting */ }
+}
+
+function spoken(t) {
+  return t.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_#>|]/g, "").replace(/\bT(\d+)\b/g, "task $1").replace(/A\$/g, "A dollars ").replace(/\s+/g, " ").trim();
+}
+function say(text) {
+  if (!$("speak").checked || !window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(spoken(text));
+  const v = speechSynthesis.getVoices().find((x) => x.name === $("voice").value);
+  if (v) u.voice = v;
+  u.rate = 1.03;
+  speaking++; setStatus(jarvisStatus);
+  u.onend = u.onerror = () => { speaking = Math.max(0, speaking - 1); setStatus(jarvisStatus); if (!speaking) afterTurn(); };
+  speechSynthesis.speak(u);
+}
+function afterTurn() {
+  if ($("handsfree").checked && jarvisStatus === "idle" && !speaking && !listening) setTimeout(() => {
+    if (jarvisStatus === "idle" && !speaking && !listening) listen();
+  }, 350);
+}
+function loadVoices() {
+  const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
+  if (!vs.length) return;
+  const saved = PREF("voice");
+  const best = vs.find((v) => v.name === saved) || vs.find((v) => /natural|neural|online/i.test(v.name) && /en-(GB|AU)/.test(v.lang))
+    || vs.find((v) => /natural|neural|online/i.test(v.name)) || vs[0];
+  $("voice").innerHTML = vs.map((v) => `<option ${v === best ? "selected" : ""}>${esc(v.name)}</option>`).join("");
+}
+if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+
+// ------------------------------------------------------------ wiring
+$("mic").onclick = listen;
+$("send").onclick = () => send($("text").value);
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("text").value); } });
+$("stop").onclick = () => { speechSynthesis.cancel(); speaking = 0; if (listening) rec.stop(); post("/api/stop").catch(() => {}); };
+$("new").onclick = () => post("/api/new").catch((e) => addMsg("err", e.message));
+$("voice").onchange = () => PREF("voice", $("voice").value);
+$("handsfree").checked = PREF("handsfree") === "1";
+$("handsfree").onchange = () => { PREF("handsfree", $("handsfree").checked ? "1" : "0"); if ($("handsfree").checked) afterTurn(); };
+$("speak").checked = PREF("speak") !== "0";
+$("speak").onchange = () => PREF("speak", $("speak").checked ? "1" : "0");
+connect();
+</script>
+</body>
+</html>

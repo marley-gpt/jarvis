@@ -61,5 +61,6 @@ Extra AI spend target: about A$50/month. Prefer Claude Code itself, local tools 
 
 - `core/` — JARVIS memory/records engine (Python stdlib, `bin/jarvis`, `bin/hook`), tests in `core/tests` (`python3 -m unittest discover -s core/tests`).
 - `.claude/` — agents, skills, hooks and permissions.
+- `core/dashboard/` — live dashboard (`bin/jarvis dashboard`, or double-click `JARVIS Dashboard.cmd`): agent sections, delegation, voice conversation. Messages sent there arrive in a headless session with a voice-style system prompt, so keep those replies short and spoken.
 - `brain/` — the owner's data (memory Markdown, `jarvis.db`, work, files, backups). Never commit it.
 - `electron/`, `src/` — the older Windows desktop control app (separate; `npm test`). The future dashboard will read `brain/`.
