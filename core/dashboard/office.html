@@ -118,7 +118,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 <div id="top" class="hud">
   <button id="speaker" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
   <div id="status" class="glass"><span class="dot"></span><span id="st">Connecting…</span></div>
-  <div id="toggles"><button id="t-speak">🔊 Voice</button><button id="t-hands">Hands-free</button><button id="t-clap" title="Clap twice and JARVIS wakes up">👏 Clap</button><select id="t-voice" title="JARVIS voice"></select><button id="t-stop">Stop</button></div>
+  <div id="toggles"><button id="t-speak">🔊 Voice</button><button id="t-hands">Hands-free</button><button id="t-wake" title="Say “Hey JARVIS” to wake him: only the wake word is listened for, on this PC">🎙 Hey JARVIS</button><select id="t-voice" title="JARVIS voice"></select><button id="t-stop">Stop</button></div>
 </div>
 <div id="notice" class="hud glass"></div>
 <div id="toasts" class="hud"><button id="apbtn" class="glass"></button></div>
@@ -414,9 +414,9 @@ J.on("state", (s) => { render(s); showStatus(); })
 
 $("speaker").onclick = () => J.listen();
 $("ask").onsubmit = (e) => { e.preventDefault(); J.send($("text").value); $("text").value = ""; };
-function syncToggles() { $("t-speak").className = J.settings.speak ? "on" : ""; $("t-hands").className = J.settings.handsfree ? "on" : ""; $("t-clap").className = J.settings.clap ? "on" : ""; }
-$("t-clap").onclick = () => { J.settings.clap = !J.settings.clap; syncToggles(); };
-J.on("clap", syncToggles).on("wake", () => toast("JARVIS", "Awake. Listening after the greeting.", "#38bdf8"));
+function syncToggles() { $("t-speak").className = J.settings.speak ? "on" : ""; $("t-hands").className = J.settings.handsfree ? "on" : ""; $("t-wake").className = J.settings.wake ? "on" : ""; }
+$("t-wake").onclick = () => { J.settings.wake = !J.settings.wake; };
+J.on("state", syncToggles).on("awake", () => toast("JARVIS", "Awake. Listening after the greeting.", "#38bdf8"));
 $("t-speak").onclick = () => { J.settings.speak = !J.settings.speak; syncToggles(); };
 $("t-hands").onclick = () => { J.settings.handsfree = !J.settings.handsfree; syncToggles(); };
 $("t-stop").onclick = () => J.stop();

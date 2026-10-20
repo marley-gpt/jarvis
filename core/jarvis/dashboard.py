@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, records, tts
+from . import brief, db, journal, memory, paths, records, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -399,6 +399,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     hub = Hub()
     runner = Runner(hub)
     kokoro = tts.Kokoro()
+    wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}))
     token = secrets.token_urlsafe(24)
 
     class Handler(BaseHTTPRequestHandler):
@@ -452,6 +453,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
                 data["jarvis"]["claude"] = bool(find_claude())
                 data["tts"] = kokoro.info()
+                data["wake"] = {**wake.info(), "enabled": wake.enabled()}
                 return self._json(200, data)
             if self.path == "/api/events":
                 return self._events()
@@ -530,6 +532,15 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 except (tts.TTSError, OSError, ValueError) as exc:
                     return self._json(503, {"error": str(exc)})
                 return self._send(200, wav, "audio/wav")
+            if self.path == "/api/wake":
+                # {"on": bool} switches "Hey JARVIS" on/off (remembered in brain/config.json);
+                # {"paused": bool} ignores the mic while JARVIS is speaking or already listening.
+                if "on" in body:
+                    paths.set_config("wake_word", bool(body["on"]))
+                    wake.start() if body["on"] else wake.stop()
+                if "paused" in body:
+                    wake.send("pause" if body["paused"] else "resume")
+                return self._json(200, {**wake.info(), "enabled": wake.enabled()})
             if self.path == "/api/approval":
                 conn = db.connect()
                 try:
@@ -561,7 +572,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 super().handle_error(request, client_address)
 
     server = Server((host, port), Handler)
-    server.hub, server.runner, server.token, server.tts = hub, runner, token, kokoro
+    server.hub, server.runner, server.token, server.tts, server.wake = hub, runner, token, kokoro, wake
     return server
 
 
@@ -583,6 +594,8 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         threading.Thread(target=server.tts.warm, daemon=True).start()
     else:
         print("Note: Kokoro voice not installed, so JARVIS will use the browser's voice.", flush=True)
+    if server.wake.enabled():
+        server.wake.start()
     if open_browser:
         webbrowser.open(url)
     try:
@@ -590,5 +603,6 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        server.wake.stop()
         server.tts.stop()
         server.server_close()

@@ -213,3 +213,29 @@ class DashboardTest(BrainTest):
         self.wait_idle()
         err = next(e for e in self.events if e["type"] == "error")
         self.assertIn("Could not start Claude Code", err["text"])
+
+
+class WakeWordTest(BrainTest):
+    def test_hey_jarvis_reaches_the_dashboard_and_can_be_switched_off(self):
+        self.init()
+        fake = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_wake.py")]
+        (self.home / "config.json").write_text(json.dumps({"claude_command": FAKE, "wake_command": fake}), encoding="utf-8")
+        server = dashboard.make_server(port=0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        q = server.hub.subscribe()
+        try:
+            server.wake.start()
+            ev = q.get(timeout=10)
+            self.assertEqual(ev["type"], "wake")
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+            conn.request("POST", "/api/wake", json.dumps({"on": False}),
+                         {"Host": f"127.0.0.1:{server.server_address[1]}", "X-Jarvis-Token": server.token})
+            data = json.loads(conn.getresponse().read())
+            conn.close()
+            self.assertFalse(data["enabled"])
+            self.assertFalse(data["on"])
+            self.assertFalse(json.loads((self.home / "config.json").read_text(encoding="utf-8"))["wake_word"] is not False)
+        finally:
+            server.wake.stop()
+            server.shutdown()
+            server.server_close()

@@ -214,7 +214,7 @@ aside .hd b { font-size: 13px; } #st { color: var(--muted); font-size: 12px; }
       </div>
       <div class="opts">
         <label><input type="checkbox" id="handsfree"> Hands-free</label>
-        <label title="Clap twice and JARVIS wakes up"><input type="checkbox" id="clap"> 👏 Clap to wake</label>
+        <label title="Say “Hey JARVIS” to wake him: only the wake word is listened for, on this PC"><input type="checkbox" id="wake"> 🎙 Hey JARVIS</label>
         <label><input type="checkbox" id="speak"> Speak replies</label>
         <select id="voice" title="JARVIS voice"></select>
         <button class="btn" id="stop">Stop</button>
@@ -507,8 +507,8 @@ $("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.prevent
 $("mic").onclick = () => J.listen();
 $("stop").onclick = () => J.stop();
 $("new").onclick = () => J.newConversation();
-$("clap").checked = J.settings.clap; $("clap").onchange = (e) => (J.settings.clap = e.target.checked);
-J.on("clap", (e) => ($("clap").checked = e.on)).on("wake", () => toast("👏 JARVIS is awake", "var(--accent)"));
+$("wake").onchange = (e) => (J.settings.wake = e.target.checked);
+J.on("state", () => ($("wake").checked = J.settings.wake)).on("awake", () => toast("🎙 JARVIS is awake", "var(--accent)"));
 $("handsfree").checked = J.settings.handsfree; $("handsfree").onchange = (e) => (J.settings.handsfree = e.target.checked);
 $("speak").checked = J.settings.speak; $("speak").onchange = (e) => (J.settings.speak = e.target.checked);
 $("voice").onchange = (e) => { J.settings.voice = e.target.value; J.preview(); };
