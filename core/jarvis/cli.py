@@ -344,6 +344,22 @@ def cmd_dashboard(conn, args):
     dashboard.serve(port=args.port, open_browser=not args.no_open)
 
 
+def cmd_ready(conn, args):
+    from . import readiness
+    if args.n:
+        readiness.set_status(args.n, args.status, args.note)
+    s = readiness.summary(conn)
+    a = s["academy"]
+    out(f"Blake Academy: {a['captured']}/{a['lessons']} lessons captured, {a['studied']} studied, "
+        f"{a['mentor_entries']} mentor entries, {len(a['playbooks'])} playbooks")
+    for c in a["courses"]:
+        out(f"  {c['order']:2d}. {c['title']:28s} captured {c['captured']}/{c['lessons']}  studied {c['studied']}/{c['lessons']}")
+    out("Readiness for the first product test:" + ("  READY" if s["ready"] else ""))
+    for i in s["readiness"]:
+        mark = {"done": "[x]", "doing": "[~]", "todo": "[ ]"}[i["status"]]
+        out(f"  {mark} {i['n']}. {i['item']}" + (f" ({i['note']})" if i.get("note") else ""))
+
+
 def cmd_feedback_add(conn, args):
     from . import feedback
     e = feedback.add(conn, about=args.about, kind=args.kind, verdict=args.verdict, source=args.source, what=args.what,
@@ -636,6 +652,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
     s.set_defaults(fn=cmd_dashboard)
+
+    s = sub.add_parser("ready", help="Blake course coverage and the first-product-test readiness checklist")
+    s.add_argument("n", nargs="?", type=int, help="checklist item to update")
+    s.add_argument("status", nargs="?", choices=("todo", "doing", "done"))
+    s.add_argument("--note")
+    s.set_defaults(fn=cmd_ready)
 
     fb = sub.add_parser("feedback", help="the feedback loop: record what worked and what didn't").add_subparsers(
         dest="sub", required=True)

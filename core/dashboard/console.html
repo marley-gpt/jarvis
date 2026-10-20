@@ -233,13 +233,13 @@ const esc = J.esc, hhmm = J.hhmm;
 const STATUS = { idle: "Idle", thinking: "Thinking…", delegating: "Delegating to the team…", listening: "Listening…", speaking: "Speaking…" };
 const PILL = { working: "Working", queued: "Queued", idle: "Ready", done: "Finished" };
 const VIEWS = [
-  ["command", "◎", "Command Center"], ["agents", "⬡", "Agents"], ["tasks", "☰", "Tasks"], ["pipeline", "▦", "Product Pipeline"],
+  ["command", "◎", "Command Center"], ["academy", "🎓", "Blake & Readiness"], ["agents", "⬡", "Agents"], ["tasks", "☰", "Tasks"], ["pipeline", "▦", "Product Pipeline"],
   ["testing", "⚗", "Product Testing"], ["approvals", "✓", "Approvals"], ["vault", "◈", "Knowledge Vault"], ["costs", "$", "Costs"],
 ];
 const SUBS = {
   command: "What JARVIS and the team are doing right now", agents: "JARVIS delegates; the specialists do the work",
   tasks: "Every job and who it was handed to", pipeline: "Products from idea to scale", testing: "Live and finished product tests",
-  approvals: "Nothing consequential happens without you", vault: "Everything JARVIS remembers", costs: "AI and tool spend against the A$50 target",
+  approvals: "Nothing consequential happens without you", vault: "Everything JARVIS remembers", academy: "What the team has learned from Blake, and how close we are to the first product test", costs: "AI and tool spend against the A$50 target",
 };
 const STAGES = ["idea", "researching", "preparing", "ready", "testing", "passed", "failed", "scaling", "archived"];
 const flash = {};
@@ -295,7 +295,7 @@ const statusOf = (a) => (a.status !== "working" && flash[a.name] > Date.now() ? 
 function renderView() {
   const s = J.state;
   if (!s) { $("view").innerHTML = `<div class="empty">Connecting to the brain…</div>`; return; }
-  ({ command: vCommand, agents: vAgents, tasks: vTasks, pipeline: vPipeline, testing: vTesting, approvals: vApprovals, vault: vVault, costs: vCosts })[view](s);
+  ({ command: vCommand, academy: vAcademy, agents: vAgents, tasks: vTasks, pipeline: vPipeline, testing: vTesting, approvals: vApprovals, vault: vVault, costs: vCosts })[view](s);
 }
 
 function commandCard(s) {
@@ -436,6 +436,24 @@ async function vVault(s) {
     ${m.snippet ? `<div class="s">${esc(m.snippet)}</div>` : ""}
     ${open && m.id === vaultOpen ? `<pre class="body">${esc(open.body || open.error || "")}</pre><div class="mono">${esc(open.path || "")}${open.meta?.source ? " · source: " + esc(open.meta.source) : ""}</div>` : ""}</div>`).join("")
     : `<div class="empty" style="padding:14px">Nothing matches.</div>`;
+}
+
+function vAcademy(s) {
+  const p = s.progress; if (!p) { $("view").innerHTML = '<div class="empty">No progress data yet.</div>'; return; }
+  const a = p.academy, pct = (x, n) => (n ? Math.round(100 * x / n) : 0);
+  const done = p.readiness.filter((i) => i.status === "done").length;
+  $("view").innerHTML = `<div class="card cmd" style="gap:28px"><div class="who"><b>${p.ready ? "Ready for the first product test" : "Getting ready for the first product test"}</b>
+      <div>${done} of ${p.readiness.length} readiness checks done. JARVIS tells you when every one is done.</div></div>
+    <div class="nums"><div class="num"><b>${a.captured}/${a.lessons}</b><span>Lessons captured</span></div>
+      <div class="num"><b>${a.studied}</b><span>Studied</span></div><div class="num"><b>${a.mentor_entries}</b><span>Blake entries</span></div>
+      <div class="num"><b>${a.playbooks.length}</b><span>Playbooks</span></div></div></div>
+  <h2>Readiness checklist</h2><div class="card">${p.readiness.map((i) => `<div class="ev"><span class="pill ${i.status === "done" ? "done" : i.status === "doing" ? "in_progress" : ""}">${i.status}</span>
+     <b>${i.n}.</b> ${esc(i.item)}${i.note ? `<div class="mono">${esc(i.note)}</div>` : ""}</div>`).join("")}</div>
+  <h2>Blake's courses</h2><div class="card"><table><tr><th>#</th><th>Course</th><th>Captured</th><th>Studied</th></tr>${a.courses.map((c) =>
+    `<tr><td class="mono">${c.order}</td><td>${esc(c.title)}</td><td>${c.captured}/${c.lessons}<div class="bar"><i style="width:${pct(c.captured, c.lessons)}%"></i></div></td>
+     <td>${c.studied}/${c.lessons}<div class="bar"><i style="width:${pct(c.studied, c.lessons)}%"></i></div></td></tr>`).join("")}</table></div>
+  <h2>Blake playbooks (skills the agents load)</h2><div class="card"><table><tr><th>Playbook</th><th>Lines</th><th>Reference files</th></tr>${a.playbooks.map((b) =>
+    `<tr><td>${esc(b.name)}</td><td class="mono">${b.lines}</td><td class="mono">${b.references}</td></tr>`).join("")}</table></div>`;
 }
 
 function vCosts(s) {

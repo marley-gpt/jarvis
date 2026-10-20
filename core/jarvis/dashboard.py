@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, records, tts, wakeword
+from . import brief, db, journal, memory, paths, readiness, records, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -162,6 +162,7 @@ def snapshot(conn, live: dict | None = None) -> dict:
         "products": _rows(products),
         "tests": tests,
         "counts": counts,
+        "progress": readiness.summary(conn),
         "brain": str(paths.home()),
         "jarvis": {"status": live.get("status", "idle"), "request": live.get("request"),
                    "claude": live.get("claude"), "login_needed": bool(db.get_meta(conn, "claude_login_needed"))},

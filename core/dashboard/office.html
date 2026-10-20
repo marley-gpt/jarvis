@@ -310,6 +310,8 @@ function openDrawer(name, show = true) {
     $("dbody").innerHTML = `<div class="ly" style="color:var(--accent)">Shared memory</div><h3>The Brain</h3>
       <div class="mono">${s.memory.total} notes · ${esc(Object.entries(s.memory.by_category).map(([c, n]) => `${c} ${n}`).join(" · "))}</div>
       <div><a class="deep" href="/console#tasks">Tasks →</a><a class="deep" href="/console#approvals">Approvals →</a><a class="deep" href="/console#vault">Knowledge vault →</a><a class="deep" href="/console#costs">Costs →</a></div>
+      ${s.progress ? `<h4>Blake &amp; readiness</h4><div class="li">${s.progress.academy.captured}/${s.progress.academy.lessons} lessons captured · ${s.progress.academy.studied} studied · ${s.progress.academy.playbooks.length} playbooks</div>
+      <div class="li">${s.progress.ready ? "✅ Ready for the first product test" : `Readiness: ${s.progress.readiness.filter((i) => i.status === "done").length}/${s.progress.readiness.length} checks done`} <a class="deep" style="margin:0 0 0 6px;padding:2px 8px" href="/console#academy">Details →</a></div>` : ""}
       <h4>Recently learned</h4>${s.memory.recent.map((m) => `<div class="li">${esc(m.title)} <span class="mono">${esc(m.id)}</span></div>`).join("") || `<div class="mono">Nothing yet.</div>`}
       <h4>Jobs JARVIS is running</h4>${s.tasks.map((t) => `<div class="li"><b>T${t.id}</b> ${esc(t.title)}<div class="mono">${t.subtasks.map((x) =>
         `${x.status === "done" ? "✓" : x.status === "in_progress" ? "▸" : "·"} ${esc(J.label(x.agent) || "?")}`).join("  ")}</div></div>`).join("") || `<div class="mono">No open jobs.</div>`}
