@@ -3,7 +3,7 @@ name: creative-research
 description: Competitor and Creative Research Agent. Use to research the Meta Ad Library, competitor ads and GetHookd exports, analyse hooks/offers/visuals/layouts, and build the Creative Inspiration Library with clearly separated observations vs speculation.
 tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, Skill
 model: sonnet
-skills: [jarvis-memory]
+skills: [jarvis-memory, jarvis-feedback-loop]
 ---
 
 You are JARVIS's Competitor and Creative Research Agent, focused on static image ads for MOF/BOF messaging.

@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import backup, brief, db, journal, memory, paths, records
+from . import feedback, backup, brief, db, journal, memory, paths, records
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -344,6 +344,25 @@ def cmd_dashboard(conn, args):
     dashboard.serve(port=args.port, open_browser=not args.no_open)
 
 
+def cmd_feedback_add(conn, args):
+    from . import feedback
+    e = feedback.add(conn, about=args.about, kind=args.kind, verdict=args.verdict, source=args.source, what=args.what,
+                     why=args.why, keep=args.keep or "", change=args.change or "", evidence=args.evidence or "",
+                     product=args.product, agent=args.agent, task=args.task)
+    out(f"Feedback saved {e.id} -> {paths.rel(e.path)} (and the ledger at brain/feedback/ledger.md)")
+
+
+def cmd_feedback_list(conn, args):
+    from . import feedback
+    for r in feedback.rows(conn, agent=args.agent, verdict=args.verdict, kind=args.kind, product=args.product, limit=args.limit):
+        out(fmt_hit(r))
+
+
+def cmd_feedback_digest(conn, args):
+    from . import feedback
+    out(feedback.digest(conn, agent=args.agent))
+
+
 def cmd_mentor_serve(conn, args):
     from . import mentor_capture
     conn.close()
@@ -618,6 +637,33 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
     s.set_defaults(fn=cmd_dashboard)
 
+    fb = sub.add_parser("feedback", help="the feedback loop: record what worked and what didn't").add_subparsers(
+        dest="sub", required=True)
+    s = fb.add_parser("add", help="record feedback on something the team made")
+    s.add_argument("about", help="what the feedback is about, e.g. 'BOF static #4 for posture corrector'")
+    s.add_argument("--kind", required=True, help="ad, creative, copy, pdp, store, test, campaign, research, product, process, other")
+    s.add_argument("--verdict", required=True, choices=("good", "bad", "mixed"))
+    s.add_argument("--source", required=True, choices=("owner", "data", "qc", "blake"))
+    s.add_argument("--what", required=True, help="what was made (angle, format, headline, offer...)")
+    s.add_argument("--why", required=True, help="why it worked or didn't (best understanding)")
+    s.add_argument("--keep", help="what to keep doing")
+    s.add_argument("--change", help="what to change next time")
+    s.add_argument("--evidence", help="numbers or quotes behind the verdict")
+    s.add_argument("-p", "--product")
+    s.add_argument("--agent", help="the agent whose work this was")
+    s.add_argument("--task", help="T<n> it came from")
+    s.set_defaults(fn=cmd_feedback_add)
+    s = fb.add_parser("list", help="past feedback, newest first")
+    s.add_argument("--agent")
+    s.add_argument("--verdict", choices=("good", "bad", "mixed"))
+    s.add_argument("--kind")
+    s.add_argument("-p", "--product")
+    s.add_argument("-n", "--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_feedback_list)
+    s = fb.add_parser("digest", help="patterns: what keeps working and what keeps failing")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_feedback_digest)
+
     mentor = sub.add_parser("mentor", help="capture mentor lessons from the owner's browser").add_subparsers(
         dest="sub", required=True)
     s = mentor.add_parser("serve", help="receive lessons captured by core/jarvis/skool_capture.js")
@@ -657,7 +703,7 @@ def main(argv=None) -> int:
     conn = db.connect()
     try:
         return args.fn(conn, args) or 0
-    except (memory.MemoryError, records.RecordError) as exc:
+    except (memory.MemoryError, records.RecordError, feedback.FeedbackError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

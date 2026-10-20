@@ -92,3 +92,23 @@ class RecordsTest(BrainTest):
         self.assertEqual(path.name, f"T{tid}-customer-research.md")
         self.assertTrue(path.parent.is_dir())
         self.assertEqual(memory.slugify("Ä b/c"), "b-c")
+
+
+class FeedbackTest(BrainTest):
+    def test_feedback_is_recorded_listed_and_digested(self):
+        from jarvis import feedback
+        self.init()
+        feedback.add(self.conn, about="BOF static 4 for posture corrector", kind="ad", verdict="good", source="data",
+                     what="problem-first headline, 2 floating units", why="clear pain hook", keep="problem-first headlines",
+                     change="", evidence="CTR 3.1%", product=None, agent="creative-director", task="T9")
+        feedback.add(self.conn, about="BOF static 7", kind="ad", verdict="bad", source="owner", what="busy layout",
+                     why="too many callouts", change="max 3 callouts", agent="creative-director")
+        rows = feedback.rows(self.conn, agent="creative-director")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(feedback.rows(self.conn, verdict="bad")), 1)
+        d = feedback.digest(self.conn, agent="creative-director")
+        self.assertIn("problem-first headlines", d)
+        self.assertIn("max 3 callouts", d)
+        self.assertIn("WORKED", feedback.ledger_path().read_text(encoding="utf-8"))
+        with self.assertRaises(feedback.FeedbackError):
+            feedback.add(self.conn, about="x", kind="nope", verdict="good", source="owner", what="a", why="b")

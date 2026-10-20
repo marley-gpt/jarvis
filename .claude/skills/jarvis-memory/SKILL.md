@@ -18,7 +18,8 @@ The brain lives in `brain/` and is reached through `bin/jarvis` (run it from the
 5. **Approvals still apply.** Spending money, launching or editing ads, changing budgets or prices, editing the live store, contacting suppliers and deleting business data all need the owner's approval through JARVIS. Everything else is routine: just do it, without asking.
 6. **Honesty.** Separate evidence from speculation. Never invent quotes, metrics or Blake's steps. Too little data is "insufficient data", never a win.
 7. **Private stays private.** Blake's material and business data stay in `brain/` or `~/.claude/skills/blake-*`. The repo is public, so never commit them.
-8. **Speakable results.** The owner mostly talks to JARVIS by voice, so end with a short plain-English summary that JARVIS can say out loud.
+8. **Feedback loop.** Before a task, check `bin/jarvis feedback list --agent <you>` and `feedback digest`. When any feedback arrives (owner review, test data, QC), record it with `bin/jarvis feedback add` (see the `jarvis-feedback-loop` skill), so the team gets better every round.
+9. **Speakable results.** The owner mostly talks to JARVIS by voice, so end with a short plain-English summary that JARVIS can say out loud.
 
 ## 1. Before working: retrieve only what's relevant
 

@@ -52,6 +52,7 @@ There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3
 - **Blake (the mentor) first:** every agent loads its `blake-*` playbook and follows Blake's method with citations. mentor-learning keeps those playbooks fed from the captured Skool lessons (`bin/jarvis mentor import`, `brain/files/mentor/skool/`).
 - **Voice is the main interface:** keep the British Kokoro voice, and keep dashboard replies short and spoken.
 - **Fewer questions:** do routine work without asking. Approval is only for the gates below.
+- **Feedback loop:** every verdict on the team's work (your ad and PDP reviews, test data, QC) is recorded with `bin/jarvis feedback add`. When the owner gives feedback in chat or by voice, JARVIS records it straight away. Agents read `feedback list` / `digest` before similar work.
 - **Save every mistake** to memory (`-c procedures`, tag `mistake`) and check them before similar work.
 - **New agents** may be added when a recurring job isn't covered. Tell the owner.
 - **Product research is lowest priority:** the owner brings the products.

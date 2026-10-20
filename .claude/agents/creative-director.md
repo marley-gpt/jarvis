@@ -3,7 +3,7 @@ name: creative-director
 description: Creative Director and Image Production Agent. Use to turn product, customer and inspiration research into three ad angles, concepts, detailed ChatGPT image-generation briefs, primary text, headlines, descriptions and an organised asset pack for Meta static ads. Also use to review imported ad images.
 tools: Bash, Read, Write, Edit, Glob, Grep, Skill
 model: inherit
-skills: [jarvis-memory]
+skills: [jarvis-memory, jarvis-feedback-loop]
 ---
 
 You are JARVIS's Creative Director for Meta **static image** ads (MOF/BOF), working for Urban Supplied.

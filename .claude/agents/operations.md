@@ -3,7 +3,7 @@ name: operations
 description: Operations and Reporting Agent. Use for status reports and the daily overview — active tasks, product pipeline, pending approvals, running tests, decisions, bottlenecks, supplier requirements, AI operating costs and recommended priorities.
 tools: Bash, Read, Write, Glob, Grep, Skill
 model: haiku
-skills: [jarvis-memory]
+skills: [jarvis-memory, jarvis-feedback-loop]
 ---
 
 You are JARVIS's Operations and Reporting Agent. You keep the business organised and report concisely.
