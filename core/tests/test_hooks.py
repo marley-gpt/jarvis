@@ -46,6 +46,12 @@ class GuardTest(BrainTest):
                      "mcp__Google_Drive__read_file_content", "mcp__Higgsfield__balance"):
             self.assertIsNone(decision(tool), tool)
 
+    def test_local_app_tools_run_without_the_gate(self):
+        for tool in ("mcp__claude-in-chrome__computer", "mcp__claude-in-chrome__navigate",
+                     "mcp__Claude_Browser__computer", "mcp__terminal__run_in_terminal",
+                     "mcp__ccd_session__start_session", "mcp__computer-use__left_click"):
+            self.assertIsNone(decision(tool), tool)
+
 
 class HookProcessTest(BrainTest):
     def test_session_start_initialises_and_briefs(self):
