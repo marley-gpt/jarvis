@@ -150,9 +150,16 @@
         if (samples === o.learn) for (let i = 0; i < CELLS; i++) mask[i] = busy[i] >= o.learn * 0.6 ? 1 : 0;
       }
       prevSample = g;
-      let changed = 0;
-      if (lastKeptGrid) for (let i = 0; i < CELLS; i++) if (!mask[i] && Math.abs(g[i] - lastKeptGrid[i]) > 0.06) changed++;
-      if (!lastKeptGrid || changed >= o.minCells || t - lastKept >= o.minGap) {
+      // Sharp changes (a click, a page load, a text overlay appearing) are kept straight away; soft
+      // changes spread over the frame (a talking head moving, lighting) at most every `softGap` s.
+      let changed = 0, sharp = 0;
+      if (lastKeptGrid) for (let i = 0; i < CELLS; i++) {
+        if (mask[i]) continue;
+        const d = Math.abs(g[i] - lastKeptGrid[i]);
+        if (d > 0.06) changed++;
+        if (d > 0.2) sharp++;
+      }
+      if (!lastKeptGrid || sharp >= o.sharpCells || (changed >= o.minCells && t - lastKept >= o.softGap) || t - lastKept >= o.minGap) {
         bctx.drawImage(v, 0, 0, big.width, big.height);
         await post("/frame", { ...ids, t, data: big.toDataURL("image/jpeg", 0.72) });
         if (!tiles) sheetFrom = t;
@@ -211,7 +218,7 @@
       return st;
     },
     async captureLesson(opts) {
-      const o = Object.assign({ every: 2, minGap: 30, minCells: 6, learn: 20, maxFrames: 500, width: 1280 }, opts);
+      const o = Object.assign({ every: 2, minGap: 30, minCells: 6, sharpCells: 4, softGap: 8, learn: 20, maxFrames: 500, width: 1280 }, opts);
       const pp = data();
       const md = new URL(location.href).searchParams.get("md");
       const mods = pp.course.children.map(unit);
