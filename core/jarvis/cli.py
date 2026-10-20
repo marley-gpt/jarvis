@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import backup, brief, db, memory, paths, records
+from . import backup, brief, db, journal, memory, paths, records
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -34,7 +34,8 @@ def tags(value) -> list[str]:
 def cmd_init(conn, args):
     for folder in paths.CATEGORIES:
         (paths.memory_dir() / folder).mkdir(parents=True, exist_ok=True)
-    for folder in (paths.work_dir(), paths.files_dir(), paths.backups_dir(), paths.scratch_dir()):
+    for folder in (paths.work_dir(), paths.files_dir(), paths.backups_dir(), paths.scratch_dir(),
+                   paths.journal_dir()):
         folder.mkdir(parents=True, exist_ok=True)
     memory.sync(conn)
     added = 0
@@ -318,6 +319,25 @@ def cmd_cost_summary(conn, args):
         out("Agent runs this month: " + ", ".join(f"{r['agent'] or '?'}×{r['n']}" for r in runs))
 
 
+def fmt_journal(row, text_key="text", n=300) -> str:
+    who = "Owner " if row["role"] == "owner" else "JARVIS"
+    return f"J{row['id']}  {journal.when(row['ts'])} {who}  {journal.short(row[text_key], n)}"
+
+
+def cmd_recall(conn, args):
+    rows = journal.search(conn, args.query, limit=args.limit, role=args.role)
+    if not rows:
+        out("No earlier conversation matches.")
+    for r in rows:
+        out(fmt_journal(r, "snippet"))
+
+
+def cmd_journal(conn, args):
+    session = journal.previous_session(conn) if args.previous else None
+    for r in journal.recent(conn, limit=args.limit, role=args.role, session_id=session):
+        out(fmt_journal(r, n=args.width))
+
+
 def cmd_backup(conn, args):
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
@@ -510,6 +530,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("amount", type=float, help="AUD")
     s.set_defaults(fn=cmd_cost_check)
     cost.add_parser("summary").set_defaults(fn=cmd_cost_summary)
+
+    s = sub.add_parser("recall", help="search earlier conversations (the journal)")
+    s.add_argument("query")
+    s.add_argument("-n", "--limit", type=int, default=8)
+    s.add_argument("--role", choices=journal.ROLES)
+    s.set_defaults(fn=cmd_recall)
+    s = sub.add_parser("journal", help="show recent conversation")
+    s.add_argument("-n", "--limit", type=int, default=20)
+    s.add_argument("--role", choices=journal.ROLES)
+    s.add_argument("--previous", action="store_true", help="only the most recent session")
+    s.add_argument("-w", "--width", type=int, default=300)
+    s.set_defaults(fn=cmd_journal)
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")

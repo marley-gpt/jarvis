@@ -16,6 +16,7 @@ bin/jarvis mem search "<what you need>" [-c <category>] [-p <product>] [--proven
 bin/jarvis mem get <id> [<id>...]        # full entry, only for hits you will actually use
 bin/jarvis product show <slug>           # index of everything known about one product
 bin/jarvis task show T<n>                # your assignment and its history
+bin/jarvis recall "<what was said>"      # earlier conversations with the owner (auto-journaled)
 ```
 
 Always search `-c mentor` (or `--provenance mentor`) for a method that covers your task. If one exists, follow it and cite it. If none exists, say "No mentor method found" and label your own approach **JARVIS recommendation**.

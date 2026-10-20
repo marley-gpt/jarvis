@@ -40,6 +40,9 @@ DEFAULT_CONFIG = {
     "max_parallel_agents": 4,
     "backup_keep": 20,
     "duplicate_threshold": 0.82,
+    # Memory and journal hits injected with each owner message (UserPromptSubmit hook).
+    "recall_memory_hits": 4,
+    "recall_journal_hits": 3,
     # Below these, a test result is reported as "insufficient data" and never as a win.
     "min_spend_for_verdict_usd": 30.0,
     "min_clicks_for_verdict": 50,
@@ -68,6 +71,10 @@ def files_dir() -> Path:
 
 def backups_dir() -> Path:
     return home() / "backups"
+
+
+def journal_dir() -> Path:
+    return home() / "journal"
 
 
 def scratch_dir() -> Path:

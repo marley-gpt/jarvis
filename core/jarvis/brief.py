@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from . import memory, records
+from . import journal, memory, records
 
 
-def session_brief(conn, max_tasks: int = 8) -> str:
+def session_brief(conn, max_tasks: int = 8, session_id: str | None = None) -> str:
     out = ["# JARVIS brief (auto-loaded from brain/)"]
 
     core = memory.listing(conn, category="business", status="active", limit=6) + \
@@ -40,6 +40,13 @@ def session_brief(conn, max_tasks: int = 8) -> str:
     if recent:
         out.append("\n## Recent decisions")
         out += [f"- D{d['id']} {d['ts'][:10]} {d['decision'][:110]}" for d in recent]
+
+    last = journal.previous_session(conn, session_id)
+    if last:
+        said = journal.recent(conn, limit=6, role="owner", session_id=last)
+        if said:
+            out.append(f"\n## Last conversation ({journal.when(said[-1]['ts'])}; `bin/jarvis journal --previous`)")
+            out += [f"- {journal.short(j['text'], 130)}" for j in said]
 
     ok, spent, budget = records.cost_check(conn, 0)
     st = memory.stats(conn)

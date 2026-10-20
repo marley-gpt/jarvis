@@ -22,7 +22,7 @@ def create(conn: sqlite3.Connection, label: str = "manual") -> Path:
         target.close()
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(snap, "jarvis.db")
-            for folder in (paths.memory_dir(), paths.work_dir()):
+            for folder in (paths.memory_dir(), paths.work_dir(), paths.journal_dir()):
                 if folder.exists():
                     for f in folder.rglob("*"):
                         if f.is_file():

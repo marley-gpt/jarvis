@@ -1,6 +1,8 @@
 """Claude Code hook handlers (wired up in .claude/settings.json via bin/hook).
 
 session_start  inject the JARVIS brief, initialise the brain, take the daily backup
+prompt         UserPromptSubmit: journal the owner's message and inject relevant memory (auto-recall)
+stop           Stop: journal JARVIS's reply
 guard          PreToolUse: protect brain data and gate consequential external actions
 post_tool      PostToolUse: append consequential MCP calls to the action log
 subagent       SubagentStart/SubagentStop: record which specialist ran
@@ -12,7 +14,7 @@ import json
 import re
 import sys
 
-from . import backup, brief, cli, db, paths, records
+from . import backup, brief, cli, db, journal, memory, paths, records
 
 # MCP tool names whose last segment starts with one of these verbs are read-only.
 READ_VERBS = ("get", "list", "search", "query", "show", "find", "read", "fetch", "validate", "describe",
@@ -84,6 +86,30 @@ def guard(event: dict) -> dict | None:
     return None
 
 
+SAVE_NUDGE = ("If this message states a fact, preference, correction, rule or decision, save it now "
+              "(`bin/jarvis mem add --provenance user`, `mem supersede <id>` or `decide`) before replying.")
+
+
+def recall(conn, prompt: str, session_id: str | None) -> str:
+    """Compact context block for one owner message: matching memory and earlier conversation."""
+    cfg = paths.config()
+    lines = []
+    words = memory._fts_query(prompt, "OR")
+    if words:
+        hits = memory.search(conn, prompt, limit=int(cfg["recall_memory_hits"]))
+        if hits:
+            lines.append("Memory that may be relevant (`bin/jarvis mem get <id>` for the full entry):")
+            lines += [f"- {h['id']} [{h['category']}/{h['provenance']}] {h['title']} — {journal.short(h['snippet'], 160)}"
+                      for h in hits]
+        said = journal.search(conn, prompt, limit=int(cfg["recall_journal_hits"]), exclude_session=session_id)
+        if said:
+            lines.append("Earlier conversation (`bin/jarvis recall \"...\"` for more):")
+            lines += [f"- J{j['id']} {journal.when(j['ts'])} {j['role']}: {journal.short(j['snippet'], 160)}"
+                      for j in said]
+    head = "JARVIS auto-recall (local search, may be incomplete)."
+    return "\n".join([head, *lines, SAVE_NUDGE])
+
+
 def _summarise(data) -> str:
     text = json.dumps(data, ensure_ascii=False, default=str)
     return text if len(text) <= 400 else text[:400] + "…"
@@ -112,7 +138,17 @@ def main(argv: list[str]) -> int:
                 backup.daily(conn)
             except OSError as exc:  # a failed backup must not block the session
                 sys.stderr.write(f"jarvis: daily backup failed: {exc}\n")
-            sys.stdout.write(brief.session_brief(conn) + "\n")
+            sys.stdout.write(brief.session_brief(conn, session_id=event.get("session_id")) + "\n")
+        elif kind == "prompt":
+            prompt = event.get("prompt") or ""
+            session = event.get("session_id")
+            context = recall(conn, prompt, session)  # search before recording, so the message can't match itself
+            journal.record(conn, "owner", prompt, session)
+            sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                                 "additionalContext": context}}))
+        elif kind == "stop":
+            reply = event.get("last_assistant_message") or journal.last_reply(event.get("transcript_path"))
+            journal.record(conn, "jarvis", reply, event.get("session_id"))
         elif kind == "post_tool":
             tool = event.get("tool_name", "")
             if tool.startswith("mcp__") and not is_read_only_tool(tool):

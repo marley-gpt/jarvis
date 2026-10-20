@@ -38,6 +38,12 @@
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" session_start", "timeout": 30 }] }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" prompt", "timeout": 15 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" stop", "timeout": 15 }] }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",

@@ -6,7 +6,7 @@ import sqlite3
 
 from . import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory (
@@ -143,6 +143,17 @@ CREATE TABLE IF NOT EXISTS actions (
     summary TEXT,
     session_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    UNIQUE (session_id, digest)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts USING fts5(text, tokenize = 'porter unicode61');
 
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
