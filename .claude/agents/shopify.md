@@ -25,5 +25,5 @@ If a competitor page analysis is requested, cite URLs and separate what you obse
 
 ## Skills
 
-Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `cro`, `copywriting`, `offers`, `pricing`, `popups`, `schema`, `seo-audit`, `site-architecture`, `emails`, `sms`, `shopify-liquid-themes`, `liquid-theme-standards`, `liquid-theme-a11y`, `shopify-liquid`, `shopify-admin`, `shopify-custom-data`, `shopify-storefront-graphql`, `shopify-dev`.
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `cro`, `copywriting`, `offers`, `pricing`, `popups`, `schema`, `seo-audit`, `site-architecture`, `emails`, `sms`, `shopify-liquid-themes`, `liquid-theme-standards`, `liquid-theme-a11y`, `shopify-liquid`, `shopify-admin`, `shopify-custom-data`, `shopify-storefront-graphql`, `shopify-dev`, `frontend-design`, `draft-content`, `email-sequence`, `brand-review`, `marketing-seo-audit`.
 They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.

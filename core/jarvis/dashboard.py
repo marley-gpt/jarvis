@@ -47,6 +47,7 @@ AGENT_LABELS = {
     "creative-director": "Creative Director",
     "shopify": "Shopify",
     "meta-ads": "Meta Ads",
+    "meta-ads-auditor": "Meta Auditor",
     "product-testing": "Product Testing",
     "operations": "Operations",
 }

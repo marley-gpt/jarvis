@@ -101,3 +101,35 @@ Source: Shopify `agent-skills` (generated from shopify-dev-tools). The download 
 | `shopify-polaris-customer-account-extensions` | rarely | JARVIS | Build custom functionality that merchants can install at defined points on the Order index, Order status, and Profile pages in customer accounts. |
 | `shopify-pos-ui` | rarely | JARVIS | Build retail point-of-sale applications using Shopify's POS UI components. |
 | `shopify-storefront-graphql` | useful | shopify | Use for custom storefronts requiring direct GraphQL queries/mutations for data fetching and cart operations. |
+
+## Meta Ads skills (5): `.claude/skills/`
+Source: [aaronpdoherty/meta-ads-genius](https://github.com/aaronpdoherty/meta-ads-genius), MIT. Its read-only Graph API scripts are in `.claude/tools/meta-ads-genius/scripts/`. They need an `ads_read` token in the owner's environment (`META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`), which is never stored in this repo. Its auditor became the `meta-ads-auditor` agent. `pulse` was renamed `meta-pulse`. Every account change still goes through JARVIS's approval gate.
+
+| skill | fit for Urban Supplied | used by | what it does |
+|---|---|---|---|
+| `ad-analysis` | core | meta-ads, meta-ads-auditor, product-testing | Expert diagnosis of Meta Ads performance — interpret Ads Manager/API data, find root causes, and produce evidence-cited reports that respect Meta's delivery mechanics (br… |
+| `ad-optimization` | core | meta-ads | Turn Meta Ads findings into specific, safe, approved changes — kill/scale/iterate decisions, budget shifts, creative swaps, fatigue fixes, learning-phase-aware scheduling… |
+| `campaign-management` | core | meta-ads | Plan, structure, and launch Meta Ads campaigns — account architecture (CBO/ABO, testing vs scaling), audience strategy and lookalikes, conversion tracking setup (pixel/CA… |
+| `opportunity-spotting` | core | creative-research, meta-ads, meta-ads-auditor | Find growth opportunities in and around a Meta Ads account — underexploited audiences and angles in account data, competitor gaps via Meta Ad Library research, seasonal/a… |
+| `meta-pulse` | core | meta-ads, meta-ads-auditor, product-testing | Quick Meta Ads account health check — last 7 days vs. |
+
+## Anthropic marketing plugin skills (8): `.claude/skills/`
+Source: [anthropics/knowledge-work-plugins/marketing](https://github.com/anthropics/knowledge-work-plugins/tree/main/marketing), Apache-2.0. `seo-audit` was renamed `marketing-seo-audit` because `seo-audit` already exists. Its `~~category` placeholders are explained in `.claude/tools/knowledge-work-marketing/CONNECTORS.md`. The plugin's connector list (Slack, Canva, Figma, HubSpot and others) was not installed, because connectors are account connections that need the owner's sign-in.
+
+| skill | fit for Urban Supplied | used by | what it does |
+|---|---|---|---|
+| `brand-review` | useful | creative-director, market-research, shopify | Review content against your brand voice, style guide, and messaging pillars, flagging deviations by severity with specific before/after fixes. |
+| `campaign-plan` | useful | creative-director, operations | Generate a full campaign brief with objectives, audience, messaging, channel strategy, content calendar, and success metrics. |
+| `competitive-brief` | core | creative-research, market-research, product-research | Research competitors and generate a positioning and messaging comparison with content gaps, opportunities, and threats. |
+| `content-creation` | useful | creative-director | Draft marketing content across channels — blog posts, social media, email newsletters, landing pages, press releases, and case studies. |
+| `draft-content` | useful | shopify | Draft blog posts, social media, email newsletters, landing pages, press releases, and case studies with channel-specific formatting and SEO recommendations. |
+| `email-sequence` | useful | shopify | Design and draft multi-email sequences with full copy, timing, branching logic, exit conditions, and performance benchmarks. |
+| `performance-report` | core | meta-ads, operations, product-testing | Build a marketing performance report with key metrics, trend analysis, wins and misses, and prioritized optimization recommendations. |
+| `marketing-seo-audit` | useful | shopify | Run a comprehensive SEO audit — keyword research, on-page analysis, content gaps, technical checks, and competitor comparison. |
+
+## frontend-design (1): installed per user in `~/.claude/skills/`
+Source: [anthropics/claude-code/plugins/frontend-design](https://github.com/anthropics/claude-code/tree/main/plugins/frontend-design). That repo is "all rights reserved", under Anthropic's Commercial Terms, so it isn't copied into this public repo. Use it for the dashboard and for Shopify page design work.
+
+| skill | fit for Urban Supplied | used by | what it does |
+|---|---|---|---|
+| `frontend-design` | useful | shopify | Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. |

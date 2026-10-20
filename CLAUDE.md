@@ -36,6 +36,7 @@ Everything durable lives in `brain/` (git-ignored, because this repo is public) 
 | `creative-director` | angles → concepts → ChatGPT image briefs → copy → asset pack |
 | `shopify` | PDP drafts and previews; read-only store access |
 | `meta-ads` | campaign drafts and read-only performance analysis |
+| `meta-ads-auditor` | read-only graded audit of the Meta ad account (signals, creative, structure, audiences) |
 | `product-testing` | test records, metrics, verdicts, lessons |
 | `operations` | status reports, bottlenecks, costs, priorities, daily overview |
 
@@ -43,13 +44,13 @@ Use the cheapest agent that fits: research and record-keeping agents run on chea
 
 ## Skills
 
-There are 71 playbook skills: 52 marketing, 3 Liquid-theme and 15 Shopify-dev (installed per user) plus `jarvis-memory`. They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
+There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
 
 ## Approval gates (never bypass)
 
 Ask the owner and record the request **before**: spending money, launching or editing campaigns, changing budgets, editing the live Shopify store, changing prices, contacting suppliers, deleting business data, or anything irreversible:
 `bin/jarvis approval request <spend|launch|budget|shopify_live|price|supplier|delete|other> "<summary>" --task T<n> [--amount X --currency USD]`
-When the owner answers, run `approval approve|reject A<n>`. Only then perform the action yourself. Specialists prepare drafts and never execute consequential actions. A hook also forces a permission prompt on every non-read MCP call and logs it (`bin/jarvis log`).
+When the owner answers, run `approval approve|reject A<n>`. Only then perform the action yourself. Specialists prepare drafts and never execute consequential actions. A hook also forces a permission prompt on every non-read MCP call that can change the store, ads or shared files or spend credits, and logs it (`bin/jarvis log`). Local browser, terminal and session tools run freely, because the owner gave blanket permission for routine work.
 
 ## Costs
 

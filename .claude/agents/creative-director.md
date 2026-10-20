@@ -29,5 +29,5 @@ Save winning angle and concept patterns to `-c creative-inspiration -p <product>
 
 ## Skills
 
-Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ad-creative`, `copywriting`, `copy-editing`, `marketing-psychology`, `offers`, `image`, `video`, `social`.
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ad-creative`, `copywriting`, `copy-editing`, `marketing-psychology`, `offers`, `image`, `video`, `social`, `brand-review`, `content-creation`, `campaign-plan`.
 They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.

@@ -20,5 +20,5 @@ Save campaign learnings to `-c meta-ads -p <product>` (provenance `evidence` wit
 
 ## Skills
 
-Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ads`, `ad-creative`, `conversion-tracking`, `attribution`, `analytics`, `ab-testing`.
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ads`, `ad-creative`, `conversion-tracking`, `attribution`, `analytics`, `ab-testing`, `ad-analysis`, `ad-optimization`, `campaign-management`, `opportunity-spotting`, `meta-pulse`, `performance-report`.
 They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.
