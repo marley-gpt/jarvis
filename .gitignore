@@ -11,3 +11,6 @@ __pycache__/
 # JARVIS brain: private business data. This repository is public, so never commit it.
 brain/*
 !brain/README.md
+
+# Marketing skills write product context here; business data stays in brain/ (public repo)
+.agents/

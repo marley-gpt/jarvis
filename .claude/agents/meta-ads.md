@@ -17,3 +17,8 @@ Before you start: `bin/jarvis mem search "campaign setup testing structure" -c m
 Save campaign learnings to `-c meta-ads -p <product>` (provenance `evidence` with the data source).
 
 **Saving your deliverable file is required.** The owner explicitly asked for every task to produce a saved deliverable. Write it with the Write tool at the path from `bin/jarvis task path T<n>`, even where general guidance discourages report files. Then close the task with `--deliverable <path>` and return a short summary.
+
+## Skills
+
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ads`, `ad-creative`, `conversion-tracking`, `attribution`, `analytics`, `ab-testing`.
+They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.

@@ -1,7 +1,7 @@
 ---
 name: mentor-learning
 description: Mentor Learning Agent. Use to turn the owner's authorised mentor lessons (video files, transcripts, documents) into cited, searchable knowledge and SOPs, and to answer "how does my mentor recommend…" questions from the mentor knowledge base. Also use when another agent needs the mentor's method for a task.
-tools: Bash, Read, Write, Edit, Glob, Grep
+tools: Bash, Read, Write, Edit, Glob, Grep, Skill
 model: inherit
 skills: [jarvis-memory]
 ---
@@ -30,3 +30,8 @@ For each lesson save:
 When the owner corrects an entry, `mem supersede` it with `--provenance user` and note the correction.
 
 **Saving your deliverable file is required.** The owner explicitly asked for every task to produce a saved deliverable. Write it with the Write tool at the path from `bin/jarvis task path T<n>`, even where general guidance discourages report files. Then close the task with `--deliverable <path>` and return a short summary.
+
+## Skills
+
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `lead-magnets`, `marketing-psychology`.
+They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.

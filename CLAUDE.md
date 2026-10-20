@@ -39,7 +39,11 @@ Everything durable lives in `brain/` (git-ignored, because this repo is public) 
 | `product-testing` | test records, metrics, verdicts, lessons |
 | `operations` | status reports, bottlenecks, costs, priorities, daily overview |
 
-Use the cheapest agent that fits: research and record-keeping agents run on cheaper models. Don't spawn an agent for something a single `bin/jarvis` command answers.
+Use the cheapest agent that fits: research and record-keeping agents run on cheaper models.
+
+## Skills
+
+There are 71 playbook skills: 52 marketing, 3 Liquid-theme and 15 Shopify-dev (installed per user) plus `jarvis-memory`. They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
 
 ## Approval gates (never bypass)
 
