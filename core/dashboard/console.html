@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS Console</title>
+<style>
+:root {
+  --bg: #05080f; --side: #080d18; --panel: #0c1322; --panel2: #101a2d; --line: #1a2740; --text: #e6ecf7; --muted: #7f8fae;
+  --accent: #38bdf8; --accent2: #818cf8; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --glow: rgba(56,189,248,.3);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+button { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: 250px 1fr 360px; height: 100%; }
+
+/* sidebar */
+nav { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.brand { display: flex; gap: 10px; align-items: center; padding: 18px 18px 14px; }
+.brand .logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04101f; box-shadow: 0 0 18px var(--glow); }
+.brand b { letter-spacing: .22em; font-size: 14px; display: block; }
+.brand small { color: var(--muted); font-size: 11px; }
+.nav { padding: 6px 10px; }
+.nav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; background: none;
+  border-radius: 8px; cursor: pointer; color: var(--muted); text-align: left; }
+.nav button:hover { background: var(--panel); color: var(--text); }
+.nav button.on { background: var(--panel2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.nav .n { margin-left: auto; font-size: 11px; background: #18243d; border-radius: 99px; padding: 0 7px; }
+.nav .n.hot { background: rgba(251,191,36,.18); color: var(--warn); }
+.sect { padding: 14px 20px 6px; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+#side-agents { overflow-y: auto; padding: 0 10px 14px; flex: 1; }
+.sa { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.sa:hover { background: var(--panel); }
+.sa .i { width: 22px; text-align: center; }
+.pill { font-size: 10.5px; padding: 1px 8px; border-radius: 99px; background: #18243d; color: var(--muted); margin-left: auto; white-space: nowrap; }
+.pill.working { background: rgba(56,189,248,.15); color: var(--accent); }
+.pill.queued { background: rgba(251,191,36,.12); color: var(--warn); }
+.pill.done, .pill.approved, .pill.passed { background: rgba(52,211,153,.14); color: var(--ok); }
+.pill.blocked, .pill.rejected, .pill.failed { background: rgba(248,113,113,.14); color: var(--bad); }
+.pill.waiting_approval, .pill.pending { background: rgba(251,191,36,.12); color: var(--warn); }
+.pill.in_progress, .pill.running { background: rgba(56,189,248,.15); color: var(--accent); }
+
+/* main */
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+header { display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header .crumb { color: var(--muted); font-size: 12px; }
+header .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.chip.hot { border-color: rgba(251,191,36,.5); color: var(--warn); background: rgba(251,191,36,.07); }
+#clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 5px; }
+.dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+#view { flex: 1; overflow-y: auto; padding: 22px 24px 40px; }
+#banner { display: none; margin: 14px 24px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35); color: var(--warn); }
+h2 { margin: 26px 0 12px; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+h2:first-child { margin-top: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+
+/* command card */
+.cmd { display: flex; gap: 20px; align-items: center; background: linear-gradient(120deg, #0d1a33, #0c1322 60%);
+  border-color: #23406b; box-shadow: 0 0 40px rgba(56,189,248,.07); }
+#orb { width: 64px; height: 64px; border-radius: 50%; flex: none; position: relative;
+  background: radial-gradient(circle at 35% 30%, #a5e8ff, var(--accent) 40%, #1e3a8a 100%);
+  box-shadow: 0 0 22px var(--glow), inset 0 0 18px rgba(255,255,255,.25); }
+#orb::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; border: 2px solid var(--accent); opacity: .25; }
+#orb.thinking, #orb.delegating { animation: pulse 1.1s ease-in-out infinite; }
+#orb.listening { background: radial-gradient(circle at 35% 30%, #d1fae5, var(--ok) 45%, #065f46 100%); animation: pulse .8s infinite; }
+#orb.speaking { background: radial-gradient(circle at 35% 30%, #e0e7ff, var(--accent2) 45%, #312e81 100%); animation: pulse .5s infinite; }
+@keyframes pulse { 50% { transform: scale(1.07); box-shadow: 0 0 40px var(--glow); } }
+.cmd { flex-wrap: wrap; } .cmd .who { flex: 1; min-width: 220px; } .cmd .nums { flex-wrap: wrap; gap: 14px 26px; }
+.cmd .who b { font-size: 16px; } .cmd .who div { color: var(--muted); font-size: 12.5px; }
+.cmd .nums { margin-left: auto; display: flex; gap: 26px; }
+.num b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.num span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+
+/* agent cards */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.agent { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 15px;
+  display: flex; flex-direction: column; gap: 8px; cursor: pointer; transition: border-color .3s, box-shadow .3s, transform .2s; overflow: hidden; }
+.agent::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 2px; background: var(--c); opacity: .7; }
+.agent:hover { transform: translateY(-2px); }
+.agent .top { display: flex; gap: 10px; align-items: center; }
+.agent .ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-size: 19px; flex: none;
+  background: color-mix(in srgb, var(--c) 16%, transparent); }
+.agent .nm { font-weight: 600; } .agent .ly { font-size: 11px; color: var(--c); text-transform: uppercase; letter-spacing: .08em; }
+.agent .ds { color: var(--muted); font-size: 12.5px; min-height: 3.6em; }
+.agent .now { font-size: 12.5px; min-height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent .feed { font: 11px Consolas, ui-monospace, monospace; color: var(--muted); }
+.agent .feed div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent .meta { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; align-items: center; }
+.agent .meta b { color: var(--text); font-weight: 600; }
+.agent .mdl { border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.agent.working { border-color: var(--c); box-shadow: 0 0 0 1px var(--c), 0 0 26px color-mix(in srgb, var(--c) 30%, transparent); }
+.agent.working .ic { animation: pulse 1.2s infinite; }
+.agent.flash { border-color: var(--ok); }
+
+/* tables and lists */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 9px 8px; border-bottom: 1px solid #121d33; vertical-align: top; }
+td.mono, .mono { font-family: Consolas, ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+.bar { height: 6px; background: #18243d; border-radius: 9px; overflow: hidden; margin-top: 6px; }
+.bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--ok)); }
+.bar.cost i { background: linear-gradient(90deg, var(--ok), var(--warn)); }
+.kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 6px; }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; min-height: 120px; }
+.col h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); display: flex; }
+.col h3 span { margin-left: auto; }
+.prod { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; margin-bottom: 7px; font-size: 13px; }
+.prod small { display: block; color: var(--muted); font-size: 11px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 10px; }
+.metrics div { background: var(--panel2); border-radius: 8px; padding: 6px 8px; font-size: 11px; color: var(--muted); }
+.metrics b { display: block; color: var(--text); font-size: 14px; }
+.stack > * + * { margin-top: 12px; }
+.appr { border-color: rgba(251,191,36,.4); }
+.appr .row { display: flex; gap: 10px; align-items: center; }
+.btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 12.5px; }
+.btn:hover { border-color: var(--accent); }
+.btn.ok { border-color: rgba(52,211,153,.5); color: var(--ok); } .btn.no { border-color: rgba(248,113,113,.5); color: var(--bad); }
+.search { display: flex; gap: 8px; margin-bottom: 14px; }
+input[type=search], select, textarea { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 8px 11px; font: inherit; }
+input[type=search] { flex: 1; }
+.mem { padding: 10px 12px; border-bottom: 1px solid #121d33; cursor: pointer; }
+.mem:hover { background: var(--panel2); }
+.mem .t { font-weight: 600; font-size: 13.5px; }
+.mem .s { color: var(--muted); font-size: 12px; }
+.tag { font-size: 10.5px; border-radius: 6px; padding: 1px 6px; background: #18243d; color: var(--muted); margin-right: 4px; }
+.tag.mentor { background: rgba(167,139,250,.16); color: #c4b5fd; } .tag.user { background: rgba(56,189,248,.14); color: var(--accent); }
+pre.body { white-space: pre-wrap; font: 13px/1.55 "Segoe UI", system-ui, sans-serif; margin: 10px 0 0; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ev { font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid #121d33; }
+.ev time { color: var(--muted); font-size: 11px; margin-right: 6px; }
+.ev .k { color: var(--accent); }
+
+/* conversation dock */
+aside { background: var(--side); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+aside .hd { padding: 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+aside .hd b { font-size: 13px; } #st { color: var(--muted); font-size: 12px; }
+#chat { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+.msg { padding: 9px 12px; border-radius: 12px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; font-size: 13.5px; }
+.msg.owner { align-self: flex-end; background: #1e3a5f; border-bottom-right-radius: 4px; }
+.msg.jarvis { align-self: flex-start; background: var(--panel2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.sys { align-self: center; color: var(--muted); font-size: 12px; padding: 2px 6px; text-align: center; }
+.msg.sys.dispatch { color: var(--accent); }
+.msg.err { align-self: center; color: var(--bad); font-size: 12px; background: rgba(248,113,113,.08); }
+.msg .t { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.dock { border-top: 1px solid var(--line); padding: 12px 14px; }
+.dock .row { display: flex; gap: 8px; align-items: center; }
+#mic { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; flex: none; font-size: 19px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04101f; box-shadow: 0 0 14px var(--glow); }
+#mic.on { background: linear-gradient(135deg, var(--ok), #10b981); animation: pulse .8s infinite; }
+#text { flex: 1; resize: none; height: 42px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 9px; color: var(--muted); font-size: 11.5px; align-items: center; }
+.opts label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+.opts select { font-size: 11.5px; padding: 2px 4px; max-width: 150px; }
+.opts .btn { padding: 3px 8px; font-size: 11.5px; }
+#toasts { position: fixed; top: 16px; right: 376px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
+.toast { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 9px 13px;
+  font-size: 12.5px; max-width: 320px; box-shadow: 0 8px 30px rgba(0,0,0,.4); animation: in .25s ease-out; }
+@keyframes in { from { opacity: 0; transform: translateY(-6px); } }
+
+@media (max-width: 1280px) { .app { grid-template-columns: 210px 1fr 320px; } #toasts { right: 336px; } }
+@media (max-width: 960px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; height: auto; min-height: 100%; }
+  nav { border-right: 0; border-bottom: 1px solid var(--line); } #side-agents, nav .sect { display: none; }
+  .nav { display: flex; overflow-x: auto; gap: 4px; } .nav button { width: auto; white-space: nowrap; }
+  aside { border-left: 0; border-top: 1px solid var(--line); height: 70vh; } #toasts { right: 16px; }
+  .cmd { flex-wrap: wrap; } .cmd .nums { margin-left: 0; } .split { grid-template-columns: 1fr; }
+  header, #view { padding-left: 16px; padding-right: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <div class="brand"><div class="logo">J</div><div><b>JARVIS</b><small>Urban Supplied OS</small></div></div>
+    <div class="nav" id="nav"></div>
+    <div class="sect">Agents</div>
+    <div id="side-agents"></div>
+    <div class="sect" style="padding-bottom:16px"><a href="/office" style="color:var(--accent);text-decoration:none">Open office view →</a></div>
+  </nav>
+
+  <main>
+    <header>
+      <div><h1 id="vtitle">Command Center</h1><div class="crumb" id="vsub"></div></div>
+      <div class="right">
+        <span class="chip" id="apchip">0 approvals</span>
+        <span class="chip" id="spend">A$0 / 50</span>
+        <span id="conn-wrap" style="font-size:12px;color:var(--muted)"><span id="conn" class="dot"></span><span id="conn-t">offline</span></span>
+        <span id="clock"></span>
+      </div>
+    </header>
+    <div id="banner"></div>
+    <div id="view"></div>
+  </main>
+
+  <aside>
+    <div class="hd"><div id="orb2" style="width:12px;height:12px;border-radius:50%;background:var(--accent)"></div>
+      <div><b>Talk to JARVIS</b><div id="st">Idle</div></div></div>
+    <div id="chat"></div>
+    <div class="dock">
+      <div class="row">
+        <button id="mic" title="Talk to JARVIS">🎙</button>
+        <textarea id="text" placeholder="Talk or type to JARVIS…"></textarea>
+        <button class="btn" id="send">Send</button>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="handsfree"> Hands-free</label>
+        <label><input type="checkbox" id="speak"> Speak replies</label>
+        <select id="voice" title="JARVIS voice"></select>
+        <button class="btn" id="stop">Stop</button>
+        <button class="btn" id="new">New chat</button>
+      </div>
+    </div>
+  </aside>
+</div>
+<div id="toasts"></div>
+
+<script>window.JARVIS_TOKEN = "__JARVIS_TOKEN__";</script>
+<script src="/jarvis.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = J.esc, hhmm = J.hhmm;
+const STATUS = { idle: "Idle", thinking: "Thinking…", delegating: "Delegating to the team…", listening: "Listening…", speaking: "Speaking…" };
+const PILL = { working: "Working", queued: "Queued", idle: "Ready", done: "Finished" };
+const VIEWS = [
+  ["command", "◎", "Command Center"], ["agents", "⬡", "Agents"], ["tasks", "☰", "Tasks"], ["pipeline", "▦", "Product Pipeline"],
+  ["testing", "⚗", "Product Testing"], ["approvals", "✓", "Approvals"], ["vault", "◈", "Knowledge Vault"], ["costs", "$", "Costs"],
+];
+const SUBS = {
+  command: "What JARVIS and the team are doing right now", agents: "JARVIS delegates; nine specialists do the work",
+  tasks: "Every job and who it was handed to", pipeline: "Products from idea to scale", testing: "Live and finished product tests",
+  approvals: "Nothing consequential happens without you", vault: "Everything JARVIS remembers", costs: "AI and tool spend against the A$50 target",
+};
+const STAGES = ["idea", "researching", "preparing", "ready", "testing", "passed", "failed", "scaling", "archived"];
+const flash = {};
+let view = (location.hash.slice(1) || J.pref("console.view") || "command");
+let chatLoaded = false, current = null, vaultQ = "", vaultC = "", vaultOpen = null;
+
+// ------------------------------------------------------------ navigation
+function go(v) {
+  view = VIEWS.some((x) => x[0] === v) ? v : "command";
+  J.pref("console.view", view);
+  history.replaceState(null, "", "#" + view);
+  renderNav(); renderView();
+}
+function renderNav() {
+  const s = J.state;
+  const counts = s ? { tasks: s.counts.open_tasks, approvals: s.approvals.length, pipeline: s.products.length,
+    testing: s.tests.filter((t) => t.status === "running").length, vault: s.memory.total, agents: s.agents.filter((a) => a.status === "working").length } : {};
+  $("nav").innerHTML = VIEWS.map(([id, ic, name]) => `<button data-v="${id}" class="${id === view ? "on" : ""}">
+    <span>${ic}</span>${name}${counts[id] ? `<span class="n ${id === "approvals" ? "hot" : ""}">${counts[id]}</span>` : ""}</button>`).join("");
+  const [, , title] = VIEWS.find((x) => x[0] === view);
+  $("vtitle").textContent = title; $("vsub").textContent = SUBS[view];
+}
+$("nav").onclick = (e) => { const b = e.target.closest("button"); if (b) go(b.dataset.v); };
+$("apchip").onclick = () => go("approvals");
+$("spend").onclick = () => go("costs");
+$("side-agents").onclick = (e) => { const r = e.target.closest(".sa"); if (r) { go("agents"); setTimeout(() => focusAgent(r.dataset.name), 50); } };
+
+// ------------------------------------------------------------ rendering
+function onState(s) {
+  const ap = s.approvals.length;
+  $("apchip").textContent = `${ap} approval${ap === 1 ? "" : "s"} waiting`;
+  $("apchip").className = "chip" + (ap ? " hot" : "");
+  $("spend").textContent = `A$${s.cost.spent.toFixed(2)} / ${s.cost.budget.toFixed(0)}`;
+  banner(s.jarvis.claude ? "" : "Talking to JARVIS needs the Claude Code CLI (free with your Claude plan). Install it, then restart the dashboard. You can already watch the team.");
+  $("side-agents").innerHTML = s.agents.map((a) => {
+    const st = statusOf(a);
+    return `<div class="sa" data-name="${a.name}"><span class="i">${J.meta(a.name).icon}</span>${esc(a.label)}<span class="pill ${st}">${PILL[st]}</span></div>`;
+  }).join("");
+  if (!chatLoaded) {
+    chatLoaded = true;
+    s.journal.forEach((j) => addMsg(j.role, j.text, j.ts));
+    if (!s.journal.length) addMsg("sys", "Hi, I'm JARVIS. Everything we say is remembered.");
+  }
+  if (J.status === "idle" && s.jarvis.status !== "idle") showStatus(s.jarvis.status, s.jarvis.request);
+  renderNav();
+  if (view !== "vault") renderView();
+}
+const statusOf = (a) => (a.status !== "working" && flash[a.name] > Date.now() ? "done" : a.status);
+
+function renderView() {
+  const s = J.state;
+  if (!s) { $("view").innerHTML = `<div class="empty">Connecting to the brain…</div>`; return; }
+  ({ command: vCommand, agents: vAgents, tasks: vTasks, pipeline: vPipeline, testing: vTesting, approvals: vApprovals, vault: vVault, costs: vCosts })[view](s);
+}
+
+function commandCard(s) {
+  const working = s.agents.filter((a) => a.status === "working").length;
+  const shown = J.shown();
+  return `<div class="card cmd"><div id="orb" class="${shown}"></div>
+    <div class="who"><b>JARVIS</b> <span class="pill ${shown === "idle" ? "" : "working"}">${STATUS[shown] || shown}</span>
+      <div>Lead agent · Claude Code${s.jarvis.request ? " · " + esc(s.jarvis.request) : ""}</div>
+      <div>${working ? `${working} specialist${working === 1 ? "" : "s"} working now` : "Team standing by"}</div></div>
+    <div class="nums"><div class="num"><b>${s.counts.delegations}</b><span>Delegations</span></div>
+      <div class="num"><b>${s.counts.decisions}</b><span>Decisions</span></div>
+      <div class="num"><b>${s.counts.open_tasks}</b><span>Open tasks</span></div>
+      <div class="num"><b>${s.memory.total}</b><span>Memories</span></div></div></div>`;
+}
+
+function agentCard(a) {
+  const m = J.meta(a.name), st = statusOf(a);
+  const feed = a.activity.length ? `<div class="feed">${a.activity.slice(-2).map((l) => `<div>${esc(l)}</div>`).join("")}</div>` : "";
+  return `<div class="agent ${st === "working" ? "working" : ""} ${st === "done" ? "flash" : ""}" data-name="${a.name}" style="--c:${m.color}">
+    <div class="top"><div class="ic">${m.icon}</div><div><div class="nm">${esc(a.label)}</div><div class="ly">${m.layer}</div></div>
+      <span class="pill ${st}">${PILL[st]}</span></div>
+    <div class="ds">${esc(m.blurb || a.role)}</div>
+    <div class="now">${a.now ? "▸ " + esc(a.now) : a.last_done ? `<span style="color:var(--muted)">Last: ${esc(a.last_done.title)}</span>` : ""}</div>${feed}
+    <div class="meta"><span class="mdl">${esc(a.model)}</span><span><b>${a.runs}</b> runs</span><span><b>${a.open}</b> open</span></div></div>`;
+}
+
+function vCommand(s) {
+  const working = s.agents.filter((a) => a.status !== "idle");
+  $("view").innerHTML = commandCard(s) +
+    `<h2>Active now</h2>` + (working.length ? `<div class="grid">${working.map(agentCard).join("")}</div>` : `<div class="empty">No specialist is working. Ask JARVIS for something on the right.</div>`) +
+    `<div class="split"><div><h2>Jobs JARVIS is running</h2><div class="card">${parentTasks(s.tasks)}</div></div>
+      <div><h2>Activity</h2><div class="card">${activity(s.activity.slice(0, 12))}</div></div></div>` +
+    (s.approvals.length ? `<h2>Waiting for you</h2><div class="stack">${s.approvals.map(approvalCard).join("")}</div>` : "");
+}
+function vAgents(s) { $("view").innerHTML = commandCard(s) + `<h2>Agent network</h2><div class="grid">${s.agents.map(agentCard).join("")}</div>`; }
+function focusAgent(name) {
+  const el = document.querySelector(`.agent[data-name="${name}"]`);
+  if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.animate([{ transform: "scale(1.03)" }, { transform: "none" }], 500); }
+}
+
+function parentTasks(tasks) {
+  return tasks.length ? tasks.map((t) => {
+    const n = t.subtasks.length, d = t.subtasks.filter((x) => x.status === "done").length;
+    return `<div class="ev"><b>T${t.id}</b> ${esc(t.title)} <span class="pill ${t.status}">${t.status.replace("_", " ")}</span>
+      ${n ? `<div class="bar"><i style="width:${Math.round(100 * d / n)}%"></i></div>` : ""}
+      <div class="mono">${t.subtasks.map((x) => `${x.status === "done" ? "✓" : x.status === "in_progress" ? "▸" : "·"} ${esc(J.label(x.agent) || "?")}`).join("  ")}</div></div>`;
+  }).join("") : `<div class="empty">No open jobs.</div>`;
+}
+function activity(evts) {
+  return evts.length ? evts.map((e) => `<div class="ev"><time>${hhmm(e.ts)}</time><span class="k">${esc(J.label(e.agent) || "JARVIS")}</span>
+    ${esc(e.kind.replace("status:", ""))} · T${e.task_id} ${esc(e.title)}${e.note ? " — " + esc(e.note) : ""}</div>`).join("") : `<div class="empty">No task activity yet.</div>`;
+}
+
+function vTasks(s) {
+  const rows = s.recent_tasks;
+  $("view").innerHTML = `<h2>Open jobs</h2><div class="card">${parentTasks(s.tasks)}</div><h2>All recent tasks</h2><div class="card">` +
+    (rows.length ? `<table><tr><th>ID</th><th>Task</th><th>Agent</th><th>Product</th><th>Status</th><th>Updated</th></tr>${rows.map((t) =>
+      `<tr><td class="mono">T${t.id}${t.parent_id ? `<br>↳ T${t.parent_id}` : ""}</td><td>${esc(t.title)}${t.summary ? `<div class="mono">${esc(t.summary)}</div>` : ""}</td>
+       <td>${t.agent ? J.meta(t.agent).icon + " " + esc(J.label(t.agent)) : "JARVIS"}</td><td>${esc(t.product || "")}</td>
+       <td><span class="pill ${t.status}">${t.status.replace("_", " ")}</span></td><td class="mono">${esc((t.updated || "").slice(5, 16).replace("T", " "))}</td></tr>`).join("")}</table>`
+      : `<div class="empty">No tasks yet.</div>`) + `</div>`;
+}
+
+function vPipeline(s) {
+  const by = Object.fromEntries(STAGES.map((st) => [st, []]));
+  s.products.forEach((p) => (by[p.stage] ||= []).push(p));
+  const tests = (slug) => s.tests.filter((t) => t.product === slug).length;
+  $("view").innerHTML = s.products.length ? `<div class="kanban">${Object.entries(by).map(([st, ps]) =>
+    `<div class="col"><h3>${st}<span>${ps.length}</span></h3>${ps.map((p) => `<div class="prod"><b>${esc(p.name)}</b>
+      <small>${esc(p.slug)}${tests(p.slug) ? ` · ${tests(p.slug)} test${tests(p.slug) === 1 ? "" : "s"}` : ""}</small>${p.notes ? `<small>${esc(p.notes)}</small>` : ""}</div>`).join("")}</div>`).join("")}</div>`
+    : `<div class="card empty">No products yet. Ask JARVIS to research one, or run <span class="mono">bin/jarvis product add "&lt;name&gt;"</span>.</div>`;
+}
+
+const money = (v) => (v == null ? "–" : "$" + Number(v).toFixed(2));
+const pct = (v) => (v == null ? "–" : (v * 100).toFixed(2) + "%");
+function vTesting(s) {
+  $("view").innerHTML = s.tests.length ? `<div class="stack">${s.tests.map((t) => {
+    const e = t.eval, budget = t.budget_usd || 0;
+    const verdict = e.sufficient ? (t.verdict || "Enough data to judge") : "Insufficient data";
+    return `<div class="card"><div style="display:flex;gap:10px;align-items:center"><b>X${t.id}</b> ${esc(t.product)}
+      <span class="pill ${t.status}">${t.status}</span><span class="pill ${e.sufficient ? "" : "queued"}" style="margin-left:auto">${esc(verdict)}</span></div>
+      <div style="margin-top:6px">${esc(t.hypothesis)}</div>
+      <div class="mono">${t.angle ? "Angle: " + esc(t.angle) + " · " : ""}${t.planned_days || "?"} days · budget ${money(budget)}${t.criteria ? " · " + esc(t.criteria) : ""}</div>
+      ${budget ? `<div class="bar cost"><i style="width:${Math.min(100, Math.round(100 * e.spend / budget))}%"></i></div>` : ""}
+      <div class="metrics"><div>Spend<b>${money(e.spend)}</b></div><div>CPM<b>${money(e.cpm)}</b></div><div>CTR<b>${pct(e.ctr)}</b></div>
+        <div>CPC<b>${money(e.cpc)}</b></div><div>ATC<b>${e.atc}</b></div><div>Purchases<b>${e.purchases}</b></div>
+        <div>CPA<b>${money(e.cpa)}</b></div><div>ROAS<b>${e.roas == null ? "–" : e.roas.toFixed(2)}</b></div><div>CVR<b>${pct(e.cvr)}</b></div></div>
+      ${t.lesson ? `<div style="margin-top:8px" class="mono">Lesson: ${esc(t.lesson)}</div>` : ""}</div>`;
+  }).join("")}</div>` : `<div class="card empty">No product tests recorded yet.</div>`;
+}
+
+function approvalCard(a) {
+  return `<div class="card appr"><div class="row"><b>A${a.id}</b><span class="pill pending">${esc(a.kind)}</span>
+    ${a.task_id ? `<span class="mono">T${a.task_id}</span>` : ""}<span class="mono" style="margin-left:auto">${esc((a.ts || "").slice(0, 16).replace("T", " "))}</span></div>
+    <div style="margin:8px 0">${esc(a.summary)}${a.amount ? ` — <b>${a.amount} ${esc(a.currency || "")}</b>` : ""}</div>
+    ${a.detail ? `<div class="mono" style="margin-bottom:8px">${esc(a.detail)}</div>` : ""}
+    <div class="row"><button class="btn ok" data-ap="${a.id}" data-ok="1">Approve</button><button class="btn no" data-ap="${a.id}" data-ok="0">Reject</button>
+    <span class="mono">JARVIS only acts after you approve.</span></div></div>`;
+}
+function vApprovals(s) {
+  $("view").innerHTML = s.approvals.length ? `<div class="stack">${s.approvals.map(approvalCard).join("")}</div>`
+    : `<div class="card empty">Nothing is waiting for your approval.</div>`;
+}
+$("view").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-ap]");
+  if (b) {
+    const ok = b.dataset.ok === "1";
+    if (!confirm(`${ok ? "Approve" : "Reject"} A${b.dataset.ap}?`)) return;
+    try { await J.decide(b.dataset.ap, ok); toast(`A${b.dataset.ap} ${ok ? "approved" : "rejected"}. Tell JARVIS to go ahead.`, ok ? "var(--ok)" : "var(--bad)"); }
+    catch (err) { toast(err.message, "var(--bad)"); }
+    return;
+  }
+  const m = e.target.closest(".mem");
+  if (m) { vaultOpen = vaultOpen === m.dataset.id ? null : m.dataset.id; vVault(J.state); return; }
+  const a = e.target.closest(".agent");
+  if (a && view === "command") { go("agents"); setTimeout(() => focusAgent(a.dataset.name), 50); }
+});
+
+async function vVault(s) {
+  if (!$("vq")) {
+    const cats = Object.keys(s.memory.by_category);
+    $("view").innerHTML = `<div class="search"><input type="search" id="vq" placeholder="Search everything JARVIS knows…" value="${esc(vaultQ)}">
+      <select id="vc"><option value="">All categories</option>${cats.map((c) => `<option ${c === vaultC ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+      <div class="mono" id="vstat" style="margin-bottom:10px"></div><div class="card" style="padding:0" id="vlist"></div>`;
+    let t = null;
+    $("vq").oninput = () => { clearTimeout(t); t = setTimeout(() => { vaultQ = $("vq").value; vVault(J.state); }, 250); };
+    $("vc").onchange = () => { vaultC = $("vc").value; vVault(J.state); };
+  }
+  $("vstat").textContent = `${s.memory.total} memories · ${s.memory.needs_review} need review · ` +
+    Object.entries(s.memory.by_category).map(([c, n]) => `${c} ${n}`).join(" · ");
+  const rows = await J.memory(vaultQ, vaultC);
+  let open = null;
+  if (vaultOpen) open = await J.memoryEntry(vaultOpen);
+  $("vlist").innerHTML = rows.length ? rows.map((m) => `<div class="mem" data-id="${esc(m.id)}">
+    <div class="t">${esc(m.title)}</div>
+    <div class="s"><span class="tag ${esc(m.provenance)}">${esc(m.provenance)}</span><span class="tag">${esc(m.category)}</span>${m.product ? `<span class="tag">${esc(m.product)}</span>` : ""}
+      <span class="mono">${esc(m.id)}</span>${m.status !== "active" ? ` <span class="pill queued">${esc(m.status)}</span>` : ""}</div>
+    ${m.snippet ? `<div class="s">${esc(m.snippet)}</div>` : ""}
+    ${open && m.id === vaultOpen ? `<pre class="body">${esc(open.body || open.error || "")}</pre><div class="mono">${esc(open.path || "")}${open.meta?.source ? " · source: " + esc(open.meta.source) : ""}</div>` : ""}</div>`).join("")
+    : `<div class="empty" style="padding:14px">Nothing matches.</div>`;
+}
+
+function vCosts(s) {
+  const c = s.cost, p = c.budget ? Math.min(100, Math.round(100 * c.spent / c.budget)) : 0;
+  $("view").innerHTML = `<div class="card"><div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:26px">A$${c.spent.toFixed(2)}</b>
+    <span class="mono">of A$${c.budget.toFixed(2)} this month (${p}%)</span></div><div class="bar cost"><i style="width:${p}%"></i></div>
+    <div class="mono" style="margin-top:8px">Claude Code runs on your existing subscription; voice runs in the browser for free. Only extra paid APIs are counted here.</div></div>
+    <h2>By service this month</h2><div class="card">${c.by_service.length ? `<table><tr><th>Service</th><th>Calls</th><th>A$</th></tr>${c.by_service.map((r) =>
+      `<tr><td>${esc(r.service)}</td><td>${r.n}</td><td>${r.aud.toFixed(2)}</td></tr>`).join("")}</table>` : `<div class="empty">No paid AI or API spend logged this month.</div>`}</div>`;
+}
+
+// ------------------------------------------------------------ conversation
+function addMsg(role, text, ts) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.innerHTML = fmt(text) + (ts ? `<span class="t">${hhmm(ts)}</span>` : "");
+  $("chat").appendChild(el);
+  $("chat").scrollTop = $("chat").scrollHeight;
+  return el;
+}
+function fmt(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>"); }
+function showStatus(st, req) {
+  const shown = J.shown ? J.shown() : st;
+  $("st").textContent = (STATUS[shown] || shown) + (req ? " · " + req : "");
+  $("orb2").style.background = { listening: "var(--ok)", speaking: "var(--accent2)", idle: "var(--muted)" }[shown] || "var(--accent)";
+  $("mic").className = J.listening ? "on" : "";
+  const orb = $("orb"); if (orb) orb.className = shown;
+}
+function banner(t) { const b = $("banner"); b.textContent = t; b.style.display = t ? "block" : "none"; }
+function toast(text, color) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = text; if (color) el.style.borderLeftColor = color;
+  $("toasts").appendChild(el); setTimeout(() => el.remove(), 5000);
+  while ($("toasts").children.length > 4) $("toasts").firstChild.remove();
+}
+
+J.on("state", onState)
+  .on("status", (e) => { showStatus(e.status, e.request); if (e.status === "thinking" && e.request) current = null; })
+  .on("owner", (e) => { addMsg("owner", e.text); current = null; })
+  .on("say", (e) => { current = addMsg("jarvis", e.text); })
+  .on("interim", (e) => { $("text").value = e.text; })
+  .on("error", (e) => { addMsg("err", e.text); toast(e.text, "var(--bad)"); })
+  .on("dispatch", (e) => {
+    addMsg("sys dispatch", `→ ${J.label(e.agent)}: ${e.description || "working"}`);
+    toast(`${J.meta(e.agent).icon} ${J.label(e.agent)} started: ${e.description || "working"}`, J.meta(e.agent).color);
+    J.refresh();
+  })
+  .on("agent_activity", (e) => {
+    const a = J.state?.agents.find((x) => x.name === e.agent);
+    if (a) { a.activity = [...a.activity, e.line].slice(-4); if (view === "agents" || view === "command") renderView(); }
+  })
+  .on("agent_done", (e) => {
+    flash[e.agent] = Date.now() + 8000;
+    addMsg("sys", `✓ ${J.label(e.agent)} finished`);
+    toast(`✓ ${J.label(e.agent)} finished`, "var(--ok)");
+    J.refresh(); setTimeout(J.refresh, 8100);
+  })
+  .on("jarvis_tool", (e) => { $("st").textContent = "Working · " + e.summary; })
+  .on("reset", () => { $("chat").innerHTML = ""; addMsg("sys", "New conversation started. Memory and history are kept."); })
+  .on("connection", (e) => { $("conn").className = "dot" + (e.live ? " on" : ""); $("conn-t").textContent = e.live ? "live" : "reconnecting"; })
+  .on("voices", fillVoices);
+
+function fillVoices() {
+  const vs = J.voices(), best = J.bestVoice();
+  $("voice").innerHTML = vs.map((v) => `<option ${best && v.name === best.name ? "selected" : ""}>${esc(v.name)}</option>`).join("") || "<option>Default voice</option>";
+}
+$("send").onclick = () => { J.send($("text").value); $("text").value = ""; };
+$("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").onclick(); } };
+$("mic").onclick = () => J.listen();
+$("stop").onclick = () => J.stop();
+$("new").onclick = () => J.newConversation();
+$("handsfree").checked = J.settings.handsfree; $("handsfree").onchange = (e) => (J.settings.handsfree = e.target.checked);
+$("speak").checked = J.settings.speak; $("speak").onchange = (e) => (J.settings.speak = e.target.checked);
+$("voice").onchange = (e) => (J.settings.voice = e.target.value);
+document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); } });
+
+function tick() { $("clock").textContent = new Date().toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+setInterval(tick, 1000); tick();
+fillVoices(); renderNav(); renderView();
+</script>
+</body>
+</html>

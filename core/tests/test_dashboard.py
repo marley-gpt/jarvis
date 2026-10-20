@@ -62,6 +62,47 @@ class DashboardTest(BrainTest):
         self.assertEqual(pr["now"], "Research posture corrector")
         self.assertTrue(state["jarvis"]["claude"])
 
+    def test_prototype_pages_and_shared_client(self):
+        for path in ("/console", "/office", "/classic"):
+            status, html = self.request("GET", path, token=False)
+            self.assertEqual(status, 200, path)
+            self.assertIn(self.server.token.encode(), html)
+        status, js = self.request("GET", "/jarvis.js", token=False)
+        self.assertEqual(status, 200)
+        self.assertIn(b"window.J = J", js)
+        self.assertEqual(self.request("GET", "/nope", token=False)[0], 404)
+
+    def test_state_has_console_sections(self):
+        records.product_add(self.conn, "Posture Corrector")
+        parent = records.task_add(self.conn, "Launch posture corrector")
+        records.task_add(self.conn, "Research it", agent="product-research", parent=parent)
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertEqual(state["counts"]["delegations"], 1)
+        self.assertEqual(state["counts"]["open_tasks"], 2)
+        self.assertEqual([p["slug"] for p in state["products"]], ["posture-corrector"])
+        self.assertIn("by_service", state["cost"])
+        pr = next(a for a in state["agents"] if a["name"] == "product-research")
+        self.assertEqual((pr["open"], pr["runs"]), (1, 0))
+
+    def test_memory_search_and_entry(self):
+        rows = json.loads(self.request("GET", "/api/memory?q=approval", token=False)[1])
+        self.assertTrue(rows)
+        self.assertIn("snippet", rows[0])
+        everything = json.loads(self.request("GET", "/api/memory", token=False)[1])
+        self.assertGreaterEqual(len(everything), len(rows))
+        status, raw = self.request("GET", f"/api/memory/{rows[0]['id']}", token=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["meta"]["id"], rows[0]["id"])
+        self.assertEqual(self.request("GET", "/api/memory/M-NOPE", token=False)[0], 404)
+
+    def test_approval_from_dashboard(self):
+        aid = records.approval_request(self.conn, "spend", "Test budget A$100")
+        self.assertEqual(self.request("POST", "/api/approval", {"id": aid, "approve": True}, token=False)[0], 403)
+        status, raw = self.request("POST", "/api/approval", {"id": f"A{aid}", "approve": True})
+        self.assertEqual((status, json.loads(raw)["status"]), (200, "approved"))
+        self.assertEqual(self.request("POST", "/api/approval", {"id": aid, "approve": False})[0], 400)
+        self.assertEqual(self.request("POST", "/api/approval", {"id": 999, "approve": True})[0], 400)
+
     def test_requests_need_token_and_loopback_host(self):
         self.assertEqual(self.request("POST", "/api/chat", {"text": "hi"}, token=False)[0], 403)
         self.assertEqual(self.request("GET", "/api/state", host="evil.example:80")[0], 403)

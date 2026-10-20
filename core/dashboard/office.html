@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS Office</title>
+<style>
+:root {
+  --bg: #04070e; --panel: rgba(12,19,34,.88); --line: #1d2a44; --text: #e6ecf7; --muted: #8394b4;
+  --accent: #38bdf8; --accent2: #818cf8; --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+button { font: inherit; color: inherit; cursor: pointer; }
+#world { position: fixed; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none;
+  background: radial-gradient(900px 600px at 50% 45%, #0b1630 0%, var(--bg) 70%); }
+#world.drag { cursor: grabbing; }
+.room { cursor: pointer; }
+.room:hover .floor-tint { fill-opacity: .3; }
+.who { animation: bob 2.6s ease-in-out infinite; transform-box: fill-box; }
+.room.working .who { animation-duration: .55s; }
+.room.working .screen { animation: flick 1.4s steps(2) infinite; }
+.room.working .ring { animation: ring 1.6s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-2px); } }
+@keyframes flick { 50% { opacity: .55; } }
+@keyframes ring { 50% { stroke-opacity: .25; } }
+.core { animation: core 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.busy .core { animation-duration: .9s; }
+@keyframes core { 50% { transform: scale(1.06); opacity: .85; } }
+.beam { stroke-dasharray: 10 12; animation: beam 2.2s linear forwards; }
+@keyframes beam { from { stroke-dashoffset: 260; } 80% { opacity: 1; } to { stroke-dashoffset: 0; opacity: 0; } }
+.road-line { stroke-dasharray: 8 10; animation: flow 3s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -36; } }
+
+.hud { position: fixed; z-index: 5; }
+.glass { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(8px); }
+#brand { top: 16px; left: 16px; padding: 10px 14px; display: flex; gap: 10px; align-items: center; }
+#brand .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04101f; }
+#brand b { letter-spacing: .22em; font-size: 13px; display: block; }
+#brand small { color: var(--muted); font-size: 11px; }
+#brand a { color: var(--accent); font-size: 11.5px; text-decoration: none; margin-left: 8px; }
+#top { top: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#speaker { width: 62px; height: 62px; border-radius: 50%; border: 0; font-size: 24px; color: #04101f;
+  background: radial-gradient(circle at 35% 30%, #a5e8ff, var(--accent) 45%, #1e3a8a 100%); box-shadow: 0 0 26px rgba(56,189,248,.45); transition: transform .2s; }
+#speaker:hover { transform: scale(1.05); }
+#speaker.thinking, #speaker.delegating { animation: pulse 1.1s infinite; }
+#speaker.listening { background: radial-gradient(circle at 35% 30%, #d1fae5, var(--ok) 45%, #065f46 100%); animation: pulse .8s infinite; }
+#speaker.speaking { background: radial-gradient(circle at 35% 30%, #e0e7ff, var(--accent2) 45%, #312e81 100%); animation: pulse .5s infinite; }
+@keyframes pulse { 50% { transform: scale(1.08); box-shadow: 0 0 44px rgba(56,189,248,.55); } }
+#status { font-size: 12px; color: var(--muted); padding: 3px 12px; text-align: center; max-width: 420px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-right: 5px; }
+#status .dot.on { background: var(--ok); }
+#toggles { display: flex; gap: 6px; font-size: 11px; }
+#toggles button { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 2px 9px; color: var(--muted); }
+#toggles button.on { color: var(--accent); border-color: rgba(56,189,248,.5); }
+#toasts { top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; width: 300px; }
+.toast { padding: 9px 13px; font-size: 12.5px; border-left: 3px solid var(--accent); animation: in .25s ease-out; }
+.toast b { display: block; font-size: 12px; }
+@keyframes in { from { opacity: 0; transform: translateX(10px); } }
+#apbtn { display: none; border-color: rgba(251,191,36,.5); color: var(--warn); padding: 8px 13px; font-size: 12.5px; text-align: left; }
+#captions { bottom: 18px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100% - 32px)); padding: 12px 16px; }
+#cap { font-size: 17px; min-height: 1.5em; line-height: 1.5; max-height: 4.5em; overflow: hidden; }
+#cap .w { color: #6e7f9f; transition: color .1s; } #cap .w.said { color: var(--text); }
+#cap .w.now { color: #04101f; background: var(--accent); border-radius: 4px; box-shadow: 0 0 10px rgba(56,189,248,.6); }
+#cap .owner { color: var(--muted); font-style: italic; }
+#ask { display: flex; gap: 8px; margin-top: 8px; }
+#ask input { flex: 1; background: rgba(16,26,45,.9); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 8px 11px; font: inherit; font-size: 13px; }
+#ask button { background: rgba(16,26,45,.9); border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; font-size: 12.5px; }
+#models { bottom: 18px; left: 16px; display: flex; flex-direction: column; gap: 6px; }
+.mchip { padding: 5px 11px; font-size: 11.5px; display: flex; gap: 7px; align-items: center; }
+.mchip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+#mini { bottom: 18px; right: 16px; padding: 8px; }
+#mini svg { width: 190px; height: 120px; display: block; cursor: crosshair; }
+#mini .zoom { display: flex; gap: 6px; margin-top: 6px; }
+#mini .zoom button { flex: 1; background: rgba(16,26,45,.9); border: 1px solid var(--line); border-radius: 7px; padding: 2px 0; }
+#drawer { top: 0; right: 0; bottom: 0; width: 360px; border-radius: 0; border-width: 0 0 0 1px; padding: 20px; overflow-y: auto;
+  transform: translateX(100%); transition: transform .25s; z-index: 8; }
+#drawer.open { transform: none; }
+#drawer h3 { margin: 0; font-size: 18px; } #drawer .ly { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+#drawer h4 { margin: 18px 0 6px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+#drawer .x { position: absolute; top: 14px; right: 14px; background: none; border: 0; font-size: 20px; color: var(--muted); }
+.li { font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid #142039; }
+.mono { font: 11.5px Consolas, ui-monospace, monospace; color: var(--muted); }
+.ap { padding: 8px 0; border-bottom: 1px solid #142039; font-size: 12.5px; }
+.ap button { background: rgba(16,26,45,.9); border: 1px solid var(--line); border-radius: 7px; padding: 3px 10px; font-size: 12px; margin: 6px 6px 0 0; }
+.ap .ok { color: var(--ok); border-color: rgba(52,211,153,.5); } .ap .no { color: var(--bad); border-color: rgba(248,113,113,.5); }
+@media (max-width: 760px) {
+  #mini, #models { display: none; } #toasts { width: auto; left: 16px; top: 120px; } #brand { padding: 8px 10px; }
+  #brand small, #brand a { display: none; } #captions { bottom: 12px; } #cap { font-size: 15px; } #drawer { width: 100%; }
+}
+</style>
+</head>
+<body>
+<svg id="world" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="g-core" cx="40%" cy="35%"><stop offset="0" stop-color="#e0f7ff"/><stop offset=".35" stop-color="#38bdf8"/><stop offset="1" stop-color="#1e3a8a"/></radialGradient>
+    <radialGradient id="g-halo"><stop offset="0" stop-color="#38bdf8" stop-opacity=".55"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <pattern id="tiles" width="64" height="32" patternUnits="userSpaceOnUse"><path d="M0 16 L32 0 L64 16 L32 32 Z" fill="none" stroke="#12203a" stroke-width="1"/></pattern>
+  </defs>
+  <g id="scene"><g id="ground"></g><g id="roads"></g><g id="beams"></g><g id="rooms"></g></g>
+</svg>
+
+<div id="brand" class="hud glass"><div class="logo">J</div><div><b>JARVIS</b><small>Urban Supplied HQ</small></div><a href="/console">Console →</a></div>
+<div id="top" class="hud">
+  <button id="speaker" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
+  <div id="status" class="glass"><span class="dot"></span><span id="st">Connecting…</span></div>
+  <div id="toggles"><button id="t-speak">🔊 Voice</button><button id="t-hands">Hands-free</button><button id="t-stop">Stop</button></div>
+</div>
+<div id="toasts" class="hud"><button id="apbtn" class="glass"></button></div>
+<div id="models" class="hud"></div>
+<div id="mini" class="hud glass">
+  <svg id="minimap" xmlns="http://www.w3.org/2000/svg"><use href="#scene"/><rect id="vp" fill="rgba(56,189,248,.08)" stroke="#38bdf8" stroke-width="12"/></svg>
+  <div class="zoom"><button id="z-in">+</button><button id="z-out">−</button><button id="z-fit">⤢</button></div>
+</div>
+<div id="captions" class="hud glass">
+  <div id="cap"><span class="owner">Tap the speaker and talk to JARVIS, or type below.</span></div>
+  <form id="ask"><input id="text" placeholder="Type to JARVIS…" autocomplete="off"><button>Send</button></form>
+</div>
+<div id="drawer" class="hud glass"><button class="x" id="dx">×</button><div id="dbody"></div></div>
+
+<script>window.JARVIS_TOKEN = "__JARVIS_TOKEN__";</script>
+<script src="/jarvis.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = J.esc;
+const NS = "http://www.w3.org/2000/svg";
+const TW = 32, TH = 16, RING = 13.5, HALF = 3.2, WALL = 62;
+const STATUS = { idle: "Idle", thinking: "Thinking…", delegating: "Delegating to the team…", listening: "Listening…", speaking: "Speaking…" };
+const PILL = { working: "Working", queued: "Queued", idle: "Ready", done: "Finished" };
+const flash = {};
+let selected = null;
+
+// ------------------------------------------------------------ isometric helpers
+const P = (gx, gy, z = 0) => [(gx - gy) * TW, (gx + gy) * TH - z];
+const pts = (list) => list.map((p) => p.join(",")).join(" ");
+const poly = (list, fill, extra = "") => `<polygon points="${pts(list)}" fill="${fill}" ${extra}/>`;
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(Math.min(255, Math.max(0, v * f))));
+  return `rgb(${c.join(",")})`;
+}
+function box(gx, gy, w, d, h, color, z = 0) {
+  const top = [P(gx, gy, z + h), P(gx + w, gy, z + h), P(gx + w, gy + d, z + h), P(gx, gy + d, z + h)];
+  const left = [P(gx, gy + d, z), P(gx + w, gy + d, z), P(gx + w, gy + d, z + h), P(gx, gy + d, z + h)];
+  const right = [P(gx + w, gy, z), P(gx + w, gy + d, z), P(gx + w, gy + d, z + h), P(gx + w, gy, z + h)];
+  return poly(left, shade(color, .55)) + poly(right, shade(color, .75)) + poly(top, color);
+}
+function layout(agents) {
+  return agents.map((a, i) => {
+    const ang = (225 + i * (360 / agents.length)) * Math.PI / 180;
+    return { a, cx: RING * Math.cos(ang), cy: RING * Math.sin(ang) };
+  });
+}
+const statusOf = (a) => (a.status !== "working" && flash[a.name] > Date.now() ? "done" : a.status);
+
+// ------------------------------------------------------------ world
+function drawGround() {
+  const R = RING + HALF + 5;
+  $("ground").innerHTML = poly([P(-R, -R), P(R, -R), P(R, R), P(-R, R)], "url(#tiles)", 'stroke="#13213c"') +
+    poly([P(-3, -3), P(3, -3), P(3, 3), P(-3, 3)], "#0a1730", 'stroke="#1e3a66" stroke-width="2"');
+}
+
+function drawRoads(rooms) {
+  $("roads").innerHTML = rooms.map(({ a, cx, cy }) => {
+    const [x1, y1] = P(0, 0), [x2, y2] = P(cx, cy), c = J.meta(a.name).color;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#101b31" stroke-width="22" stroke-linecap="round"/>
+      <line class="road-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-opacity="${a.status === "working" ? .8 : .18}" stroke-width="2"/>`;
+  }).join("");
+}
+
+function roomSvg({ a, cx, cy }) {
+  const m = J.meta(a.name), c = m.color, st = statusOf(a);
+  const x0 = cx - HALF, y0 = cy - HALF, x1 = cx + HALF, y1 = cy + HALF;
+  const floor = [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
+  const wallL = [P(x0, y0), P(x0, y1), P(x0, y1, WALL), P(x0, y0, WALL)];
+  const wallR = [P(x0, y0), P(x1, y0), P(x1, y0, WALL), P(x0, y0, WALL)];
+  const working = st === "working";
+  // character sits behind the desk, facing the screen
+  const [hx, hy] = P(cx - .3, cy - .9, 0);
+  const person = `<g class="who"><ellipse cx="${hx}" cy="${hy - 2}" rx="10" ry="4" fill="#000" opacity=".35"/>
+    <rect x="${hx - 8}" y="${hy - 30}" width="16" height="22" rx="7" fill="${c}"/>
+    <circle cx="${hx}" cy="${hy - 38}" r="7.5" fill="#f1d3b3"/><path d="M${hx - 7.5} ${hy - 40} a7.5 7.5 0 0 1 15 0 z" fill="${shade(c, .45)}"/></g>`;
+  const [sx, sy] = P(cx + .3, cy + .1, 30);
+  const screen = `<rect class="screen" x="${sx - 13}" y="${sy - 12}" width="26" height="15" rx="2" fill="${working ? c : "#1c2a44"}" ${working ? 'filter="url(#glow)"' : ""}/>
+    <rect x="${sx - 2}" y="${sy + 3}" width="4" height="5" fill="#2a3a58"/>`;
+  const bubble = st === "queued" ? `<g transform="translate(${hx + 12},${hy - 62})"><rect x="-9" y="-11" width="18" height="16" rx="5" fill="#fbbf24"/><text y="2" text-anchor="middle" font-size="12" font-weight="700" fill="#1a1205">!</text></g>`
+    : working ? `<g transform="translate(${hx + 14},${hy - 62})"><rect x="-15" y="-10" width="30" height="14" rx="7" fill="#0b1426" stroke="${c}"/>${[0, 1, 2].map((i) =>
+      `<circle cx="${-7 + i * 7}" cy="-3" r="2" fill="${c}"><animate attributeName="opacity" values=".2;1;.2" dur="1s" begin="${i * .2}s" repeatCount="indefinite"/></circle>`).join("")}</g>`
+    : st === "done" ? `<g transform="translate(${hx + 12},${hy - 62})"><circle r="9" fill="#34d399"/><text y="4" text-anchor="middle" font-size="12" font-weight="700" fill="#03140c">✓</text></g>` : "";
+  const [lx, ly] = P(x0, y0, WALL + 34);
+  const dotc = { working: c, queued: "#fbbf24", done: "#34d399", idle: "#56637d" }[st];
+  return `<g class="room ${st}" data-name="${a.name}">
+    ${poly(floor, "#0d1628")}${poly(floor, c, 'class="floor-tint" fill-opacity=".14"')}
+    ${poly(wallL, shade(c, .3), 'fill-opacity=".9"')}${poly(wallR, shade(c, .42), 'fill-opacity=".9"')}
+    ${poly([P(x0, y0, WALL), P(x0, y1, WALL), P(x0, y1, WALL + 4), P(x0, y0, WALL + 4)], shade(c, .8))}
+    ${poly([P(x0, y0, WALL), P(x1, y0, WALL), P(x1, y0, WALL + 4), P(x0, y0, WALL + 4)], shade(c, .9))}
+    ${box(x0 + .25, y0 + 2.2, .9, 2.4, 40, "#24324d")}
+    ${box(x0 + 3.6, y0 + .25, 2.2, .7, 26, "#2b3a57")}
+    ${person}
+    ${box(cx - .9, cy - .2, 2.4, 1.1, 16, "#3a4a68")}${screen}
+    ${box(x1 - 1, y1 - 1, .7, .7, 12, "#3b2f24")}<circle cx="${P(x1 - .65, y1 - .65, 26)[0]}" cy="${P(x1 - .65, y1 - .65, 26)[1]}" r="9" fill="#22c55e" fill-opacity=".8"/>
+    ${poly(floor, "none", `class="ring" stroke="${working ? c : "#24324d"}" stroke-width="${working ? 3 : 1.5}" ${working ? 'filter="url(#glow)"' : ""}`)}
+    ${bubble}
+    <g transform="translate(${lx},${ly})">
+      <rect x="-82" y="-26" width="164" height="40" rx="9" fill="#0b1324" fill-opacity=".92" stroke="${working ? c : "#22314f"}"/>
+      <text y="-8" text-anchor="middle" font-size="13" font-weight="600" fill="#e6ecf7">${m.icon} ${esc(a.label)}</text>
+      <circle cx="-44" cy="6" r="3.5" fill="${dotc}"/>
+      <text x="-36" y="9.5" font-size="10.5" fill="#8394b4">1 agent · ${PILL[st]}${a.open ? ` · ${a.open} open` : ""}</text>
+    </g></g>`;
+}
+
+function drawBrain(s) {
+  const [x, y] = P(0, 0);
+  const busy = J.shown() !== "idle";
+  return `<g class="${busy ? "busy" : ""}" id="brain" style="cursor:pointer">
+    <ellipse cx="${x}" cy="${y}" rx="130" ry="65" fill="url(#g-halo)"/>
+    ${box(-1.6, -1.6, 3.2, 3.2, 14, "#1b2c4d")}
+    <circle class="core" cx="${x}" cy="${y - 52}" r="34" fill="url(#g-core)" filter="url(#glow)"/>
+    <ellipse cx="${x}" cy="${y - 52}" rx="48" ry="14" fill="none" stroke="#7dd3fc" stroke-opacity=".5" stroke-width="1.5">
+      <animateTransform attributeName="transform" type="rotate" from="0 ${x} ${y - 52}" to="360 ${x} ${y - 52}" dur="${busy ? 3 : 12}s" repeatCount="indefinite"/></ellipse>
+    <text x="${x}" y="${y + 40}" text-anchor="middle" font-size="15" font-weight="700" letter-spacing="3" fill="#e0f2fe">THE BRAIN</text>
+    <text x="${x}" y="${y + 57}" text-anchor="middle" font-size="11" fill="#8394b4">${s.memory.total} notes · shared memory${s.memory.needs_review ? ` · ${s.memory.needs_review} to review` : ""}</text>
+  </g>`;
+}
+
+function render(s) {
+  const rooms = layout(s.agents);
+  drawRoads(rooms);
+  const items = rooms.map((r) => ({ depth: r.cx + r.cy, svg: roomSvg(r) }));
+  items.push({ depth: 0, svg: drawBrain(s) });
+  $("rooms").innerHTML = items.sort((p, q) => p.depth - q.depth).map((i) => i.svg).join("");
+  // models
+  const models = {};
+  s.agents.forEach((a) => (models[a.model] = (models[a.model] || 0) + 1));
+  $("models").innerHTML = `<div class="mchip glass"><i style="background:var(--accent)"></i>JARVIS · Claude Code</div>` +
+    Object.entries(models).map(([m, n]) => `<div class="mchip glass"><i style="background:${{ haiku: "#a3e635", sonnet: "#f59e0b", opus: "#a78bfa" }[m] || "#94a3b8"}"></i>${esc(m)} × ${n}</div>`).join("") +
+    `<div class="mchip glass mono">A$${s.cost.spent.toFixed(2)} / ${s.cost.budget.toFixed(0)} this month</div>`;
+  const ap = s.approvals.length;
+  $("apbtn").style.display = ap ? "block" : "none";
+  $("apbtn").textContent = `⚠ ${ap} approval${ap === 1 ? "" : "s"} waiting for you`;
+  if (selected) openDrawer(selected, false);
+  if (!s.jarvis.claude) setCap(null, "Talking needs the Claude Code CLI. Install it and restart the dashboard; you can already watch the team.");
+}
+
+// ------------------------------------------------------------ camera
+const FIT = { x: -900, y: -660, w: 1800, h: 1180 };  // extra headroom so the top HUD clears the top room
+let vb = { ...FIT };
+function applyView() {
+  const W = innerWidth, H = innerHeight, k = Math.max(vb.w / W, vb.h / H);
+  const w = W * k, h = H * k, x = vb.x + (vb.w - w) / 2, y = vb.y + (vb.h - h) / 2;
+  $("world").setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+  $("minimap").setAttribute("viewBox", `${FIT.x - 100} ${FIT.y - 60} ${FIT.w + 200} ${FIT.h + 120}`);
+  Object.entries({ x, y, width: w, height: h }).forEach(([k2, v]) => $("vp").setAttribute(k2, v));
+}
+function zoom(f, cx, cy) {
+  const nw = Math.min(4000, Math.max(300, vb.w * f)), r = nw / vb.w;
+  cx ??= vb.x + vb.w / 2; cy ??= vb.y + vb.h / 2;
+  vb = { x: cx - (cx - vb.x) * r, y: cy - (cy - vb.y) * r, w: nw, h: vb.h * r };
+  applyView();
+}
+function toWorld(ev) {
+  const pt = $("world").createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+  return pt.matrixTransform($("world").getScreenCTM().inverse());
+}
+$("world").addEventListener("wheel", (e) => { e.preventDefault(); const p = toWorld(e); zoom(e.deltaY > 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, { passive: false });
+let drag = null, moved = 0;
+$("world").addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, vb: { ...vb } }; moved = 0; });
+addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const k = $("world").viewBox.baseVal.width / innerWidth, dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+  if (moved > 4) { $("world").classList.add("drag"); vb = { ...drag.vb, x: drag.vb.x - dx * k, y: drag.vb.y - dy * k }; applyView(); }
+});
+addEventListener("pointerup", () => { drag = null; $("world").classList.remove("drag"); });
+$("world").addEventListener("click", (e) => {
+  if (moved > 4) return;
+  const r = e.target.closest(".room");
+  if (r) return openDrawer(r.dataset.name);
+  if (e.target.closest("#brain")) return openDrawer("__brain");
+  closeDrawer();
+});
+$("minimap").addEventListener("click", (e) => {
+  const pt = $("minimap").createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const p = pt.matrixTransform($("minimap").getScreenCTM().inverse());
+  vb = { ...vb, x: p.x - vb.w / 2, y: p.y - vb.h / 2 }; applyView();
+});
+$("z-in").onclick = () => zoom(1 / 1.3); $("z-out").onclick = () => zoom(1.3); $("z-fit").onclick = () => { vb = { ...FIT }; applyView(); };
+addEventListener("resize", applyView);
+
+// ------------------------------------------------------------ drawer
+function openDrawer(name, show = true) {
+  const s = J.state; if (!s) return;
+  selected = name;
+  if (name === "__brain") {
+    $("dbody").innerHTML = `<div class="ly" style="color:var(--accent)">Shared memory</div><h3>The Brain</h3>
+      <div class="mono">${s.memory.total} notes · ${esc(Object.entries(s.memory.by_category).map(([c, n]) => `${c} ${n}`).join(" · "))}</div>
+      <h4>Recently learned</h4>${s.memory.recent.map((m) => `<div class="li">${esc(m.title)} <span class="mono">${esc(m.id)}</span></div>`).join("") || `<div class="mono">Nothing yet.</div>`}
+      <h4>Jobs JARVIS is running</h4>${s.tasks.map((t) => `<div class="li"><b>T${t.id}</b> ${esc(t.title)}<div class="mono">${t.subtasks.map((x) =>
+        `${x.status === "done" ? "✓" : x.status === "in_progress" ? "▸" : "·"} ${esc(J.label(x.agent) || "?")}`).join("  ")}</div></div>`).join("") || `<div class="mono">No open jobs.</div>`}
+      <h4>Waiting for your approval</h4>${approvals(s)}
+      <h4>Recent activity</h4>${s.activity.slice(0, 10).map((e) => `<div class="li"><span class="mono">${J.hhmm(e.ts)}</span> ${esc(J.label(e.agent) || "JARVIS")} · ${esc(e.kind.replace("status:", ""))} · T${e.task_id} ${esc(e.title)}</div>`).join("") || `<div class="mono">No task activity yet.</div>`}`;
+  } else {
+    const a = s.agents.find((x) => x.name === name); if (!a) return closeDrawer();
+    const m = J.meta(a.name), st = statusOf(a);
+    $("dbody").innerHTML = `<div class="ly" style="color:${m.color}">${m.layer}</div><h3>${m.icon} ${esc(a.label)}</h3>
+      <div class="mono">${esc(a.model)} · ${a.runs} runs · ${a.open} open · ${PILL[st]}</div>
+      <p style="color:var(--muted);font-size:13px">${esc(m.blurb || a.role)}</p>
+      ${a.now ? `<h4>Now</h4><div class="li">▸ ${esc(a.now)}</div>` : ""}
+      <h4>Live feed</h4>${a.activity.map((l) => `<div class="li mono">${esc(l)}</div>`).join("") || `<div class="mono">Quiet.</div>`}
+      <h4>Open tasks</h4>${a.tasks.map((t) => `<div class="li"><b>T${t.id}</b> ${esc(t.title)} <span class="mono">${esc(t.status)}</span></div>`).join("") || `<div class="mono">None.</div>`}
+      ${a.last_done ? `<h4>Last finished</h4><div class="li"><b>T${a.last_done.id}</b> ${esc(a.last_done.title)}${a.last_done.summary ? `<div class="mono">${esc(a.last_done.summary)}</div>` : ""}</div>` : ""}`;
+  }
+  if (show) $("drawer").classList.add("open");
+}
+function closeDrawer() { selected = null; $("drawer").classList.remove("open"); }
+$("dx").onclick = closeDrawer;
+function approvals(s) {
+  return s.approvals.map((a) => `<div class="ap"><b>A${a.id}</b> [${esc(a.kind)}] ${esc(a.summary)}${a.amount ? ` — ${a.amount} ${esc(a.currency || "")}` : ""}
+    <div><button class="ok" data-ap="${a.id}" data-ok="1">Approve</button><button class="no" data-ap="${a.id}" data-ok="0">Reject</button></div></div>`).join("")
+    || `<div class="mono">Nothing waiting.</div>`;
+}
+$("apbtn").onclick = () => openDrawer("__brain");
+$("drawer").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-ap]"); if (!b) return;
+  const ok = b.dataset.ok === "1";
+  if (!confirm(`${ok ? "Approve" : "Reject"} A${b.dataset.ap}?`)) return;
+  try { await J.decide(b.dataset.ap, ok); toast("Approval", `A${b.dataset.ap} ${ok ? "approved" : "rejected"}. Tell JARVIS to go ahead.`, ok ? "#34d399" : "#f87171"); }
+  catch (err) { toast("Error", err.message, "#f87171"); }
+});
+
+// ------------------------------------------------------------ beams, toasts, captions
+function beam(name, back) {
+  const r = layout(J.state?.agents || []).find((x) => x.a.name === name); if (!r) return;
+  const [x1, y1] = P(0, 0), [x2, y2] = P(r.cx, r.cy), c = J.meta(name).color;
+  const el = document.createElementNS(NS, "line");
+  Object.entries(back ? { x1: x2, y1: y2, x2: x1, y2: y1 } : { x1, y1, x2, y2 }).forEach(([k, v]) => el.setAttribute(k, v));
+  el.setAttribute("stroke", back ? "#34d399" : c); el.setAttribute("stroke-width", "5"); el.setAttribute("stroke-linecap", "round");
+  el.setAttribute("class", "beam"); el.setAttribute("filter", "url(#glow)");
+  $("beams").appendChild(el); setTimeout(() => el.remove(), 2300);
+}
+function toast(title, text, color) {
+  const el = document.createElement("div");
+  el.className = "toast glass"; el.style.borderLeftColor = color || "var(--accent)";
+  el.innerHTML = `<b>${esc(title)}</b>${esc(text)}`;
+  $("toasts").appendChild(el); setTimeout(() => el.remove(), 6000);
+  const all = $("toasts").querySelectorAll(".toast"); if (all.length > 4) all[0].remove();
+}
+let capWords = [], capTimer = null;
+function setCap(cls, text) {
+  clearTimeout(capTimer);
+  if (cls) { $("cap").innerHTML = `<span class="${cls}">${esc(text)}</span>`; capWords = []; return; }
+  capWords = []; let i = 0;
+  $("cap").innerHTML = text.split(/(\s+)/).map((part) => {
+    const start = i; i += part.length;
+    if (!part.trim()) return part;
+    capWords.push(start); return `<span class="w" data-i="${start}">${esc(part)}</span>`;
+  }).join("");
+}
+function capAt(at) {
+  const spans = $("cap").querySelectorAll(".w"); let nowEl = null;
+  spans.forEach((s) => { const i = +s.dataset.i; s.className = "w" + (i < at ? " said" : ""); if (i <= at) nowEl = s; });
+  if (nowEl) { nowEl.className = "w now"; nowEl.scrollIntoView({ block: "nearest" }); }
+}
+let capText = "";
+J.on("caption", (e) => {
+  if (e.text !== capText) { capText = e.text; setCap(null, e.text); }
+  if (e.done) { $("cap").querySelectorAll(".w").forEach((s) => (s.className = "w said")); }
+  else capAt(e.at || 0);
+});
+
+// ------------------------------------------------------------ live events
+function showStatus() {
+  const shown = J.shown();
+  $("speaker").className = shown;
+  $("st").textContent = (STATUS[shown] || shown) + (J.state?.jarvis.request && shown !== "idle" ? " · " + J.state.jarvis.request : "");
+  document.querySelector("#brain")?.setAttribute("class", shown !== "idle" ? "busy" : "");
+}
+J.on("state", (s) => { render(s); showStatus(); })
+  .on("status", (e) => { if (J.state && e.request !== undefined) J.state.jarvis.request = e.request; showStatus(); })
+  .on("owner", (e) => setCap("owner", "You: " + e.text))
+  .on("interim", (e) => setCap("owner", "You: " + e.text + " …"))
+  .on("say", (e) => { if (!J.settings.speak) setCap(null, J.spoken(e.text)); })
+  .on("error", (e) => toast("JARVIS", e.text, "#f87171"))
+  .on("dispatch", (e) => { beam(e.agent); toast(`${J.meta(e.agent).icon} ${J.label(e.agent)}`, "Started: " + (e.description || "working"), J.meta(e.agent).color); J.refresh(); })
+  .on("agent_activity", (e) => {
+    const a = J.state?.agents.find((x) => x.name === e.agent);
+    if (a) { a.activity = [...a.activity, e.line].slice(-4); if (selected === e.agent) openDrawer(e.agent, false); }
+  })
+  .on("agent_done", (e) => {
+    flash[e.agent] = Date.now() + 8000; beam(e.agent, true);
+    toast(`✓ ${J.label(e.agent)}`, "Finished and reported back to JARVIS", "#34d399");
+    J.refresh(); setTimeout(J.refresh, 8100);
+  })
+  .on("jarvis_tool", (e) => { $("st").textContent = "Working · " + e.summary; })
+  .on("reset", () => setCap("owner", "New conversation started. Memory and history are kept."))
+  .on("connection", (e) => { document.querySelector("#status .dot").className = "dot" + (e.live ? " on" : ""); if (!e.live) $("st").textContent = "Reconnecting…"; });
+
+$("speaker").onclick = () => J.listen();
+$("ask").onsubmit = (e) => { e.preventDefault(); J.send($("text").value); $("text").value = ""; };
+function syncToggles() { $("t-speak").className = J.settings.speak ? "on" : ""; $("t-hands").className = J.settings.handsfree ? "on" : ""; }
+$("t-speak").onclick = () => { J.settings.speak = !J.settings.speak; syncToggles(); };
+$("t-hands").onclick = () => { J.settings.handsfree = !J.settings.handsfree; syncToggles(); };
+$("t-stop").onclick = () => J.stop();
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); }
+  if (e.key === "Escape") closeDrawer();
+});
+drawGround(); applyView(); syncToggles();
+</script>
+</body>
+</html>

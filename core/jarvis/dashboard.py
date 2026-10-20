@@ -1,6 +1,8 @@
 """Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
 
-`bin/jarvis dashboard` serves core/dashboard/index.html on 127.0.0.1 and streams
+`bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
+sidebar console at `/`, the isometric office at `/office`, the first version at
+`/classic`, all sharing jarvis.js) and streams
 state over Server-Sent Events. Talking to JARVIS runs Claude Code headless
 (`claude -p --output-format stream-json`), resuming one conversation, so it uses
 the owner's existing Claude subscription. Each delegation (Agent tool call) and
@@ -15,6 +17,7 @@ it costs nothing extra.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import secrets
@@ -25,10 +28,14 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, unquote
 
 from . import brief, db, journal, memory, paths, records
 
-PAGE = paths.CORE_DIR / "dashboard" / "index.html"
+STATIC = paths.CORE_DIR / "dashboard"
+# Two prototypes of the same live dashboard, plus the first version.
+PAGES = {"/": "console.html", "/console": "console.html", "/office": "office.html", "/classic": "index.html"}
+ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -61,7 +68,7 @@ def agent_roster() -> list[dict]:
         meta, _ = memory.parse(path.read_text(encoding="utf-8"))
         name = meta.get("name") or path.stem
         desc = meta.get("description", "")
-        role = re.split(r"(?<=\.)\s", desc, 1)
+        role = re.split(r"(?<=\.)\s", desc, maxsplit=1)
         found[name] = {
             "name": name,
             "label": AGENT_LABELS.get(name, name.replace("-", " ").title()),
@@ -97,6 +104,9 @@ def snapshot(conn, live: dict | None = None) -> dict:
         else:
             a["status"], a["now"] = "idle", None
         a["activity"] = live.get("activity", {}).get(a["name"], [])[-4:]
+        a["runs"] = conn.execute("SELECT COUNT(*) FROM agent_runs WHERE agent = ? AND event = 'SubagentStart'",
+                                 (a["name"],)).fetchone()[0]
+        a["open"] = len(a["tasks"])
 
     parents = conn.execute(
         f"""SELECT * FROM tasks WHERE parent_id IS NULL AND status IN ({','.join('?' * len(records.OPEN_TASK_STATUSES))})
@@ -106,6 +116,21 @@ def snapshot(conn, live: dict | None = None) -> dict:
         subs = conn.execute("SELECT id, title, agent, status FROM tasks WHERE parent_id = ? ORDER BY id", (p["id"],)).fetchall()
         tasks.append({**dict(p), "subtasks": _rows(subs)})
 
+    recent_tasks = conn.execute("SELECT * FROM tasks ORDER BY updated DESC LIMIT 60").fetchall()
+    products = conn.execute("SELECT * FROM products ORDER BY updated DESC").fetchall()
+    tests = []
+    for t in conn.execute("SELECT * FROM tests ORDER BY id DESC LIMIT 40").fetchall():
+        tests.append({**dict(t), "eval": records.evaluate(conn, t["id"])})
+    month = paths.now()[:7]
+    by_service = _rows(conn.execute("SELECT service, ROUND(SUM(amount_aud), 2) AS aud, COUNT(*) AS n FROM costs "
+                                    "WHERE substr(ts, 1, 7) = ? GROUP BY service ORDER BY aud DESC", (month,)))
+    counts = {
+        "delegations": conn.execute("SELECT COUNT(*) FROM tasks WHERE parent_id IS NOT NULL").fetchone()[0],
+        "decisions": conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0],
+        "open_tasks": conn.execute(f"SELECT COUNT(*) FROM tasks WHERE status IN ({','.join('?' * len(records.OPEN_TASK_STATUSES))})",
+                                   records.OPEN_TASK_STATUSES).fetchone()[0],
+        "agent_runs": conn.execute("SELECT COUNT(*) FROM agent_runs WHERE event = 'SubagentStart'").fetchone()[0],
+    }
     events = conn.execute(
         """SELECT e.ts, e.kind, e.note, t.id AS task_id, t.title, t.agent FROM task_events e
            JOIN tasks t ON t.id = e.task_id ORDER BY e.id DESC LIMIT 25""").fetchall()
@@ -119,7 +144,12 @@ def snapshot(conn, live: dict | None = None) -> dict:
         "memory": {"total": st["total"], "needs_review": st["needs_review"], "by_category": st["by_category"],
                    "recent": _rows(memory.listing(conn, status="active", limit=6))},
         "journal": _rows(journal.recent(conn, limit=40)),
-        "cost": {"spent": spent, "budget": budget},
+        "cost": {"spent": spent, "budget": budget, "by_service": by_service},
+        "recent_tasks": _rows(recent_tasks),
+        "products": _rows(products),
+        "tests": tests,
+        "counts": counts,
+        "brain": str(paths.home()),
         "jarvis": {"status": live.get("status", "idle"), "request": live.get("request"),
                    "claude": live.get("claude")},
     }
@@ -136,10 +166,14 @@ def _epoch(ts: str) -> float:
 def signature(conn) -> tuple:
     """Cheap fingerprint of the brain: changes whenever anything the page shows changes."""
     parts = []
-    for table in ("tasks", "task_events", "agent_runs", "journal", "approvals", "decisions", "memory", "costs"):
+    for table in ("tasks", "task_events", "agent_runs", "journal", "approvals", "decisions", "memory", "costs",
+                  "products", "tests", "test_metrics"):
         parts.append(conn.execute(f"SELECT COUNT(*), MAX(rowid) FROM {table}").fetchone()[:])
     parts.append(conn.execute("SELECT MAX(updated) FROM tasks").fetchone()[0])
     parts.append(conn.execute("SELECT MAX(updated) FROM memory").fetchone()[0])
+    parts.append(conn.execute("SELECT MAX(updated) FROM products").fetchone()[0])
+    parts.append(conn.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0])
+    parts.append(conn.execute("SELECT GROUP_CONCAT(status) FROM tests").fetchone()[0])
     return tuple(parts)
 
 
@@ -174,6 +208,10 @@ def find_claude() -> list[str] | None:
     if cfg:
         return cfg if isinstance(cfg, list) else [cfg]
     exe = shutil.which("claude")
+    if not exe:
+        # The native installer puts it here but doesn't always add the folder to PATH.
+        native = Path.home() / ".local" / "bin" / ("claude.exe" if os.name == "nt" else "claude")
+        exe = str(native) if native.exists() else None
     return [exe] if exe else None
 
 
@@ -343,9 +381,24 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
         def do_GET(self):
             if not self._host_ok():
                 return self._json(403, {"error": "forbidden host"})
-            if self.path in ("/", "/index.html"):
-                html = PAGE.read_text(encoding="utf-8").replace("__JARVIS_TOKEN__", token)
+            route, _, query = self.path.partition("?")
+            if route in PAGES:
+                html = (STATIC / PAGES[route]).read_text(encoding="utf-8").replace("__JARVIS_TOKEN__", token)
                 return self._send(200, html.encode(), "text/html; charset=utf-8")
+            if route in ASSETS:
+                name, ctype = ASSETS[route]
+                return self._send(200, (STATIC / name).read_bytes(), ctype)
+            if route == "/api/memory":
+                return self._memory(parse_qs(query))
+            if route.startswith("/api/memory/"):
+                conn = db.connect()
+                try:
+                    entry = memory.get(conn, unquote(route.rsplit("/", 1)[1]))
+                except memory.MemoryError as exc:
+                    return self._json(404, {"error": str(exc)})
+                finally:
+                    conn.close()
+                return self._json(200, {"meta": entry.meta, "body": entry.body, "path": paths.rel(entry.path)})
             if self.path == "/api/state":
                 conn = db.connect()
                 try:
@@ -357,6 +410,19 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             if self.path == "/api/events":
                 return self._events()
             self._json(404, {"error": "not found"})
+
+        def _memory(self, q: dict):
+            text = (q.get("q") or [""])[0].strip()
+            cat = (q.get("c") or [None])[0] or None
+            conn = db.connect()
+            try:
+                rows = (memory.search(conn, text, category=cat, limit=40) if text
+                        else memory.listing(conn, category=cat, limit=200))
+            finally:
+                conn.close()
+            keep = ("id", "title", "category", "product", "provenance", "status", "confidence", "source",
+                    "source_ref", "updated", "snippet")
+            return self._json(200, [{k: r[k] for k in keep if k in r.keys()} for r in rows])
 
         def _events(self):
             self.send_response(200)
@@ -412,6 +478,15 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 except FileNotFoundError as exc:
                     return self._json(503, {"error": str(exc)})
                 return self._json(202, {"ok": True})
+            if self.path == "/api/approval":
+                conn = db.connect()
+                try:
+                    row = records.approval_decide(conn, body.get("id"), bool(body.get("approve")), body.get("note"))
+                except (records.RecordError, ValueError, TypeError) as exc:
+                    return self._json(400, {"error": str(exc)})
+                finally:
+                    conn.close()
+                return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/stop":
                 runner.stop()
                 return self._json(200, {"ok": True})
