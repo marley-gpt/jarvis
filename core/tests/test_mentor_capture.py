@@ -90,7 +90,8 @@ class MentorImportTest(BrainTest):
                   "lesson": {**LESSON, "url": "https://www.skool.com/x/classroom/y?md=1", "description": "Filters to use",
                              "resources": [{"title": "Sheet", "link": "https://example.com"}],
                              "cues": [[0, "All right"], [75, "always check the Kalodata revenue column"]]},
-                  "frames": [{**LESSON, "t": 75, "data": JPEG}], "images": []}
+                  "frames": [{**LESSON, "t": 75, "data": JPEG}], "images": [],
+                  "attachments": [{**LESSON, "name": "Testing SOP.txt", "data": base64.b64encode(b"Spend 2x AOV before killing").decode()}]}
         (folder / "jarvis-skool-02-01-deep.json").write_text(json.dumps(bundle), encoding="utf-8")
         (folder / "jarvis-skool-partial.json").write_text("{not json", encoding="utf-8")
         done = mentor_capture.import_bundles(folder, conn=self.conn)
@@ -101,6 +102,8 @@ class MentorImportTest(BrainTest):
         hits = memory.search(self.conn, "Kalodata revenue column", category="mentor")
         self.assertEqual(hits[0]["title"], "Transcript: Product Research - Deep product Research (Incl Market/Competitor)")
         self.assertIn("[01:15] always check", memory.get(self.conn, hits[0]["id"]).body)
+        self.assertIn("Spend 2x AOV before killing", memory.get(self.conn, hits[0]["id"]).body)
+        self.assertTrue(list((self.home / "files").rglob("testing-sop.txt")))
         # Re-importing supersedes instead of duplicating.
         (folder / "jarvis-skool-02-01-deep.json").write_text(json.dumps(bundle), encoding="utf-8")
         mentor_capture.import_bundles(folder, conn=self.conn)

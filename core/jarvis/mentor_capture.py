@@ -16,6 +16,7 @@ brain/files/mentor/skool/<course>/<NN-lesson>/:
   frames/          video frames as mm-ss.jpg: every on-screen change (2 s sampling, webcam ignored)
   sheets/          the same frames tiled 3x3 with timestamps, for fast review
   images/          images embedded in the lesson text
+  attachments/     attached files (PDFs, docs) plus extracted text as <file>.txt
 """
 
 from __future__ import annotations
@@ -90,6 +91,43 @@ def save_image(data: dict, kind: str) -> Path:
     raw = data["data"].split(",", 1)[-1]
     target = sub / name
     target.write_bytes(base64.b64decode(raw))
+    return target
+
+
+def extract_text(path: Path) -> str:
+    """Best-effort text from an attached document (PDF via pypdf if installed, DOCX, plain text)."""
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            try:
+                from pypdf import PdfReader
+            except ImportError:
+                return ""
+            reader = PdfReader(str(path))
+            return "\n\n".join(f"[page {i + 1}]\n{(p.extract_text() or '').strip()}" for i, p in enumerate(reader.pages))
+        if suffix == ".docx":
+            import zipfile
+            xml = zipfile.ZipFile(path).read("word/document.xml").decode("utf-8", "replace")
+            xml = re.sub(r"</w:p>", "\n", xml)
+            return re.sub(r"<[^>]+>", "", xml).strip()
+        if suffix in (".txt", ".md", ".csv", ".json", ".html"):
+            return path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:  # a damaged or protected file must not stop the import
+        return f"(could not extract text: {exc})"
+    return ""
+
+
+def save_attachment(data: dict) -> Path:
+    d = lesson_dir(data["course_order"], data["course_title"], data["lesson_order"], data["lesson_title"]) / "attachments"
+    d.mkdir(parents=True, exist_ok=True)
+    name = data.get("name") or "file"
+    stem, dot, ext = name.rpartition(".")
+    safe = f"{slug(stem if dot else name, 60)}.{slug(ext, 8)}" if dot else slug(name, 60)
+    target = d / safe
+    target.write_bytes(base64.b64decode(data["data"].split(",", 1)[-1]))
+    text = extract_text(target)
+    if text.strip():
+        (d / (target.name + ".txt")).write_text(text, encoding="utf-8")
     return target
 
 
@@ -207,6 +245,9 @@ def remember_transcript(conn, lesson: dict, where: Path):
         parts += ["## Lesson text", lesson["description"]]
     if lesson.get("resources"):
         parts += ["## Resources"] + [f"- {r.get('title', 'link')}: {r.get('link', '')}" for r in lesson["resources"]]
+    att = where / "attachments"
+    for txt in sorted(att.glob("*.txt")) if att.exists() else []:
+        parts += [f"## Attached document: {txt.name[:-4]}", txt.read_text(encoding="utf-8", errors="replace")]
     if cues:
         parts += ["## Transcript"] + [f"[{mmss(t)}] {text}" for t, text in cues]
     else:
@@ -240,7 +281,7 @@ def import_bundles(folder: Path, remove: bool = True, conn=None) -> list[str]:
             import shutil
             for sub in ("frames", "sheets"):
                 shutil.rmtree(existing.parent / sub, ignore_errors=True)
-        if existing.exists() and not lesson.get("cues"):
+        if existing.exists() and not lesson.get("cues") and not data.get("attachments"):
             # An emptier capture (e.g. a failed earlier attempt) must never replace a full one.
             if remove:
                 f.unlink()
@@ -253,9 +294,12 @@ def import_bundles(folder: Path, remove: bool = True, conn=None) -> list[str]:
             save_image(im, "image")
         for sh in data.get("sheets", []):
             save_image(sh, "sheet")
+        for at in data.get("attachments", []):
+            save_attachment(at)
         mem_id = remember_transcript(conn, lesson, where) if conn is not None else None
         done.append(f"{paths.rel(where)}  [{mem_id or 'no memory entry'}] ({len(lesson.get('cues') or [])} caption lines, "
-                    f"{len(data.get('frames', []))} frames, {len(data.get('images', []))} images)")
+                    f"{len(data.get('frames', []))} frames, {len(data.get('images', []))} images, "
+                    f"{len(data.get('attachments', []))} files)")
         if remove:
             f.unlink()
     return done

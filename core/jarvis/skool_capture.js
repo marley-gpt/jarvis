@@ -227,7 +227,7 @@
       const m = o.meta || mods[idx];
       const ids = { course_order: o.courseOrder, course_title: o.courseTitle || unit(pp.course).metadata.title,
         lesson_order: o.lessonOrder || idx + 1, lesson_title: m.metadata.title };
-      bundle = { format: "jarvis-skool/1", frames: [], images: [], sheets: [] };
+      bundle = { format: "jarvis-skool/1", frames: [], images: [], sheets: [], attachments: [] };
       const body = richText(m.metadata.desc);
       const resources = parseResources(m.metadata.resources);
       const v = m.metadata.videoId ? await ensureVideo() : null;
@@ -241,12 +241,24 @@
         try { await post("/image", { ...ids, index: i + 1, name: `image-${i + 1}`, data: await imageData(body.images[i]) }); imgs.push(i + 1); }
         catch (e) { console.warn("image", i + 1, e); }
       }
+      // Attached files (PDFs, docs, prompt sheets): Skool hands out a short-lived signed link via
+      // POST api2.skool.com/files/<file_id>/download-url; the file itself comes from files.skool.com.
+      let files = 0;
+      for (const r of resources.filter((x) => x.file_id)) {
+        try {
+          const url = (await (await fetch(`https://api2.skool.com/files/${r.file_id}/download-url?expire=28800`, { method: "POST", credentials: "include" })).text()).trim();
+          const blob = await (await fetch(url)).blob();
+          const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+          bundle.attachments.push({ ...ids, name: r.file_name || r.title || `file-${files + 1}`, title: r.title, content_type: r.file_content_type || blob.type, data: dataUrl });
+          files++;
+        } catch (e) { console.warn("attachment", r.title, e); }
+      }
       const kept = v ? await frames(v, ids, o) : [];
       const file = `jarvis-skool-${String(ids.course_order).padStart(2, "0")}-${String(ids.lesson_order).padStart(2, "0")}-${fileSlug(ids.lesson_title)}.json`;
       const bytes = download(file);
       bundle = null;
       return { file, mb: +(bytes / 1048576).toFixed(1), lesson: ids.lesson_title, video: v ? Math.round(v.duration) : 0, cues: cues.length,
-        transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length, sheets: Math.ceil(kept.length / 9),
+        transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length, sheets: Math.ceil(kept.length / 9), files,
         resources: resources.length, descriptionChars: body.text.length };
     },
   };
