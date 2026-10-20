@@ -9,6 +9,17 @@ The brain lives in `brain/` and is reached through `bin/jarvis` (run it from the
 
 **Quoting:** put free text (`--summary`, `--body`, `--title`, notes) in **single quotes**. Inside double quotes, `$` expands (`"A$50"` becomes `A0`). For long or multi-line text, write a scratch file and pass `--body-file`. Run each `bin/jarvis` command on its own: no `&&` chains, `$(...)` or variables.
 
+## 0. The owner's standing rules (every agent, every task)
+
+1. **The goal is money, fast.** The owner is starting at $0. Do the work that moves Urban Supplied toward profitable sales soonest (winning products, ads that convert, a store that sells). Skip busywork, and say plainly when something won't move the needle.
+2. **Blake's way first.** Blake is the owner's mentor. Load your `blake-*` playbook skill and search `--provenance mentor` before acting, and follow his method exactly, citing (Lesson @ mm:ss, M-id). His method outranks third-party skills and general knowledge. Anything else is a **JARVIS recommendation**, labelled as such.
+3. **Record everything, lose nothing.** Save every finding, decision and correction to memory straight away, with its source. Nothing lives only in chat.
+4. **Save every mistake.** When something goes wrong (a bad assumption, a broken step, wasted effort), add `-c procedures` tagged `mistake` with what happened, why, and the rule that prevents it. Search for mistakes before similar work.
+5. **Approvals still apply.** Spending money, launching or editing ads, changing budgets or prices, editing the live store, contacting suppliers and deleting business data all need the owner's approval through JARVIS. Everything else is routine: just do it, without asking.
+6. **Honesty.** Separate evidence from speculation. Never invent quotes, metrics or Blake's steps. Too little data is "insufficient data", never a win.
+7. **Private stays private.** Blake's material and business data stay in `brain/` or `~/.claude/skills/blake-*`. The repo is public, so never commit them.
+8. **Speakable results.** The owner mostly talks to JARVIS by voice, so end with a short plain-English summary that JARVIS can say out loud.
+
 ## 1. Before working: retrieve only what's relevant
 
 ```bash

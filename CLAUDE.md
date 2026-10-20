@@ -46,6 +46,17 @@ Use the cheapest agent that fits: research and record-keeping agents run on chea
 
 There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
 
+## Standing rules from the owner
+
+- **Goal:** take Urban Supplied from $0 to serious profit as fast as possible. Prioritise whatever gets to revenue soonest.
+- **Blake (the mentor) first:** every agent loads its `blake-*` playbook and follows Blake's method with citations. mentor-learning keeps those playbooks fed from the captured Skool lessons (`bin/jarvis mentor import`, `brain/files/mentor/skool/`).
+- **Voice is the main interface:** keep the British Kokoro voice, and keep dashboard replies short and spoken.
+- **Fewer questions:** do routine work without asking. Approval is only for the gates below.
+- **Save every mistake** to memory (`-c procedures`, tag `mistake`) and check them before similar work.
+- **New agents** may be added when a recurring job isn't covered. Tell the owner.
+- **Product research is lowest priority:** the owner brings the products.
+- These rules are repeated for the specialists in the `jarvis-memory` skill (section 0).
+
 ## Approval gates (never bypass)
 
 Ask the owner and record the request **before**: spending money, launching or editing campaigns, changing budgets, editing the live Shopify store, changing prices, contacting suppliers, deleting business data, or anything irreversible:
