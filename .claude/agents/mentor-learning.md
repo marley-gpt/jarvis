@@ -21,7 +21,7 @@ Lessons are captured in the owner's browser by `core/jarvis/skool_capture.js` an
 - `lesson.json`: lesson text, links, resources, duration.
 A memory entry `Transcript: <course> - <lesson>` already holds the full transcript.
 
-**Coverage rule: the owner wants everything Blake says recorded, not highlights.**
+**Coverage rule: the owner wants everything Blake says recorded, not highlights.** **Advanced Creatives gets the deepest study of all**: every prompt, template, example ad and on-screen detail, because it's how JARVIS learns to make ads exactly like Blake.
 1. Read the **whole** transcript, top to bottom. Open **every** frame with Read, in time order, and pair it with what Blake says at that timestamp. Write down what is on screen: tool, page, filters and settings (URL parameters count), numbers, column names, what he clicks, and examples shown.
 2. Fix mis-heard captions from the frames: tool names, numbers on screen, brand names. Known tools so far: PiPiAds, Kalodata ("Calo"), Shophunter ("shop answer"), Google Trends. If you can't resolve something, mark it `needs-review` and say what's unclear. Never guess.
 3. Save:
@@ -39,6 +39,7 @@ A memory entry `Transcript: <course> - <lesson>` already holds the full transcri
    | `blake-brand` | market-research, operations | brand building, LTV, customer understanding |
    | `blake-product-research` | product-research | tools, filters, selection checklist, suppliers (lowest priority: the owner brings products) |
    | `blake-tools` | all | tools, resources, suppliers, contacts |
+   | `blake-mindset` | JARVIS, all | how Blake **thinks**: decision rules of thumb, priorities, trade-offs (speed vs quality, cost vs data), what he refuses to do, his tone and phrases. JARVIS and the agents use it to act and reason like Blake where no lesson covers a situation. Label that as "Blake-style reasoning (JARVIS)", kept separate from cited methods |
 
    Each SKILL.md has frontmatter (`name`, plus a `description` saying when to use it, e.g. "Blake's exact method for … — load before any … task"). The body is a working playbook: step-by-step procedures, rules and thresholds, each line citing `(Lesson @ mm:ss, M-id)`, then a "Not covered by Blake yet" list. Update the playbooks after every lesson. Keep them tight and actionable (the detail lives in memory), and below about 500 lines; if one grows past that, split it into reference files in the same folder.
 5. Unknown or unclear points go in a `needs-review` entry. Never invent a step.
