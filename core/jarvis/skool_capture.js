@@ -10,6 +10,7 @@
 //
 //   JarvisSkool.courses()                 -> [{order, id, name, title, modules}] on the classroom page
 //   JarvisSkool.lessons()                 -> [{order, id, title, hasVideo, resources}] on a course page
+//   JarvisSkool.captureCourse({courseOrder, courseTitle, from?, only?: [lesson orders]})  -> every (or only some) lessons
 //   JarvisSkool.captureLesson(opts)       -> summary of what was saved for the lesson in ?md=<id>
 //       opts: {courseOrder, courseTitle, lessonOrder, every: 2, minGap: 30, minCells: 6, maxFrames: 500, width: 1280}
 (function () {
@@ -202,7 +203,7 @@
       const o = Object.assign({ from: 1 }, opts);
       const lessons = this.lessons();
       const st = window.__jarvisCourse = { total: lessons.length, done: [], current: null, error: null, finished: false };
-      for (const l of lessons.filter((x) => x.order >= o.from)) {
+      for (const l of lessons.filter((x) => x.order >= o.from && (!o.only || o.only.includes(x.order)))) {
         st.current = l.title;
         try {
           const html = await (await fetch(location.pathname + "?md=" + l.id)).text();
