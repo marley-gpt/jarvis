@@ -42,6 +42,7 @@ A memory entry `Transcript: <course> - <lesson>` already holds the full transcri
 
    Each SKILL.md has frontmatter (`name`, plus a `description` saying when to use it, e.g. "Blake's exact method for … — load before any … task"). The body is a working playbook: step-by-step procedures, rules and thresholds, each line citing `(Lesson @ mm:ss, M-id)`, then a "Not covered by Blake yet" list. Update the playbooks after every lesson. Keep them tight and actionable (the detail lives in memory), and below about 500 lines; if one grows past that, split it into reference files in the same folder.
 5. Unknown or unclear points go in a `needs-review` entry. Never invent a step.
+6. **Save the skills.** After creating or updating any playbook, run `bin/jarvis skills backup --zip`. That copies every `blake-*` skill into `brain/skills/`, which is backed up, and refreshes the upload zips the owner adds to their claude.ai Skills. For a **new** playbook, also add a memory entry (`-c procedures --provenance mentor`, tags `skill,blake,for:<agent>`) titled `Skill: blake-<area> - <what it covers>`, so agents can find it by search.
 
 ## Deliverable (required)
 For each batch, write a report at `bin/jarvis task path T<n>` with the Write tool, even where general guidance discourages report files:

@@ -378,6 +378,36 @@ def cmd_mentor_status(conn, args):
         out(f"  {d}")
 
 
+PRIVATE_SKILL_PREFIXES = ("blake-",)
+
+
+def cmd_skills_backup(conn, args):
+    """Mirror private skills (Blake's playbooks) between ~/.claude/skills and brain/skills.
+
+    Private skills hold the mentor's paid material, so they live outside this public repo. brain/skills is
+    the backed-up copy (OneDrive and daily brain backups). --restore copies them back onto a new machine."""
+    live, safe = Path.home() / ".claude" / "skills", paths.home() / "skills"
+    src, dst = (safe, live) if args.restore else (live, safe)
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for d in sorted(src.glob("*")) if src.exists() else []:
+        if d.is_dir() and d.name.startswith(PRIVATE_SKILL_PREFIXES) and (d / "SKILL.md").exists():
+            shutil.copytree(d, dst / d.name, dirs_exist_ok=True)
+            n += 1
+    out(f"{'Restored' if args.restore else 'Backed up'} {n} private skill(s): {src} -> {dst}")
+    if args.zip:
+        import zipfile
+        zdir = Path.home() / "Downloads" / "jarvis-skill-uploads" / "blake"
+        zdir.mkdir(parents=True, exist_ok=True)
+        for d in sorted(live.glob("*")):
+            if d.is_dir() and d.name.startswith(PRIVATE_SKILL_PREFIXES) and (d / "SKILL.md").exists():
+                with zipfile.ZipFile(zdir / f"{d.name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
+                    for f in d.rglob("*"):
+                        if f.is_file():
+                            z.write(f, f"{d.name}/{f.relative_to(d).as_posix()}")
+        out(f"Upload zips for claude.ai (Settings > Skills > Add > Upload): {zdir}")
+
+
 def cmd_backup(conn, args):
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
@@ -601,6 +631,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_mentor_script)
     s = mentor.add_parser("status", help="list captured lessons")
     s.set_defaults(fn=cmd_mentor_status)
+
+    skills = sub.add_parser("skills", help="private skills (Blake's playbooks)").add_subparsers(dest="sub", required=True)
+    s = skills.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")
+    s.add_argument("--restore", action="store_true", help="copy brain/skills back to ~/.claude/skills")
+    s.add_argument("--zip", action="store_true", help="also package each one for upload to claude.ai Skills")
+    s.set_defaults(fn=cmd_skills_backup)
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")
