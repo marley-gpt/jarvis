@@ -133,3 +133,10 @@ Source: [anthropics/claude-code/plugins/frontend-design](https://github.com/anth
 | skill | fit for Urban Supplied | used by | what it does |
 |---|---|---|---|
 | `frontend-design` | useful | shopify | Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. |
+
+## market-researcher (1): `.claude/skills/`
+Source: [xcrrr/claude-skills](https://github.com/xcrrr/claude-skills/tree/main/skills/business/market-researcher), MIT. The owner marked this one and `customer-research` as very important, so both are core skills for market-research.
+
+| skill | fit for Urban Supplied | used by | what it does |
+|---|---|---|---|
+| `market-researcher` | core | market-research, product-research | Market sizing (TAM/SAM/SOM, top-down and bottom-up), competitor matrix and positioning map, survey design, segmentation, research-to-recommendation. |

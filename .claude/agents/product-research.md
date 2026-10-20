@@ -29,5 +29,5 @@ Before any task, load Blake's playbook for your job, the skill `blake-product-re
 
 ## Skills
 
-Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `competitor-profiling`, `customer-research`, `pricing`, `offers`, `marketing-ideas`, `ads`, `competitive-brief`.
+Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `market-researcher`, `competitor-profiling`, `customer-research`, `pricing`, `offers`, `marketing-ideas`, `ads`, `competitive-brief`.
 They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.
