@@ -51,7 +51,12 @@ def start_server() -> None:
 def open_window() -> None:
     browser = next((b for b in BROWSERS if Path(b).exists()), None)
     if browser:
-        subprocess.Popen([browser, f"--app={URL}", "--window-size=1440,900"], creationflags=DETACHED, close_fds=True)
+        # A dedicated profile so the window's flags always apply (they're ignored if Chrome is already running),
+        # sound can play when JARVIS wakes without a click first, and mic permission is remembered for JARVIS only.
+        profile = Path(os.environ.get("LOCALAPPDATA", str(REPO))) / "JARVIS" / "browser-profile"
+        subprocess.Popen([browser, f"--app={URL}", "--window-size=1440,900", f"--user-data-dir={profile}",
+                          "--autoplay-policy=no-user-gesture-required", "--no-first-run", "--no-default-browser-check"],
+                         creationflags=DETACHED, close_fds=True)
     else:
         os.startfile(URL)
 

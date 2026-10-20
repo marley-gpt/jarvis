@@ -251,5 +251,89 @@
     }, 350);
   }
 
+  // ---------------------------------------------------------- clap to wake
+  // Two sharp claps (0.15–0.8 s apart) wake JARVIS: he greets the owner like the film's JARVIS,
+  // gives a one-line status, then listens. Detection runs in an AudioWorklet on the local mic,
+  // nothing is recorded or sent anywhere. Ignored while JARVIS is speaking, listening or working.
+  const CLAP_WORKLET = `
+    class Clap extends AudioWorkletProcessor {
+      constructor() { super(); this.floor = 0.01; this.prev = 0; this.hold = 0; }
+      process(inputs) {
+        const ch = inputs[0] && inputs[0][0];
+        if (!ch) return true;
+        let peak = 0, sum = 0;
+        for (let i = 0; i < ch.length; i++) { const a = Math.abs(ch[i]); if (a > peak) peak = a; sum += a * a; }
+        const rms = Math.sqrt(sum / ch.length);
+        if (this.hold > 0) this.hold--;
+        else if (peak > 0.3 && peak > this.floor * 12 && peak > this.prev * 2.5) { this.port.postMessage(currentTime); this.hold = 45; }
+        this.floor = this.floor * 0.995 + rms * 0.005;
+        this.prev = peak;
+        return true;
+      }
+    }
+    registerProcessor("jarvis-clap", Clap);`;
+  let clapCtx = null, clapStream = null, lastClap = 0, clapCooldown = 0;
+  J.clap = {
+    async start() {
+      if (clapCtx) return true;
+      try {
+        clapStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        clapCtx = new AudioContext();
+        await clapCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([CLAP_WORKLET], { type: "text/javascript" })));
+        const node = new AudioWorkletNode(clapCtx, "jarvis-clap");
+        node.port.onmessage = (ev) => onClap(ev.data);
+        clapCtx.createMediaStreamSource(clapStream).connect(node);
+        if (clapCtx.state === "suspended") document.addEventListener("pointerdown", () => clapCtx && clapCtx.resume(), { once: true });
+        J.emit("clap", { on: true });
+        return true;
+      } catch (e) {
+        J.clap.stop();
+        J.emit("error", { text: "Clap to wake needs the microphone. Allow it for this window, then switch it on again.", mic: true });
+        return false;
+      }
+    },
+    stop() {
+      clapStream?.getTracks().forEach((t) => t.stop());
+      clapCtx?.close().catch(() => {});
+      clapCtx = clapStream = null;
+      J.emit("clap", { on: false });
+    },
+    get on() { return !!clapCtx; },
+  };
+  function onClap(t) {
+    if (J.speaking || J.listening || J.status !== "idle" || Date.now() < clapCooldown) { lastClap = 0; return; }
+    const gap = t - lastClap;
+    lastClap = t;
+    if (gap > 0.15 && gap < 0.8) { lastClap = 0; clapCooldown = Date.now() + 6000; J.wake(); }
+  }
+  J.greeting = () => {
+    const s = J.state, h = new Date().getHours();
+    const part = h < 5 ? "evening" : h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+    const open = [`Good ${part}, sir.`, `Welcome home, sir.`, `At your service, sir.`, `Good ${part}, sir. All systems are online.`];
+    const bits = [open[Math.floor(Math.random() * open.length)]];
+    if (s) {
+      const working = s.agents.filter((a) => a.status === "working").length;
+      const ap = s.approvals.length;
+      if (ap) bits.push(`You have ${ap} approval${ap === 1 ? "" : "s"} awaiting your decision.`);
+      bits.push(working ? `${working} of the team ${working === 1 ? "is" : "are"} at work.` : "The team is standing by.");
+    }
+    bits.push("What can I do for you?");
+    return bits.join(" ");
+  };
+  J.wake = () => {
+    J.emit("wake", {});
+    say(J.greeting());
+    if (!J.canListen) return;
+    const t0 = Date.now();
+    const wait = setInterval(() => {  // listen as soon as the greeting has been spoken
+      if (!J.speaking || Date.now() - t0 > 20000) { clearInterval(wait); if (!J.listening && J.status === "idle") J.listen(); }
+    }, 250);
+  };
+  Object.defineProperty(J.settings, "clap", {
+    get() { return J.pref("clap") !== "0"; },
+    set(v) { J.pref("clap", v ? "1" : "0"); v ? J.clap.start() : J.clap.stop(); },
+  });
+
   document.addEventListener("DOMContentLoaded", connect);
+  document.addEventListener("DOMContentLoaded", () => { if (J.settings.clap && navigator.mediaDevices) J.clap.start(); });
 })();
