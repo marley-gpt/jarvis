@@ -141,8 +141,13 @@
     const kept = [];
     const seek = (t) => new Promise((res) => { const done = () => res(); v.addEventListener("seeked", done, { once: true }); v.currentTime = t; setTimeout(done, 8000); });
     const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+    // A seek only counts once a new frame is actually painted (a throttled background tab can keep
+    // returning the same old frame); frozen captures are flagged in the result for re-capture.
+    const painted = () => new Promise((res) => { if (!v.requestVideoFrameCallback) return res(); const to = setTimeout(res, 1500); v.requestVideoFrameCallback(() => { clearTimeout(to); res(); }); });
+    let identical = 0;
     for (let t = 1; t < v.duration - 0.3 && kept.length < o.maxFrames; t += o.every) {
       await seek(t);
+      await painted();
       await sleep(90);
       const g = grid();
       if (prevSample) {
@@ -170,6 +175,8 @@
         shctx.fillStyle = "#ffeb3b"; shctx.font = "bold 26px Consolas, monospace"; shctx.fillText(mmss(t), x + 8, y + 26);
         tiles++;
         if (tiles === 9) await flushSheet(t);
+        if (lastKeptGrid) { let same = true; for (let i = 0; i < CELLS && same; i++) if (Math.abs(g[i] - lastKeptGrid[i]) > 0.004) same = false; identical = same ? identical + 1 : 0; }
+        if (identical >= 6) o.frozen = true;
         kept.push(Math.round(t)); lastKept = t; lastKeptGrid = g;
       }
     }
@@ -260,7 +267,7 @@
       bundle = null;
       return { file, mb: +(bytes / 1048576).toFixed(1), lesson: ids.lesson_title, video: v ? Math.round(v.duration) : 0, cues: cues.length,
         transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length, sheets: Math.ceil(kept.length / 9), files,
-        resources: resources.length, descriptionChars: body.text.length };
+        resources: resources.length, descriptionChars: body.text.length, frozen: !!o.frozen };
     },
   };
 })();
