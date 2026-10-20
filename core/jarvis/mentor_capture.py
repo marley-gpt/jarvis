@@ -20,6 +20,7 @@ brain/files/mentor/skool/<course>/<NN-lesson>/:
 from __future__ import annotations
 
 import base64
+import os
 import json
 import re
 import secrets
@@ -180,6 +181,8 @@ def make_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT, token: str | 
 
     class Server(ThreadingHTTPServer):
         daemon_threads = True
+        # On Windows SO_REUSEADDR lets a second server bind the same port silently; fail loudly instead.
+        allow_reuse_address = os.name != "nt"
 
     server = Server((host, port), Handler)
     server.token = token
