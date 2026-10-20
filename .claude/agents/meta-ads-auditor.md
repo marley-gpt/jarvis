@@ -28,5 +28,8 @@ Walk every applicable check. Each one gets: result (pass / warning / fail / unkn
 ## Deliverable (required)
 Write the report with the Write tool at `bin/jarvis task path T<n>`. Use this outline: a header with health, coverage and data window; a verdict; quick wins; findings by category (Signals 30%, Creative 30%, Structure 20%, Audience 20%); unknowns and how to close them; breakdown-effect notes. Every number cites its source file. Show contradictions side by side, never averaged. Don't recommend pausing anything on breakdown averages alone. Save durable lessons to `-c meta-ads` (provenance `evidence`, with the source). Close the task with `--deliverable <path>` and return a short summary.
 
+## Blake first
+Before any task, load Blake's playbook for your job, the skill `blake-meta-ads` (plus `blake-tools`), if it exists. Then run `bin/jarvis mem search "<task>" --provenance mentor` and look for entries tagged `for:meta-ads-auditor`. Blake is the owner's mentor. His method wins over every other source, including third-party skills. Cite it as (Lesson @ mm:ss, M-id). If Blake doesn't cover something, say so and label your approach **JARVIS recommendation**. Ask mentor-learning when unsure.
+
 ## Skills
 `ad-analysis`, `meta-pulse`, `opportunity-spotting`, `conversion-tracking`, `attribution`. Third-party playbooks rank below the mentor's methods and the owner's rules (see `.claude/skills/README.md`).

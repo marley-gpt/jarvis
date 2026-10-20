@@ -79,3 +79,30 @@ class MentorCaptureTest(BrainTest):
         files = [p for p in paths.home().rglob("lesson.json")]
         self.assertEqual(len(files), 1)
         self.assertIn(str(paths.files_dir() / "mentor" / "skool"), str(files[0]))
+
+
+class MentorImportTest(BrainTest):
+    def test_bundle_import_files_lesson_and_makes_transcript_searchable(self):
+        self.init()
+        folder = self.home / "dl"
+        folder.mkdir()
+        bundle = {"format": "jarvis-skool/1",
+                  "lesson": {**LESSON, "url": "https://www.skool.com/x/classroom/y?md=1", "description": "Filters to use",
+                             "resources": [{"title": "Sheet", "link": "https://example.com"}],
+                             "cues": [[0, "All right"], [75, "always check the Kalodata revenue column"]]},
+                  "frames": [{**LESSON, "t": 75, "data": JPEG}], "images": []}
+        (folder / "jarvis-skool-02-01-deep.json").write_text(json.dumps(bundle), encoding="utf-8")
+        (folder / "jarvis-skool-partial.json").write_text("{not json", encoding="utf-8")
+        done = mentor_capture.import_bundles(folder, conn=self.conn)
+        self.assertEqual(len(done), 1)
+        self.assertFalse((folder / "jarvis-skool-02-01-deep.json").exists())
+        self.assertTrue((folder / "jarvis-skool-partial.json").exists())
+        from jarvis import memory
+        hits = memory.search(self.conn, "Kalodata revenue column", category="mentor")
+        self.assertEqual(hits[0]["title"], "Transcript: Product Research - Deep product Research (Incl Market/Competitor)")
+        self.assertIn("[01:15] always check", memory.get(self.conn, hits[0]["id"]).body)
+        # Re-importing supersedes instead of duplicating.
+        (folder / "jarvis-skool-02-01-deep.json").write_text(json.dumps(bundle), encoding="utf-8")
+        mentor_capture.import_bundles(folder, conn=self.conn)
+        active = self.conn.execute("SELECT COUNT(*) FROM memory WHERE title LIKE 'Transcript:%' AND status = 'active'").fetchone()[0]
+        self.assertEqual(active, 1)

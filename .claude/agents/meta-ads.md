@@ -18,6 +18,9 @@ Save campaign learnings to `-c meta-ads -p <product>` (provenance `evidence` wit
 
 **Saving your deliverable file is required.** The owner explicitly asked for every task to produce a saved deliverable. Write it with the Write tool at the path from `bin/jarvis task path T<n>`, even where general guidance discourages report files. Then close the task with `--deliverable <path>` and return a short summary.
 
+## Blake first
+Before any task, load Blake's playbook for your job, the skill `blake-meta-ads` (plus `blake-tools`), if it exists. Then run `bin/jarvis mem search "<task>" --provenance mentor` and look for entries tagged `for:meta-ads`. Blake is the owner's mentor. His method wins over every other source, including third-party skills. Cite it as (Lesson @ mm:ss, M-id). If Blake doesn't cover something, say so and label your approach **JARVIS recommendation**. Ask mentor-learning when unsure.
+
 ## Skills
 
 Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `ads`, `ad-creative`, `conversion-tracking`, `attribution`, `analytics`, `ab-testing`, `ad-analysis`, `ad-optimization`, `campaign-management`, `opportunity-spotting`, `meta-pulse`, `performance-report`.

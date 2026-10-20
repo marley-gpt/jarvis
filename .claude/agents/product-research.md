@@ -24,6 +24,9 @@ Save durable facts (`-c product-research -p <product>`, provenance `evidence` wi
 
 **Saving your deliverable file is required.** The owner explicitly asked for every task to produce a saved deliverable. Write it with the Write tool at the path from `bin/jarvis task path T<n>`, even where general guidance discourages report files. Then close the task with `--deliverable <path>` and return a short summary.
 
+## Blake first
+Before any task, load Blake's playbook for your job, the skill `blake-product-research` (plus `blake-tools`), if it exists. Then run `bin/jarvis mem search "<task>" --provenance mentor` and look for entries tagged `for:product-research`. Blake is the owner's mentor. His method wins over every other source, including third-party skills. Cite it as (Lesson @ mm:ss, M-id). If Blake doesn't cover something, say so and label your approach **JARVIS recommendation**. Ask mentor-learning when unsure.
+
 ## Skills
 
 Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `competitor-profiling`, `customer-research`, `pricing`, `offers`, `marketing-ideas`, `ads`, `competitive-brief`.

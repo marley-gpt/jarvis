@@ -350,6 +350,24 @@ def cmd_mentor_serve(conn, args):
     mentor_capture.serve(port=args.port)
 
 
+def cmd_mentor_import(conn, args):
+    from . import mentor_capture
+    folder = Path(args.folder).expanduser() if args.folder else Path.home() / "Downloads"
+    done = mentor_capture.import_bundles(folder, remove=not args.keep, conn=conn)
+    out(f"Imported {len(done)} lesson(s) from {folder}")
+    for d in done:
+        out(f"  {d}")
+
+
+def cmd_mentor_script(conn, args):
+    from . import mentor_capture
+    target = paths.home() / "scratch" / "skool-install.js"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(mentor_capture.install_snippet(), encoding="utf-8")
+    out(f"Install snippet written to {paths.rel(target)}. Run its contents once per Skool tab, then on each lesson "
+        "page: eval(sessionStorage.jarvisSkool); await JarvisSkool.captureLesson({...})")
+
+
 def cmd_mentor_status(conn, args):
     from . import mentor_capture
     done = mentor_capture.captured()
@@ -575,6 +593,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = mentor.add_parser("serve", help="receive lessons captured by core/jarvis/skool_capture.js")
     s.add_argument("--port", type=int, default=8766)
     s.set_defaults(fn=cmd_mentor_serve)
+    s = mentor.add_parser("import", help="file lesson bundles saved by the browser into the brain")
+    s.add_argument("--folder", help="where Chrome saved them (default: ~/Downloads)")
+    s.add_argument("--keep", action="store_true", help="keep the bundle files after importing")
+    s.set_defaults(fn=cmd_mentor_import)
+    s = mentor.add_parser("script", help="write the one-time browser install snippet")
+    s.set_defaults(fn=cmd_mentor_script)
     s = mentor.add_parser("status", help="list captured lessons")
     s.set_defaults(fn=cmd_mentor_status)
 

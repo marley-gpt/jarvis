@@ -1,23 +1,34 @@
 // Runs inside a Skool classroom page in the owner's logged-in Chrome (via Claude in Chrome's
-// javascript tool). It reads only what the owner can already see and posts it to the local
-// receiver started by `bin/jarvis mentor serve` (see core/jarvis/mentor_capture.py).
+// javascript tool). It reads only what the owner can already see. Skool's Content-Security-Policy
+// blocks connections to this PC, so each lesson is packed into ONE file that Chrome saves to the
+// owner's Downloads folder (jarvis-skool-*.json); `bin/jarvis mentor import` files it in the brain
+// (see core/jarvis/mentor_capture.py).
 //
-// Usage from the agent, after replacing the two placeholders with values from
-// brain/scratch/mentor-capture.json:
-//   const CAPTURE = { port: __PORT__, token: "__TOKEN__" };  <this file>  await JarvisSkool.<fn>(...)
+// Usage from the agent: run `bin/jarvis mentor script` once per browser tab to get the one-time
+// install snippet (it stores this file in the tab's sessionStorage), then on every lesson page:
+//   eval(sessionStorage.jarvisSkool); await JarvisSkool.<fn>(...)
 //
 //   JarvisSkool.courses()                 -> [{order, id, name, title, modules}] on the classroom page
 //   JarvisSkool.lessons()                 -> [{order, id, title, hasVideo, resources}] on a course page
 //   JarvisSkool.captureLesson(opts)       -> summary of what was saved for the lesson in ?md=<id>
 //       opts: {courseOrder, courseTitle, lessonOrder, every: 8, minGap: 45, maxFrames: 80, width: 1280}
 (function () {
-  const base = `http://127.0.0.1:${CAPTURE.port}`;
-  const headers = { "Content-Type": "application/json", "X-Capture-Token": CAPTURE.token };
+  // Everything for one lesson is collected here, then saved as a single download.
+  let bundle = null;
   const post = async (path, body) => {
-    const r = await fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
-    return r.json();
+    if (path === "/lesson") bundle.lesson = body;
+    else (path === "/frame" ? bundle.frames : bundle.images).push(body);
+    return { ok: true };
   };
+  function download(name) {
+    const blob = new Blob([JSON.stringify(bundle)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return blob.size;
+  }
+  const fileSlug = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const deep = (root, acc = []) => {
     root.querySelectorAll("*").forEach((el) => { acc.push(el); if (el.shadowRoot) deep(el.shadowRoot, acc); });
@@ -56,10 +67,17 @@
   async function ensureVideo(timeoutMs = 12000) {
     let v = deep(document).find((e) => e.tagName === "VIDEO");
     if (v) return v;
-    // The player only mounts after the poster is clicked: click the largest image in the lesson pane.
-    const imgs = [...document.querySelectorAll("main img, img")].filter((i) => i.width > 300).sort((a, b) => b.width - a.width);
-    if (!imgs.length) return null;
-    imgs[0].click();
+    // The player only mounts after the poster is clicked. Skool's poster is a div with a background
+    // image from image.video.skool.com inside a "skool-mux" container; fall back to the largest image.
+    const poster = [...document.querySelectorAll("div")].find((d) => /image\.video\.skool\.com|mux\.com/.test(getComputedStyle(d).backgroundImage))
+      || document.querySelector('[class*="skool-mux"]')
+      || [...document.querySelectorAll("img")].filter((i) => i.width > 300).sort((a, b) => b.width - a.width)[0];
+    if (!poster) return null;
+    const r = poster.getBoundingClientRect();
+    const target = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) || poster;
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+    }
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       await sleep(400);
@@ -139,16 +157,39 @@
       return data().course.children.map(unit).map((m, i) => ({ order: i + 1, id: m.id, title: m.metadata.title,
         hasVideo: !!m.metadata.videoId, resources: parseResources(m.metadata.resources) }));
     },
+    // Capture every lesson of the open course, one after another, without reloading the page:
+    // each lesson's data comes from its own page HTML, and the player is reached by clicking the
+    // lesson in Skool's sidebar. Progress is kept on window.__jarvisCourse for polling.
+    async captureCourse(opts) {
+      const o = Object.assign({ from: 1 }, opts);
+      const lessons = this.lessons();
+      const st = window.__jarvisCourse = { total: lessons.length, done: [], current: null, error: null, finished: false };
+      for (const l of lessons.filter((x) => x.order >= o.from)) {
+        st.current = l.title;
+        try {
+          const html = await (await fetch(location.pathname + "?md=" + l.id)).text();
+          const nd = JSON.parse(new DOMParser().parseFromString(html, "text/html").getElementById("__NEXT_DATA__").textContent).props.pageProps;
+          const meta = nd.course.children.map(unit).find((m) => m.id === l.id);
+          const link = [...document.querySelectorAll("a")].find((a) => a.textContent.trim() === l.title);
+          if (link) { link.click(); await sleep(2500); }
+          deep(document).filter((e) => e.tagName === "VIDEO").forEach((v) => { if (!new URL(location.href).searchParams.get("md")?.startsWith(l.id.slice(0, 8))) v.pause(); });
+          st.done.push(await this.captureLesson({ ...o, lessonOrder: l.order, meta }));
+        } catch (e) { st.done.push({ lesson: l.title, error: String(e) }); }
+      }
+      st.current = null; st.finished = true;
+      return st;
+    },
     async captureLesson(opts) {
       const o = Object.assign({ every: 8, minGap: 45, maxFrames: 80, width: 1280 }, opts);
       const pp = data();
       const md = new URL(location.href).searchParams.get("md");
       const mods = pp.course.children.map(unit);
-      const idx = mods.findIndex((m) => m.id === md);
+      const idx = o.meta ? mods.findIndex((m) => m.id === o.meta.id) : mods.findIndex((m) => m.id === md);
       if (idx < 0) throw new Error("open a lesson (?md=<id>) first");
-      const m = mods[idx];
+      const m = o.meta || mods[idx];
       const ids = { course_order: o.courseOrder, course_title: o.courseTitle || unit(pp.course).metadata.title,
         lesson_order: o.lessonOrder || idx + 1, lesson_title: m.metadata.title };
+      bundle = { format: "jarvis-skool/1", frames: [], images: [] };
       const body = richText(m.metadata.desc);
       const resources = parseResources(m.metadata.resources);
       const v = m.metadata.videoId ? await ensureVideo() : null;
@@ -163,7 +204,10 @@
         catch (e) { console.warn("image", i + 1, e); }
       }
       const kept = v ? await frames(v, ids, o) : [];
-      return { lesson: ids.lesson_title, video: v ? Math.round(v.duration) : 0, cues: cues.length,
+      const file = `jarvis-skool-${String(ids.course_order).padStart(2, "0")}-${String(ids.lesson_order).padStart(2, "0")}-${fileSlug(ids.lesson_title)}.json`;
+      const bytes = download(file);
+      bundle = null;
+      return { file, mb: +(bytes / 1048576).toFixed(1), lesson: ids.lesson_title, video: v ? Math.round(v.duration) : 0, cues: cues.length,
         transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length,
         resources: resources.length, descriptionChars: body.text.length };
     },

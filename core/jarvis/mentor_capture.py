@@ -189,6 +189,72 @@ def make_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT, token: str | 
     return server
 
 
+def remember_transcript(conn, lesson: dict, where: Path):
+    """Make the whole lesson searchable for every agent: one mentor memory entry per lesson with the full
+    word-for-word transcript, lesson text and resources. Re-importing a lesson supersedes its entry."""
+    from . import memory
+    title = f"Transcript: {lesson['course_title']} - {lesson['lesson_title']}"
+    cues = lesson.get("cues") or []
+    parts = [f"Full capture of the Skool lesson **{lesson['lesson_title']}** (course: {lesson['course_title']}).",
+             f"Files: `{paths.rel(where)}` (transcript.md, frames/ named mm-ss.jpg, images/). Lesson URL: {lesson.get('url', '')}",
+             "Captions are auto-generated, so names, numbers and brand terms may be misheard: check the frame at that "
+             "timestamp before relying on one. Cite as (lesson title @ mm:ss)."]
+    if lesson.get("description"):
+        parts += ["## Lesson text", lesson["description"]]
+    if lesson.get("resources"):
+        parts += ["## Resources"] + [f"- {r.get('title', 'link')}: {r.get('link', '')}" for r in lesson["resources"]]
+    if cues:
+        parts += ["## Transcript"] + [f"[{mmss(t)}] {text}" for t, text in cues]
+    else:
+        parts += ["## Transcript", "_No captions on this lesson (text-only, or a video without a caption track)._"]
+    body = "\n\n".join(parts[:3]) + "\n\n" + "\n".join(parts[3:]) + "\n"
+    old = conn.execute("SELECT id FROM memory WHERE title = ? AND category = 'mentor' AND status = 'active'",
+                       (title,)).fetchone()
+    entry, _ = memory.remember(conn, title=title, body=body, category="mentor", provenance="mentor",
+                               tags=["transcript", "skool", slug(lesson["course_title"], 30)],
+                               confidence="likely" if cues else "confirmed", source=lesson["lesson_title"],
+                               source_ref=lesson.get("url"), supersedes=old["id"] if old else None, force=True)
+    return entry.id
+
+
+def import_bundles(folder: Path, remove: bool = True, conn=None) -> list[str]:
+    """File every jarvis-skool-*.json bundle (one per lesson, saved by skool_capture.js) into the brain."""
+    done = []
+    # Oldest first, so a later re-capture wins over an earlier one of the same lesson.
+    for f in sorted(Path(folder).glob("jarvis-skool-*.json"), key=lambda p: p.stat().st_mtime):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue  # still downloading, or not ours
+        if data.get("format") != "jarvis-skool/1" or not data.get("lesson"):
+            continue
+        lesson = data["lesson"]
+        existing = lesson_dir(lesson["course_order"], lesson["course_title"], lesson["lesson_order"],
+                              lesson["lesson_title"]) / "transcript.md"
+        if existing.exists() and not lesson.get("cues"):
+            # An emptier capture (e.g. a failed earlier attempt) must never replace a full one.
+            if remove:
+                f.unlink()
+            done.append(f"skipped {f.name}: has no transcript but one is already captured")
+            continue
+        where = save_lesson(dict(lesson))
+        for fr in data.get("frames", []):
+            save_image(fr, "frame")
+        for im in data.get("images", []):
+            save_image(im, "image")
+        mem_id = remember_transcript(conn, lesson, where) if conn is not None else None
+        done.append(f"{paths.rel(where)}  [{mem_id or 'no memory entry'}] ({len(lesson.get('cues') or [])} caption lines, "
+                    f"{len(data.get('frames', []))} frames, {len(data.get('images', []))} images)")
+        if remove:
+            f.unlink()
+    return done
+
+
+def install_snippet() -> str:
+    """One-time snippet for a browser tab: stores the capture script in sessionStorage."""
+    return f"sessionStorage.jarvisSkool = {json.dumps(SCRIPT.read_text(encoding='utf-8'))}; 'installed'"
+
+
 def info_path() -> Path:
     return paths.home() / "scratch" / "mentor-capture.json"
 
