@@ -1,7 +1,7 @@
 """Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
 
 `bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
-sidebar console at `/`, the isometric office at `/office`, the first version at
+isometric office at `/`, the sidebar console at `/console`, the first version at
 `/classic`, all sharing jarvis.js) and streams
 state over Server-Sent Events. Talking to JARVIS runs Claude Code headless
 (`claude -p --output-format stream-json`), resuming one conversation, so it uses
@@ -33,8 +33,8 @@ from urllib.parse import parse_qs, unquote
 from . import brief, db, journal, memory, paths, records
 
 STATIC = paths.CORE_DIR / "dashboard"
-# Two prototypes of the same live dashboard, plus the first version.
-PAGES = {"/": "console.html", "/console": "console.html", "/office": "office.html", "/classic": "index.html"}
+# The office is the main view (owner decision D1); the console and the first version stay available.
+PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/classic": "index.html"}
 ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
