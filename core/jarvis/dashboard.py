@@ -551,6 +551,9 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 
     class Server(ThreadingHTTPServer):
         daemon_threads = True
+        # On Windows SO_REUSEADDR lets a second dashboard bind the same port silently and serve
+        # stale code; fail instead so serve() can open the one already running.
+        allow_reuse_address = os.name != "nt"
 
         def handle_error(self, request, client_address):
             import sys
@@ -563,7 +566,14 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 
 
 def serve(port: int = 8765, open_browser: bool = True) -> None:
-    server = make_server(port=port)
+    try:
+        server = make_server(port=port)
+    except OSError:
+        url = f"http://127.0.0.1:{port}/"
+        print(f"JARVIS dashboard is already running at {url}. Opening it.", flush=True)
+        if open_browser:
+            webbrowser.open(url)
+        return
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"JARVIS dashboard running at {url}  (Ctrl+C to stop)", flush=True)
     if not find_claude():
