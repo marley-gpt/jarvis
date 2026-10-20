@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, records
+from . import brief, db, journal, memory, paths, records, tts
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -53,10 +53,15 @@ AGENT_LABELS = {
 
 # Kept free of cmd.exe metacharacters: on Windows `claude` is often a .cmd shim.
 VOICE_PROMPT = (
-    "The owner is talking to you through the JARVIS dashboard, often by voice, and your replies are read aloud. "
-    "Answer like a natural conversation: short spoken sentences, no tables, no code blocks, no headings, "
-    "no long lists. When you hand work to specialists, say who is doing what. Put detail in deliverable files, "
-    "not in the spoken reply. Consequential actions still need the owner's approval in the chat."
+    "The owner is talking to you through the JARVIS dashboard, often by voice, and your replies are read aloud "
+    "in a British voice. Speak as JARVIS from the films: a calm, courteous British butler and engineer, "
+    "unflappable, precise and quietly capable, with a dry and understated wit used lightly. "
+    "Use British spelling and phrasing. You may address the owner as sir now and then, but sparingly, "
+    "never in every reply. Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
+    "no lists, no markdown. Lead with the answer, then the one thing that matters next. "
+    "When you hand work to specialists, say plainly who is doing what. Put detail in deliverable files, "
+    "not in the spoken reply. Never invent figures or results. Consequential actions such as spending, "
+    "launching or changing ads, prices or the live store still need the owner's approval first."
 )
 
 
@@ -392,6 +397,7 @@ class Runner:
 def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     hub = Hub()
     runner = Runner(hub)
+    kokoro = tts.Kokoro()
     token = secrets.token_urlsafe(24)
 
     class Handler(BaseHTTPRequestHandler):
@@ -444,6 +450,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 finally:
                     conn.close()
                 data["jarvis"]["claude"] = bool(find_claude())
+                data["tts"] = kokoro.info()
                 return self._json(200, data)
             if self.path == "/api/events":
                 return self._events()
@@ -516,6 +523,12 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 except FileNotFoundError as exc:
                     return self._json(503, {"error": str(exc)})
                 return self._json(202, {"ok": True})
+            if self.path == "/api/tts":
+                try:
+                    wav = kokoro.speak(body.get("text") or "", body.get("voice"), body.get("speed"))
+                except (tts.TTSError, OSError, ValueError) as exc:
+                    return self._json(503, {"error": str(exc)})
+                return self._send(200, wav, "audio/wav")
             if self.path == "/api/approval":
                 conn = db.connect()
                 try:
@@ -544,7 +557,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 super().handle_error(request, client_address)
 
     server = Server((host, port), Handler)
-    server.hub, server.runner, server.token = hub, runner, token
+    server.hub, server.runner, server.token, server.tts = hub, runner, token, kokoro
     return server
 
 
@@ -555,6 +568,10 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
     if not find_claude():
         print("Note: Claude Code CLI not found, so the page will show live state but can't talk to JARVIS yet.",
               flush=True)
+    if server.tts.command():
+        threading.Thread(target=server.tts.warm, daemon=True).start()
+    else:
+        print("Note: Kokoro voice not installed, so JARVIS will use the browser's voice.", flush=True)
     if open_browser:
         webbrowser.open(url)
     try:
@@ -562,4 +579,5 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        server.tts.stop()
         server.server_close()

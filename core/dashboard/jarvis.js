@@ -48,7 +48,7 @@
   J.memory = async (q, c) => (await fetch(`/api/memory?q=${encodeURIComponent(q || "")}&c=${encodeURIComponent(c || "")}`)).json();
   J.memoryEntry = async (id) => (await fetch(`/api/memory/${encodeURIComponent(id)}`)).json();
   J.decide = async (id, approve) => { await post("/api/approval", { id, approve }); J.refresh(); };
-  J.stop = () => { speechSynthesis?.cancel(); speakQueue = 0; setSpeaking(false); if (J.listening) rec?.stop(); post("/api/stop").catch(() => {}); };
+  J.stop = () => { cancelSpeech(); if (J.listening) rec?.stop(); post("/api/stop").catch(() => {}); };
   J.newConversation = () => post("/api/new").catch((e) => J.emit("error", { text: e.message }));
 
   let saidThisTurn = false, failedTurn = false;
@@ -126,15 +126,17 @@
     if (!rec) return J.emit("error", { text: "Voice input needs Chrome or Edge. You can still type." });
     if (J.listening) return rec.stop();
     failedTurn = false;
-    speechSynthesis?.cancel(); speakQueue = 0; setSpeaking(false);
+    cancelSpeech();
     try { rec.start(); } catch (e) { /* already starting */ }
   };
 
   // ---------------------------------------------------------- voice out
+  // JARVIS speaks with Kokoro (a local neural voice served by /api/tts) when it is installed,
+  // otherwise with the browser's own voice. Voice ids: "kokoro:bm_george" or a browser voice name.
   J.settings = {
     get handsfree() { return J.pref("handsfree") === "1"; }, set handsfree(v) { J.pref("handsfree", v ? "1" : "0"); if (v) { failedTurn = false; afterTurn(); } },
-    get speak() { return J.pref("speak") !== "0"; }, set speak(v) { J.pref("speak", v ? "1" : "0"); if (!v) speechSynthesis?.cancel(); },
-    get voice() { return J.pref("voice"); }, set voice(v) { J.pref("voice", v); },
+    get speak() { return J.pref("speak") !== "0"; }, set speak(v) { J.pref("speak", v ? "1" : "0"); if (!v) cancelSpeech(); },
+    get voice() { return J.pref("speechVoice"); }, set voice(v) { J.pref("speechVoice", v); },
   };
   J.voices = () => (window.speechSynthesis ? speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en")) : []);
   J.bestVoice = () => {
@@ -142,10 +144,30 @@
     return vs.find((v) => v.name === J.settings.voice) || vs.find((v) => /natural|neural|online/i.test(v.name) && /en-(GB|AU)/.test(v.lang))
       || vs.find((v) => /natural|neural|online/i.test(v.name)) || vs[0];
   };
+  const kokoroOn = () => !!J.state?.tts?.available;
+  J.voiceOptions = () => [
+    ...(kokoroOn() ? J.state.tts.voices.map((v) => ({ id: "kokoro:" + v.id, label: `JARVIS (Kokoro) · ${v.name}` })) : []),
+    ...J.voices().map((v) => ({ id: v.name, label: v.name })),
+  ];
+  J.currentVoice = () => {
+    const saved = J.settings.voice, opts = J.voiceOptions();
+    if (saved && opts.some((o) => o.id === saved)) return saved;
+    if (kokoroOn()) return "kokoro:" + J.state.tts.voice;
+    return J.bestVoice()?.name || "";
+  };
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => J.emit("voices", J.voices());
+  let ttsSeen = null;
+  J.on("state", (s) => { const k = JSON.stringify(s.tts || null); if (k !== ttsSeen) { ttsSeen = k; J.emit("voices", J.voices()); } });
 
-  let speakQueue = 0;
+  let speakQueue = 0, chain = Promise.resolve(), gen = 0, audio = null;
   function setSpeaking(v) { J.speaking = v; setStatus(J.status); }
+  function cancelSpeech() {
+    gen++; speakQueue = 0;
+    window.speechSynthesis?.cancel();
+    if (audio) { const a = audio; audio = null; a.pause(); }
+    setSpeaking(false);
+  }
+  J.cancelSpeech = cancelSpeech;
   J.spoken = (t) => t.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/[*_#>|]/g, "").replace(/\bT(\d+)\b/g, "task $1").replace(/A\$/g, "A dollars ").replace(/\s+/g, " ").trim();
   function chunks(text) {
@@ -157,24 +179,69 @@
   }
   function say(text) {
     const all = J.spoken(text);
-    if (!J.settings.speak || !window.speechSynthesis || !all) { J.emit("caption", { text: all, done: true }); return; }
-    chunks(all).forEach(sayChunk);
+    if (!J.settings.speak || !all) { J.emit("caption", { text: all, done: true }); return; }
+    const voice = J.currentVoice(), my = gen;
+    const kokoro = voice.startsWith("kokoro:") && kokoroOn();
+    chunks(all).forEach((c) => {
+      speakQueue++; setSpeaking(true);
+      const wav = kokoro ? fetchWav(c, voice.slice(7)) : null;  // fetched ahead while earlier sentences play
+      wav?.catch(() => {});
+      chain = chain
+        .then(() => (my !== gen ? null : wav ? playWav(c, wav, my).catch(() => my === gen && playBrowser(c)) : playBrowser(c)))
+        .catch(() => {})
+        .then(() => {
+          if (my !== gen) return;
+          speakQueue = Math.max(0, speakQueue - 1);
+          J.emit("caption", { text: c, done: true });
+          if (!speakQueue) { setSpeaking(false); afterTurn(); }
+        });
+    });
   }
-  function sayChunk(clean) {
-    const u = new SpeechSynthesisUtterance(clean);
-    const v = J.bestVoice();
-    if (v) u.voice = v;
-    u.rate = 1.03;
-    u.onstart = () => J.emit("caption", { text: clean, at: 0 });
-    u.onboundary = (ev) => { if (ev.name === "word" || ev.name === undefined) J.emit("caption", { text: clean, at: ev.charIndex }); };
-    u.onend = u.onerror = () => {
-      speakQueue = Math.max(0, speakQueue - 1);
-      J.emit("caption", { text: clean, done: true });
-      if (!speakQueue) { setSpeaking(false); afterTurn(); }
-    };
-    speakQueue++; setSpeaking(true);
-    speechSynthesis.speak(u);
+  async function fetchWav(text, voice) {
+    const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": window.JARVIS_TOKEN },
+      body: JSON.stringify({ text, voice }) });
+    if (!r.ok) throw new Error("tts " + r.status);
+    return URL.createObjectURL(await r.blob());
   }
+  function playWav(text, wavPromise, my) {
+    return wavPromise.then((url) => new Promise((resolve, reject) => {
+      if (my !== gen) { URL.revokeObjectURL(url); return resolve(); }
+      const a = audio = new Audio(url);
+      let raf = 0, settled = false;
+      const done = (ok) => {
+        if (settled) return; settled = true;
+        cancelAnimationFrame(raf); URL.revokeObjectURL(url);
+        if (audio === a) audio = null;
+        ok ? resolve() : reject(new Error("playback failed"));
+      };
+      // Kokoro gives no word timings, so the caption follows the audio's progress through the sentence.
+      let last = -1;
+      const tick = () => {
+        const at = a.duration ? Math.floor(text.length * a.currentTime / a.duration) : 0;
+        if (at !== last) { last = at; J.emit("caption", { text, at }); }
+        raf = requestAnimationFrame(tick);
+      };
+      a.onplay = () => { J.emit("caption", { text, at: 0 }); raf = requestAnimationFrame(tick); };
+      a.onended = () => done(true);
+      a.onerror = () => done(false);
+      a.onpause = () => { if (my !== gen) done(true); };  // stopped by the owner
+      a.play().catch(() => done(false));
+    }));
+  }
+  function playBrowser(clean) {
+    return new Promise((resolve) => {
+      if (!window.speechSynthesis) return resolve();
+      const u = new SpeechSynthesisUtterance(clean);
+      const v = J.voices().find((x) => x.name === J.currentVoice()) || J.bestVoice();
+      if (v) u.voice = v;
+      u.rate = 1.03;
+      u.onstart = () => J.emit("caption", { text: clean, at: 0 });
+      u.onboundary = (ev) => { if (ev.name === "word" || ev.name === undefined) J.emit("caption", { text: clean, at: ev.charIndex }); };
+      u.onend = u.onerror = () => resolve();
+      speechSynthesis.speak(u);
+    });
+  }
+  J.preview = () => { cancelSpeech(); say("Very good. This is how I shall sound from now on."); };
   J.say = say;
   function afterTurn() {
     if (failedTurn) return;  // don't keep reopening the mic after an error

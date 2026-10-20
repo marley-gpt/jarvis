@@ -9,6 +9,7 @@ from helpers import CORE, BrainTest
 from jarvis import dashboard, db, records
 
 FAKE = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_claude.py")]
+FAKE_TTS = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_tts.py")]
 
 
 class DashboardTest(BrainTest):
@@ -24,6 +25,7 @@ class DashboardTest(BrainTest):
 
     def tearDown(self):
         self.server.shutdown()
+        self.server.tts.stop()
         self.server.server_close()
         super().tearDown()
 
@@ -171,6 +173,38 @@ class DashboardTest(BrainTest):
         conn = db.connect()
         self.assertEqual(db.get_meta(conn, "dashboard_session"), "sess-123")
         conn.close()
+
+    def test_kokoro_voice(self):
+        (self.home / "config.json").write_text(json.dumps({"claude_command": FAKE, "tts_command": FAKE_TTS}),
+                                              encoding="utf-8")
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertTrue(state["tts"]["available"])
+        self.assertEqual(state["tts"]["voice"], "bm_george")
+        self.assertIn("bm_george", [v["id"] for v in state["tts"]["voices"]])
+        self.assertEqual(self.request("POST", "/api/tts", {"text": "Good evening."}, token=False)[0], 403)
+        status, wav = self.request("POST", "/api/tts", {"text": "Good evening, sir.", "voice": "bm_lewis"})
+        self.assertEqual(status, 200)
+        self.assertEqual(wav[:4], b"RIFF")
+        # Once the worker reports its voices, only those are offered.
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertEqual([v["id"] for v in state["tts"]["voices"]], ["bm_george", "bm_lewis", "bm_daniel", "bf_emma"])
+        self.assertEqual(self.request("POST", "/api/tts", {"text": "boom"})[0], 503)
+        self.assertEqual(self.request("POST", "/api/tts", {"text": "  "})[0], 503)
+        # A crashed worker is restarted on the next request.
+        self.server.tts.proc.kill()
+        self.server.tts.proc.wait()
+        self.assertEqual(self.request("POST", "/api/tts", {"text": "Still here."})[0], 200)
+
+    def test_voice_falls_back_without_kokoro(self):
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertFalse(state["tts"]["available"])
+        self.assertEqual(self.request("POST", "/api/tts", {"text": "Hello"})[0], 503)
+
+    def test_voice_prompt_is_jarvis_and_shell_safe(self):
+        prompt = dashboard.VOICE_PROMPT
+        for phrase in ("British", "sir", "approval", "who is doing what"):
+            self.assertIn(phrase, prompt)
+        self.assertFalse(set(prompt) & set('%^&|<>"'))
 
     def test_missing_cli_is_reported(self):
         (self.home / "config.json").write_text(json.dumps({"claude_command": ["definitely-not-a-real-cli-xyz"]}),

@@ -498,8 +498,8 @@ J.on("state", onState)
   .on("voices", fillVoices);
 
 function fillVoices() {
-  const vs = J.voices(), best = J.bestVoice();
-  $("voice").innerHTML = vs.map((v) => `<option ${best && v.name === best.name ? "selected" : ""}>${esc(v.name)}</option>`).join("") || "<option>Default voice</option>";
+  const cur = J.currentVoice();
+  $("voice").innerHTML = J.voiceOptions().map((o) => `<option value="${esc(o.id)}" ${o.id === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("") || "<option>Default voice</option>";
 }
 $("send").onclick = () => { J.send($("text").value); $("text").value = ""; };
 $("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").onclick(); } };
@@ -508,7 +508,7 @@ $("stop").onclick = () => J.stop();
 $("new").onclick = () => J.newConversation();
 $("handsfree").checked = J.settings.handsfree; $("handsfree").onchange = (e) => (J.settings.handsfree = e.target.checked);
 $("speak").checked = J.settings.speak; $("speak").onchange = (e) => (J.settings.speak = e.target.checked);
-$("voice").onchange = (e) => { J.settings.voice = e.target.value; J.say("This is my voice now."); };
+$("voice").onchange = (e) => { J.settings.voice = e.target.value; J.preview(); };
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); }
   if ((e.key === "o" || e.key === "O") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) location.href = "/";
