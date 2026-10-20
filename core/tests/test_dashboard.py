@@ -138,6 +138,40 @@ class DashboardTest(BrainTest):
         self.assertFalse(db.get_meta(conn, "dashboard_session"))
         conn.close()
 
+    def use_fake(self, *flags):
+        (self.home / "config.json").write_text(json.dumps({"claude_command": [*FAKE, *flags]}), encoding="utf-8")
+
+    def test_logged_out_cli_is_explained_once(self):
+        self.use_fake("--fake-logged-out")
+        self.request("POST", "/api/chat", {"text": "hello Jarvis"})
+        self.wait_idle()
+        self.assertFalse([e for e in self.events if e["type"] == "say"])  # the raw CLI message is not read out
+        reply = next(e for e in self.events if e["type"] == "reply")
+        self.assertTrue(reply["is_error"] and reply["login"])
+        self.assertIn("isn't signed in", reply["text"])
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertTrue(state["jarvis"]["login_needed"])
+
+        # Once signed in, the next answer clears the warning.
+        self.use_fake()
+        self.events.clear()
+        self.request("POST", "/api/chat", {"text": "hello again"})
+        self.wait_idle()
+        state = json.loads(self.request("GET", "/api/state", token=False)[1])
+        self.assertFalse(state["jarvis"]["login_needed"])
+
+    def test_missing_saved_conversation_starts_fresh(self):
+        db.set_meta(self.conn, "dashboard_session", "gone-456")
+        self.use_fake("--fake-missing-session")
+        self.request("POST", "/api/chat", {"text": "hello"})
+        self.wait_idle()
+        self.assertFalse([e for e in self.events if e["type"] == "error"])
+        say = next(e for e in self.events if e["type"] == "say")
+        self.assertIn("Resumed=False", say["text"])
+        conn = db.connect()
+        self.assertEqual(db.get_meta(conn, "dashboard_session"), "sess-123")
+        conn.close()
+
     def test_missing_cli_is_reported(self):
         (self.home / "config.json").write_text(json.dumps({"claude_command": ["definitely-not-a-real-cli-xyz"]}),
                                               encoding="utf-8")

@@ -60,6 +60,13 @@ VOICE_PROMPT = (
 )
 
 
+# Claude Code's own wording when it has no credentials, and when a resumed conversation is gone.
+LOGIN_PROBLEM = re.compile(r"^\s*(not logged in|invalid api key|please run /login)", re.I)
+MISSING_SESSION = re.compile(r"no conversation found", re.I)
+LOGIN_HELP = ("I can't answer yet because Claude Code isn't signed in on this computer. "
+              "Open a terminal, run claude once and sign in with your Claude account, then talk to me again.")
+
+
 # ---------------------------------------------------------------- state
 
 def agent_roster() -> list[dict]:
@@ -151,7 +158,7 @@ def snapshot(conn, live: dict | None = None) -> dict:
         "counts": counts,
         "brain": str(paths.home()),
         "jarvis": {"status": live.get("status", "idle"), "request": live.get("request"),
-                   "claude": live.get("claude")},
+                   "claude": live.get("claude"), "login_needed": bool(db.get_meta(conn, "claude_login_needed"))},
     }
 
 
@@ -172,6 +179,7 @@ def signature(conn) -> tuple:
     parts.append(conn.execute("SELECT MAX(updated) FROM tasks").fetchone()[0])
     parts.append(conn.execute("SELECT MAX(updated) FROM memory").fetchone()[0])
     parts.append(conn.execute("SELECT MAX(updated) FROM products").fetchone()[0])
+    parts.append(db.get_meta(conn, "claude_login_needed"))
     parts.append(conn.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0])
     parts.append(conn.execute("SELECT GROUP_CONCAT(status) FROM tests").fetchone()[0])
     return tuple(parts)
@@ -242,13 +250,14 @@ class Runner:
         finally:
             conn.close()
 
-    def reset(self) -> None:
+    def reset(self, announce: bool = True) -> None:
         conn = db.connect()
         try:
             db.set_meta(conn, "dashboard_session", "")
         finally:
             conn.close()
-        self.hub.publish({"type": "reset"})
+        if announce:
+            self.hub.publish({"type": "reset"})
 
     def start(self, text: str) -> None:
         with self.lock:
@@ -268,36 +277,63 @@ class Runner:
             self.proc.terminate()
 
     def _run(self, claude: list[str], text: str) -> None:
+        try:
+            sid = self.session()
+            got_result, err = self._attempt(claude, text, sid)
+            if not got_result and sid and MISSING_SESSION.search(err):
+                # The saved conversation is gone (e.g. cleared by Claude Code): start a fresh one.
+                self.reset(announce=False)
+                got_result, err = self._attempt(claude, text, None)
+            if not got_result:
+                self.hub.publish({"type": "error", "text": journal.short(err or "JARVIS stopped without answering.", 400)})
+        except OSError as exc:
+            self.hub.publish({"type": "error", "text": f"Could not start Claude Code: {exc}"})
+        finally:
+            self.proc = None
+            self.live = {"status": "idle", "agents": {}, "activity": self.live.get("activity", {})}
+            self.hub.publish({"type": "status", "status": "idle"})
+
+    def _attempt(self, claude: list[str], text: str, sid: str | None) -> tuple[bool, str]:
         cmd = [*claude, "-p", "--output-format", "stream-json", "--verbose",
                "--permission-mode", "acceptEdits", "--append-system-prompt", VOICE_PROMPT]
-        sid = self.session()
         if sid:
             cmd += ["--resume", sid]
         dispatched: dict[str, str] = {}
         got_result = False
+        proc = self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT)
         try:
-            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                         text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT)
-            self.proc.stdin.write(text)
-            self.proc.stdin.close()
-            for line in self.proc.stdout:
+            proc.stdin.write(text)
+            proc.stdin.close()
+            for line in proc.stdout:
                 try:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 got_result |= self._handle(ev, dispatched)
-            self.proc.wait()
-            if not got_result:
-                err = (self.proc.stderr.read() or "").strip()
-                self.hub.publish({"type": "error", "text": journal.short(err or "JARVIS stopped without answering.", 400)})
-        except OSError as exc:
-            self.hub.publish({"type": "error", "text": f"Could not start Claude Code: {exc}"})
+            proc.wait()
+            return got_result, ("" if got_result else (proc.stderr.read() or "").strip())
         finally:
-            self.live = {"status": "idle", "agents": {}, "activity": self.live.get("activity", {})}
-            self.hub.publish({"type": "status", "status": "idle"})
+            proc.stdout.close()
+            proc.stderr.close()
+
+    def _login_needed(self, needed: bool) -> None:
+        conn = db.connect()
+        try:
+            if bool(db.get_meta(conn, "claude_login_needed")) != needed:
+                db.set_meta(conn, "claude_login_needed", "1" if needed else "")
+        finally:
+            conn.close()
 
     def _handle(self, ev: dict, dispatched: dict) -> bool:
         kind = ev.get("type")
+        if kind == "result":
+            text = ev.get("result") or ""
+            if ev.get("is_error") and LOGIN_PROBLEM.search(text):
+                self._login_needed(True)
+                self.hub.publish({"type": "reply", "text": LOGIN_HELP, "is_error": True, "login": True})
+                return True
+            self._login_needed(False)
         if ev.get("session_id") and kind in ("system", "result"):
             conn = db.connect()
             try:
@@ -311,6 +347,8 @@ class Runner:
                 if not isinstance(block, dict):
                     continue
                 if block.get("type") == "text" and block.get("text", "").strip():
+                    if not parent and LOGIN_PROBLEM.search(block["text"]):
+                        continue  # reported once, in plain words, with the result
                     if parent and parent in dispatched:
                         self._agent_line(dispatched[parent], journal.short(block["text"], 110))
                     elif not parent:

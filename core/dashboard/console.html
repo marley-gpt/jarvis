@@ -14,6 +14,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
 button { font: inherit; color: inherit; }
 .app { display: grid; grid-template-columns: 250px 1fr 360px; height: 100%; }
+.app > * { min-width: 0; }  /* a wide child (e.g. the scrolling menu) must not widen the page */
 
 /* sidebar */
 nav { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
@@ -172,6 +173,7 @@ aside .hd b { font-size: 13px; } #st { color: var(--muted); font-size: 12px; }
   aside { border-left: 0; border-top: 1px solid var(--line); height: 70vh; } #toasts { right: 16px; }
   .cmd { flex-wrap: wrap; } .cmd .nums { margin-left: 0; } .split { grid-template-columns: 1fr; }
   header, #view { padding-left: 16px; padding-right: 16px; }
+  header { flex-wrap: wrap; } header .right { margin-left: 0; flex-wrap: wrap; } #clock { display: none; }
 }
 </style>
 </head>
@@ -182,13 +184,14 @@ aside .hd b { font-size: 13px; } #st { color: var(--muted); font-size: 12px; }
     <div class="nav" id="nav"></div>
     <div class="sect">Agents</div>
     <div id="side-agents"></div>
-    <div class="sect" style="padding-bottom:16px"><a href="/" style="color:var(--accent);text-decoration:none">Open office view →</a></div>
+    <div class="sect" style="padding-bottom:16px"><a href="/" style="color:var(--accent);text-decoration:none">← Back to the office</a></div>
   </nav>
 
   <main>
     <header>
       <div><h1 id="vtitle">Command Center</h1><div class="crumb" id="vsub"></div></div>
       <div class="right">
+        <a class="chip" href="/" style="color:var(--accent);text-decoration:none" title="Back to the office (O)">⬢ Office</a>
         <span class="chip" id="apchip">0 approvals</span>
         <span class="chip" id="spend">A$0 / 50</span>
         <span id="conn-wrap" style="font-size:12px;color:var(--muted)"><span id="conn" class="dot"></span><span id="conn-t">offline</span></span>
@@ -239,7 +242,9 @@ const SUBS = {
 };
 const STAGES = ["idea", "researching", "preparing", "ready", "testing", "passed", "failed", "scaling", "archived"];
 const flash = {};
-let view = (location.hash.slice(1) || J.pref("console.view") || "command");
+const [hashView, hashAgent] = location.hash.slice(1).split("/");
+let view = hashView || J.pref("console.view") || "command";
+let pendingFocus = hashAgent ? decodeURIComponent(hashAgent) : null;
 let chatLoaded = false, current = null, vaultQ = "", vaultC = "", vaultOpen = null;
 
 // ------------------------------------------------------------ navigation
@@ -269,7 +274,7 @@ function onState(s) {
   $("apchip").textContent = `${ap} approval${ap === 1 ? "" : "s"} waiting`;
   $("apchip").className = "chip" + (ap ? " hot" : "");
   $("spend").textContent = `A$${s.cost.spent.toFixed(2)} / ${s.cost.budget.toFixed(0)}`;
-  banner(s.jarvis.claude ? "" : "Talking to JARVIS needs the Claude Code CLI (free with your Claude plan). Install it, then restart the dashboard. You can already watch the team.");
+  banner(!s.jarvis.claude ? "Talking to JARVIS needs the Claude Code CLI (free with your Claude plan). Install it, then restart the dashboard. You can already watch the team." : s.jarvis.login_needed ? "JARVIS can't answer yet: Claude Code isn't signed in. Open a terminal, run claude once and sign in, then talk to JARVIS again." : "");
   $("side-agents").innerHTML = s.agents.map((a) => {
     const st = statusOf(a);
     return `<div class="sa" data-name="${a.name}"><span class="i">${J.meta(a.name).icon}</span>${esc(a.label)}<span class="pill ${st}">${PILL[st]}</span></div>`;
@@ -282,6 +287,7 @@ function onState(s) {
   if (J.status === "idle" && s.jarvis.status !== "idle") showStatus(s.jarvis.status, s.jarvis.request);
   renderNav();
   if (view !== "vault") renderView();
+  if (pendingFocus) { const n = pendingFocus; pendingFocus = null; setTimeout(() => focusAgent(n), 50); }
 }
 const statusOf = (a) => (a.status !== "working" && flash[a.name] > Date.now() ? "done" : a.status);
 
@@ -502,8 +508,11 @@ $("stop").onclick = () => J.stop();
 $("new").onclick = () => J.newConversation();
 $("handsfree").checked = J.settings.handsfree; $("handsfree").onchange = (e) => (J.settings.handsfree = e.target.checked);
 $("speak").checked = J.settings.speak; $("speak").onchange = (e) => (J.settings.speak = e.target.checked);
-$("voice").onchange = (e) => (J.settings.voice = e.target.value);
-document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); } });
+$("voice").onchange = (e) => { J.settings.voice = e.target.value; J.say("This is my voice now."); };
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); }
+  if ((e.key === "o" || e.key === "O") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) location.href = "/";
+});
 
 function tick() { $("clock").textContent = new Date().toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 setInterval(tick, 1000); tick();

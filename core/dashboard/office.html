@@ -40,7 +40,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #04101f; }
 #brand b { letter-spacing: .22em; font-size: 13px; display: block; }
 #brand small { color: var(--muted); font-size: 11px; }
-#brand a { color: var(--accent); font-size: 11.5px; text-decoration: none; margin-left: 8px; }
+#brand a { color: #04101f; background: linear-gradient(135deg, var(--accent), var(--accent2)); font-size: 12px; font-weight: 600;
+  text-decoration: none; margin-left: 10px; padding: 6px 11px; border-radius: 9px; white-space: nowrap; }
+#brand a:hover { filter: brightness(1.1); }
+.deep { display: inline-block; margin-top: 14px; color: var(--accent); font-size: 12.5px; text-decoration: none;
+  border: 1px solid rgba(56,189,248,.45); border-radius: 8px; padding: 6px 11px; margin-right: 6px; }
+.deep:hover { background: rgba(56,189,248,.1); }
 #top { top: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
 #speaker { width: 62px; height: 62px; border-radius: 50%; border: 0; font-size: 24px; color: #04101f;
   background: radial-gradient(circle at 35% 30%, #a5e8ff, var(--accent) 45%, #1e3a8a 100%); box-shadow: 0 0 26px rgba(56,189,248,.45); transition: transform .2s; }
@@ -56,6 +61,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #toggles { display: flex; gap: 6px; font-size: 11px; }
 #toggles button { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 2px 9px; color: var(--muted); }
 #toggles button.on { color: var(--accent); border-color: rgba(56,189,248,.5); }
+#notice { top: 76px; left: 16px; max-width: 330px; padding: 10px 13px; font-size: 12.5px; color: var(--warn); border-color: rgba(251,191,36,.45); display: none; }
+#toggles select { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font: inherit; font-size: 11px; padding: 2px 6px; max-width: 150px; }
 #toasts { top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; width: 300px; }
 .toast { padding: 9px 13px; font-size: 12.5px; border-left: 3px solid var(--accent); animation: in .25s ease-out; }
 .toast b { display: block; font-size: 12px; }
@@ -88,8 +95,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ap button { background: rgba(16,26,45,.9); border: 1px solid var(--line); border-radius: 7px; padding: 3px 10px; font-size: 12px; margin: 6px 6px 0 0; }
 .ap .ok { color: var(--ok); border-color: rgba(52,211,153,.5); } .ap .no { color: var(--bad); border-color: rgba(248,113,113,.5); }
 @media (max-width: 760px) {
-  #mini, #models { display: none; } #toasts { width: auto; left: 16px; top: 120px; } #brand { padding: 8px 10px; }
-  #brand small, #brand a { display: none; } #captions { bottom: 12px; } #cap { font-size: 15px; } #drawer { width: 100%; }
+  #models, #mini #minimap { display: none; } #mini { bottom: 150px; padding: 6px; } #mini .zoom { flex-direction: column; margin: 0; }
+  #mini .zoom button { width: 36px; height: 32px; } #top { top: 72px; } #notice { top: 196px; }
+  #toggles { flex-wrap: wrap; justify-content: center; } #toggles select { max-width: 120px; }
+  #toasts { width: auto; left: 16px; top: 196px; } #brand { padding: 8px 10px; }
+  #brand small { display: none; } #brand a { padding: 5px 9px; } #captions { bottom: 12px; } #cap { font-size: 15px; } #drawer { width: 100%; }
 }
 </style>
 </head>
@@ -104,12 +114,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   <g id="scene"><g id="ground"></g><g id="roads"></g><g id="beams"></g><g id="rooms"></g></g>
 </svg>
 
-<div id="brand" class="hud glass"><div class="logo">J</div><div><b>JARVIS</b><small>Urban Supplied HQ</small></div><a href="/console">Console →</a></div>
+<div id="brand" class="hud glass"><div class="logo">J</div><div><b>JARVIS</b><small>Urban Supplied HQ</small></div><a href="/console" title="Open the detailed console (D)">▦ Detailed view</a></div>
 <div id="top" class="hud">
   <button id="speaker" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
   <div id="status" class="glass"><span class="dot"></span><span id="st">Connecting…</span></div>
-  <div id="toggles"><button id="t-speak">🔊 Voice</button><button id="t-hands">Hands-free</button><button id="t-stop">Stop</button></div>
+  <div id="toggles"><button id="t-speak">🔊 Voice</button><button id="t-hands">Hands-free</button><select id="t-voice" title="JARVIS voice"></select><button id="t-stop">Stop</button></div>
 </div>
+<div id="notice" class="hud glass"></div>
 <div id="toasts" class="hud"><button id="apbtn" class="glass"></button></div>
 <div id="models" class="hud"></div>
 <div id="mini" class="hud glass">
@@ -242,12 +253,13 @@ function render(s) {
   $("apbtn").style.display = ap ? "block" : "none";
   $("apbtn").textContent = `⚠ ${ap} approval${ap === 1 ? "" : "s"} waiting for you`;
   if (selected) openDrawer(selected, false);
-  if (!s.jarvis.claude) setCap(null, "Talking needs the Claude Code CLI. Install it and restart the dashboard; you can already watch the team.");
+  const note = !s.jarvis.claude ? "Talking to JARVIS needs the Claude Code CLI (free with your Claude plan). Install it, then restart the dashboard. You can already watch the team." : s.jarvis.login_needed ? "JARVIS can't answer yet: Claude Code isn't signed in. Open a terminal, run claude once and sign in, then talk to JARVIS again." : "";
+  $("notice").textContent = note; $("notice").style.display = note ? "block" : "none";
 }
 
 // ------------------------------------------------------------ camera
 const FIT = { x: -900, y: -660, w: 1800, h: 1180 };  // extra headroom so the top HUD clears the top room
-let vb = { ...FIT };
+let vb = innerWidth < 760 ? { x: -560, y: -520, w: 1120, h: 1040 } : { ...FIT };  // phones start closer in
 function applyView() {
   const W = innerWidth, H = innerHeight, k = Math.max(vb.w / W, vb.h / H);
   const w = W * k, h = H * k, x = vb.x + (vb.w - w) / 2, y = vb.y + (vb.h - h) / 2;
@@ -297,6 +309,7 @@ function openDrawer(name, show = true) {
   if (name === "__brain") {
     $("dbody").innerHTML = `<div class="ly" style="color:var(--accent)">Shared memory</div><h3>The Brain</h3>
       <div class="mono">${s.memory.total} notes · ${esc(Object.entries(s.memory.by_category).map(([c, n]) => `${c} ${n}`).join(" · "))}</div>
+      <div><a class="deep" href="/console#tasks">Tasks →</a><a class="deep" href="/console#approvals">Approvals →</a><a class="deep" href="/console#vault">Knowledge vault →</a><a class="deep" href="/console#costs">Costs →</a></div>
       <h4>Recently learned</h4>${s.memory.recent.map((m) => `<div class="li">${esc(m.title)} <span class="mono">${esc(m.id)}</span></div>`).join("") || `<div class="mono">Nothing yet.</div>`}
       <h4>Jobs JARVIS is running</h4>${s.tasks.map((t) => `<div class="li"><b>T${t.id}</b> ${esc(t.title)}<div class="mono">${t.subtasks.map((x) =>
         `${x.status === "done" ? "✓" : x.status === "in_progress" ? "▸" : "·"} ${esc(J.label(x.agent) || "?")}`).join("  ")}</div></div>`).join("") || `<div class="mono">No open jobs.</div>`}
@@ -308,6 +321,7 @@ function openDrawer(name, show = true) {
     $("dbody").innerHTML = `<div class="ly" style="color:${m.color}">${m.layer}</div><h3>${m.icon} ${esc(a.label)}</h3>
       <div class="mono">${esc(a.model)} · ${a.runs} runs · ${a.open} open · ${PILL[st]}</div>
       <p style="color:var(--muted);font-size:13px">${esc(m.blurb || a.role)}</p>
+      <a class="deep" href="/console#agents/${encodeURIComponent(a.name)}">Open in detailed view →</a>
       ${a.now ? `<h4>Now</h4><div class="li">▸ ${esc(a.now)}</div>` : ""}
       <h4>Live feed</h4>${a.activity.map((l) => `<div class="li mono">${esc(l)}</div>`).join("") || `<div class="mono">Quiet.</div>`}
       <h4>Open tasks</h4>${a.tasks.map((t) => `<div class="li"><b>T${t.id}</b> ${esc(t.title)} <span class="mono">${esc(t.status)}</span></div>`).join("") || `<div class="mono">None.</div>`}
@@ -383,7 +397,7 @@ J.on("state", (s) => { render(s); showStatus(); })
   .on("owner", (e) => setCap("owner", "You: " + e.text))
   .on("interim", (e) => setCap("owner", "You: " + e.text + " …"))
   .on("say", (e) => { if (!J.settings.speak) setCap(null, J.spoken(e.text)); })
-  .on("error", (e) => toast("JARVIS", e.text, "#f87171"))
+  .on("error", (e) => toast(e.mic ? "Microphone" : e.login ? "Sign-in needed" : "JARVIS", e.text, "#f87171"))
   .on("dispatch", (e) => { beam(e.agent); toast(`${J.meta(e.agent).icon} ${J.label(e.agent)}`, "Started: " + (e.description || "working"), J.meta(e.agent).color); J.refresh(); })
   .on("agent_activity", (e) => {
     const a = J.state?.agents.find((x) => x.name === e.agent);
@@ -404,9 +418,16 @@ function syncToggles() { $("t-speak").className = J.settings.speak ? "on" : ""; 
 $("t-speak").onclick = () => { J.settings.speak = !J.settings.speak; syncToggles(); };
 $("t-hands").onclick = () => { J.settings.handsfree = !J.settings.handsfree; syncToggles(); };
 $("t-stop").onclick = () => J.stop();
+function fillVoices() {
+  const vs = J.voices(), best = J.bestVoice();
+  $("t-voice").innerHTML = vs.map((v) => `<option ${best && v.name === best.name ? "selected" : ""}>${esc(v.name)}</option>`).join("") || "<option>Default voice</option>";
+}
+$("t-voice").onchange = (e) => { J.settings.voice = e.target.value; J.say("This is my voice now."); };
+J.on("voices", fillVoices); fillVoices();
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); }
   if (e.key === "Escape") closeDrawer();
+  if ((e.key === "d" || e.key === "D") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) location.href = "/console";
 });
 drawGround(); applyView(); syncToggles();
 </script>
