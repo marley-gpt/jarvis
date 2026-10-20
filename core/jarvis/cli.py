@@ -344,6 +344,22 @@ def cmd_dashboard(conn, args):
     dashboard.serve(port=args.port, open_browser=not args.no_open)
 
 
+def cmd_mentor_serve(conn, args):
+    from . import mentor_capture
+    conn.close()
+    mentor_capture.serve(port=args.port)
+
+
+def cmd_mentor_status(conn, args):
+    from . import mentor_capture
+    done = mentor_capture.captured()
+    info = mentor_capture.info_path()
+    out(f"Receiver: {'running (' + paths.rel(info) + ')' if info.exists() else 'not running'}")
+    out(f"Captured lessons: {len(done)} under {paths.rel(mentor_capture.root())}")
+    for d in done:
+        out(f"  {d}")
+
+
 def cmd_backup(conn, args):
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
@@ -553,6 +569,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
     s.set_defaults(fn=cmd_dashboard)
+
+    mentor = sub.add_parser("mentor", help="capture mentor lessons from the owner's browser").add_subparsers(
+        dest="sub", required=True)
+    s = mentor.add_parser("serve", help="receive lessons captured by core/jarvis/skool_capture.js")
+    s.add_argument("--port", type=int, default=8766)
+    s.set_defaults(fn=cmd_mentor_serve)
+    s = mentor.add_parser("status", help="list captured lessons")
+    s.set_defaults(fn=cmd_mentor_status)
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")

@@ -32,6 +32,11 @@ from . import paths
 ALLOWED_ORIGINS = ("https://www.skool.com", "https://skool.com")
 MAX_BODY = 25 * 1024 * 1024
 DEFAULT_PORT = 8766
+SCRIPT = Path(__file__).with_name("skool_capture.js")
+# What the agent runs in each lesson page (fill in port and token from info_path()):
+LOADER = ('const CAPTURE = {{port: {port}, token: "{token}"}}; '
+          'eval(await (await fetch(`http://127.0.0.1:${{CAPTURE.port}}/script`, '
+          '{{headers: {{"X-Capture-Token": CAPTURE.token}}}})).text()); ')
 
 
 def slug(text: str, n: int = 60) -> str:
@@ -140,6 +145,14 @@ def make_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT, token: str | 
                 return self._reply(403, {"error": "forbidden"})
             if self.path == "/status":
                 return self._reply(200, {"captured": captured()})
+            if self.path == "/script":
+                body = SCRIPT.read_bytes()
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "text/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                return self.wfile.write(body)
             self._reply(404, {"error": "not found"})
 
         def do_POST(self):
@@ -181,7 +194,9 @@ def serve(port: int = DEFAULT_PORT) -> None:
     server = make_server(port=port)
     p = info_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"port": server.server_address[1], "token": server.token}), encoding="utf-8")
+    port = server.server_address[1]
+    p.write_text(json.dumps({"port": port, "token": server.token,
+                             "loader": LOADER.format(port=port, token=server.token)}), encoding="utf-8")
     print(f"Mentor capture receiver on http://127.0.0.1:{server.server_address[1]} "
           f"(token in {paths.rel(p)}). Ctrl+C to stop.", flush=True)
     try:
