@@ -66,7 +66,7 @@
   }
 
   async function ensureVideo(timeoutMs = 12000) {
-    let v = deep(document).find((e) => e.tagName === "VIDEO");
+    let v = deep(document).find((e) => e.tagName === "VIDEO" && e.isConnected);
     if (v) return v;
     // The player only mounts after the poster is clicked. Skool's poster is a div with a background
     // image from image.video.skool.com inside a "skool-mux" container; fall back to the largest image.
@@ -217,7 +217,10 @@
           const nd = JSON.parse(new DOMParser().parseFromString(html, "text/html").getElementById("__NEXT_DATA__").textContent).props.pageProps;
           const meta = nd.course.children.map(unit).find((m) => m.id === l.id);
           const link = [...document.querySelectorAll("a")].find((a) => a.textContent.trim() === l.title);
+          // Wait for the previous lesson's player to go away, so the old video is never captured again.
+          const oldV = deep(document).find((e) => e.tagName === "VIDEO");
           if (link) { link.click(); await sleep(2500); }
+          for (let i = 0; i < 40 && oldV && oldV.isConnected; i++) await sleep(250);
           deep(document).filter((e) => e.tagName === "VIDEO").forEach((v) => { if (!new URL(location.href).searchParams.get("md")?.startsWith(l.id.slice(0, 8))) v.pause(); });
           st.done.push(await this.captureLesson({ ...o, lessonOrder: l.order, meta }));
         } catch (e) { st.done.push({ lesson: l.title, error: String(e) }); }
