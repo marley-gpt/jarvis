@@ -13,7 +13,8 @@ brain/files/mentor/skool/<course>/<NN-lesson>/:
 
   lesson.json      metadata, description text, resources, image list
   transcript.md    timed captions, one line per cue ([mm:ss] text)
-  frames/          video frames as mm-ss.jpg (deduplicated scene changes)
+  frames/          video frames as mm-ss.jpg: every on-screen change (2 s sampling, webcam ignored)
+  sheets/          the same frames tiled 3x3 with timestamps, for fast review
   images/          images embedded in the lesson text
 """
 
@@ -77,10 +78,13 @@ def save_lesson(data: dict) -> Path:
 
 def save_image(data: dict, kind: str) -> Path:
     d = lesson_dir(data["course_order"], data["course_title"], data["lesson_order"], data["lesson_title"])
-    sub = d / ("frames" if kind == "frame" else "images")
+    sub = d / {"frame": "frames", "sheet": "sheets"}.get(kind, "images")
     sub.mkdir(parents=True, exist_ok=True)
     if kind == "frame":
         name = mmss(float(data["t"])).replace(":", "-") + ".jpg"
+    elif kind == "sheet":
+        name = (f"sheet-{int(data.get('index', 0)):02d}_{mmss(float(data.get('from', 0))).replace(':', '-')}"
+                f"_to_{mmss(float(data.get('to', 0))).replace(':', '-')}.jpg")
     else:
         name = f"{int(data.get('index', 0)):02d}-{slug(data.get('name', 'image'), 40)}.jpg"
     raw = data["data"].split(",", 1)[-1]
@@ -231,6 +235,11 @@ def import_bundles(folder: Path, remove: bool = True, conn=None) -> list[str]:
         lesson = data["lesson"]
         existing = lesson_dir(lesson["course_order"], lesson["course_title"], lesson["lesson_order"],
                               lesson["lesson_title"]) / "transcript.md"
+        if lesson.get("cues") or data.get("frames"):
+            # A fresh full capture replaces the old frames entirely (no stale frames from coarser runs).
+            import shutil
+            for sub in ("frames", "sheets"):
+                shutil.rmtree(existing.parent / sub, ignore_errors=True)
         if existing.exists() and not lesson.get("cues"):
             # An emptier capture (e.g. a failed earlier attempt) must never replace a full one.
             if remove:
@@ -242,6 +251,8 @@ def import_bundles(folder: Path, remove: bool = True, conn=None) -> list[str]:
             save_image(fr, "frame")
         for im in data.get("images", []):
             save_image(im, "image")
+        for sh in data.get("sheets", []):
+            save_image(sh, "sheet")
         mem_id = remember_transcript(conn, lesson, where) if conn is not None else None
         done.append(f"{paths.rel(where)}  [{mem_id or 'no memory entry'}] ({len(lesson.get('cues') or [])} caption lines, "
                     f"{len(data.get('frames', []))} frames, {len(data.get('images', []))} images)")

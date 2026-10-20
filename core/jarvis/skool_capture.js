@@ -11,13 +11,13 @@
 //   JarvisSkool.courses()                 -> [{order, id, name, title, modules}] on the classroom page
 //   JarvisSkool.lessons()                 -> [{order, id, title, hasVideo, resources}] on a course page
 //   JarvisSkool.captureLesson(opts)       -> summary of what was saved for the lesson in ?md=<id>
-//       opts: {courseOrder, courseTitle, lessonOrder, every: 8, minGap: 45, maxFrames: 80, width: 1280}
+//       opts: {courseOrder, courseTitle, lessonOrder, every: 2, minGap: 30, minCells: 6, maxFrames: 500, width: 1280}
 (function () {
   // Everything for one lesson is collected here, then saved as a single download.
   let bundle = null;
   const post = async (path, body) => {
     if (path === "/lesson") bundle.lesson = body;
-    else (path === "/frame" ? bundle.frames : bundle.images).push(body);
+    else ({ "/frame": bundle.frames, "/image": bundle.images, "/sheet": bundle.sheets })[path].push(body);
     return { ok: true };
   };
   function download(name) {
@@ -110,31 +110,62 @@
     return cues.sort((a, b) => a[0] - b[0]);
   }
 
-  // Sample the video every `every` seconds; keep a frame when the picture changed (scene change)
-  // or `minGap` seconds passed since the last kept frame, so demonstrations aren't missed.
+  // Watch the screen: sample every `every` seconds (default 2) and keep a frame whenever anything on
+  // screen changed, however small (a filter, a typed number, a popup), plus at least every `minGap`
+  // seconds. The presenter's webcam moves constantly, so grid cells that change in most samples
+  // (the face cam) are learned during the first samples and ignored when judging "changed".
+  // Kept frames are also tiled 3x3 into labelled contact sheets for fast review.
   async function frames(v, ids, o) {
     v.muted = true; v.pause();
-    const small = document.createElement("canvas"); small.width = 48; small.height = 27;
+    const GW = 64, GH = 36, CELLS = GW * GH;
+    const small = document.createElement("canvas"); small.width = GW; small.height = GH;
     const sctx = small.getContext("2d", { willReadFrequently: true });
     const big = document.createElement("canvas");
     const scale = Math.min(1, o.width / v.videoWidth);
     big.width = Math.round(v.videoWidth * scale); big.height = Math.round(v.videoHeight * scale);
     const bctx = big.getContext("2d");
-    let prev = null, lastKept = -1e9, kept = [];
+    const TW = 640, TH = Math.round(640 * v.videoHeight / v.videoWidth);
+    const sheet = document.createElement("canvas"); sheet.width = TW * 3; sheet.height = TH * 3;
+    const shctx = sheet.getContext("2d");
+    let tiles = 0, sheetNo = 0, sheetFrom = 0;
+    const flushSheet = async (last) => {
+      if (!tiles) return;
+      sheetNo++;
+      await post("/sheet", { ...ids, index: sheetNo, from: sheetFrom, to: last, data: sheet.toDataURL("image/jpeg", 0.7) });
+      shctx.clearRect(0, 0, sheet.width, sheet.height); tiles = 0;
+    };
+    const grid = () => { sctx.drawImage(v, 0, 0, GW, GH); const d = sctx.getImageData(0, 0, GW, GH).data; const g = new Float32Array(CELLS); for (let i = 0; i < CELLS; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 765; return g; };
+    const busy = new Uint16Array(CELLS), mask = new Uint8Array(CELLS);
+    let prevSample = null, lastKeptGrid = null, lastKept = -1e9, samples = 0;
+    const kept = [];
     const seek = (t) => new Promise((res) => { const done = () => res(); v.addEventListener("seeked", done, { once: true }); v.currentTime = t; setTimeout(done, 8000); });
-    for (let t = 1; t < v.duration - 0.5 && kept.length < o.maxFrames; t += o.every) {
+    const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+    for (let t = 1; t < v.duration - 0.3 && kept.length < o.maxFrames; t += o.every) {
       await seek(t);
-      await sleep(120);
-      sctx.drawImage(v, 0, 0, 48, 27);
-      const px = sctx.getImageData(0, 0, 48, 27).data;
-      let diff = 0;
-      if (prev) { for (let i = 0; i < px.length; i += 4) diff += Math.abs(px[i] - prev[i]) + Math.abs(px[i + 1] - prev[i + 1]) + Math.abs(px[i + 2] - prev[i + 2]); diff /= (px.length / 4) * 765; }
-      if (!prev || diff > 0.06 || t - lastKept >= o.minGap) {
+      await sleep(90);
+      const g = grid();
+      if (prevSample) {
+        samples++;
+        for (let i = 0; i < CELLS; i++) if (Math.abs(g[i] - prevSample[i]) > 0.03) busy[i]++;
+        if (samples === o.learn) for (let i = 0; i < CELLS; i++) mask[i] = busy[i] >= o.learn * 0.6 ? 1 : 0;
+      }
+      prevSample = g;
+      let changed = 0;
+      if (lastKeptGrid) for (let i = 0; i < CELLS; i++) if (!mask[i] && Math.abs(g[i] - lastKeptGrid[i]) > 0.06) changed++;
+      if (!lastKeptGrid || changed >= o.minCells || t - lastKept >= o.minGap) {
         bctx.drawImage(v, 0, 0, big.width, big.height);
         await post("/frame", { ...ids, t, data: big.toDataURL("image/jpeg", 0.72) });
-        kept.push(Math.round(t)); lastKept = t; prev = px;
+        if (!tiles) sheetFrom = t;
+        const x = (tiles % 3) * TW, y = Math.floor(tiles / 3) * TH;
+        shctx.drawImage(v, x, y, TW, TH);
+        shctx.fillStyle = "rgba(0,0,0,.75)"; shctx.fillRect(x, y, 110, 34);
+        shctx.fillStyle = "#ffeb3b"; shctx.font = "bold 26px Consolas, monospace"; shctx.fillText(mmss(t), x + 8, y + 26);
+        tiles++;
+        if (tiles === 9) await flushSheet(t);
+        kept.push(Math.round(t)); lastKept = t; lastKeptGrid = g;
       }
     }
+    await flushSheet(lastKept);
     return kept;
   }
 
@@ -180,7 +211,7 @@
       return st;
     },
     async captureLesson(opts) {
-      const o = Object.assign({ every: 8, minGap: 45, maxFrames: 80, width: 1280 }, opts);
+      const o = Object.assign({ every: 2, minGap: 30, minCells: 6, learn: 20, maxFrames: 500, width: 1280 }, opts);
       const pp = data();
       const md = new URL(location.href).searchParams.get("md");
       const mods = pp.course.children.map(unit);
@@ -189,7 +220,7 @@
       const m = o.meta || mods[idx];
       const ids = { course_order: o.courseOrder, course_title: o.courseTitle || unit(pp.course).metadata.title,
         lesson_order: o.lessonOrder || idx + 1, lesson_title: m.metadata.title };
-      bundle = { format: "jarvis-skool/1", frames: [], images: [] };
+      bundle = { format: "jarvis-skool/1", frames: [], images: [], sheets: [] };
       const body = richText(m.metadata.desc);
       const resources = parseResources(m.metadata.resources);
       const v = m.metadata.videoId ? await ensureVideo() : null;
@@ -208,7 +239,7 @@
       const bytes = download(file);
       bundle = null;
       return { file, mb: +(bytes / 1048576).toFixed(1), lesson: ids.lesson_title, video: v ? Math.round(v.duration) : 0, cues: cues.length,
-        transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length,
+        transcriptChars: cues.reduce((n, c) => n + c[1].length, 0), frames: kept.length, images: imgs.length, sheets: Math.ceil(kept.length / 9),
         resources: resources.length, descriptionChars: body.text.length };
     },
   };
