@@ -35,7 +35,8 @@ def ledger_path():
 
 
 def add(conn, *, about: str, kind: str, verdict: str, source: str, what: str, why: str,
-        keep: str = "", change: str = "", evidence: str = "", product=None, agent=None, task=None):
+        keep: str = "", change: str = "", evidence: str = "", product=None, agent=None, task=None,
+        features: str = "", metrics: str = ""):
     if kind not in KINDS:
         raise FeedbackError(f"Unknown kind '{kind}'. Use one of: {', '.join(KINDS)}")
     if verdict not in VERDICTS:
@@ -46,6 +47,10 @@ def add(conn, *, about: str, kind: str, verdict: str, source: str, what: str, wh
     title = f"Feedback ({mark}): {about}"
     lines = [f"**Verdict:** {mark}, from {source}" + (f". Evidence: {evidence}" if evidence else ""),
              f"**What was made:** {what}", f"**Why (best understanding):** {why}"]
+    if features:
+        lines.append(f"**Features:** {features}")
+    if metrics:
+        lines.append(f"**Metrics:** {metrics}")
     if keep:
         lines.append(f"**Keep doing:** {keep}")
     if change:

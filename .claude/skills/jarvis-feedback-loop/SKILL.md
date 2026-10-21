@@ -36,6 +36,14 @@ Rules:
 - **Data beats opinion.** Mark small samples as such. A test below Blake's minimums is "insufficient data", never a win or a loss.
 - **Never invent feedback.** If the owner gave a verdict but no reason, record the verdict, and put your hypothesis under `--why` labelled "hypothesis".
 
+## 2b. Daily review of live tests (no prompt needed)
+- **Every day, at end of day,** product-testing reviews every live test and writes it down. Never rely on memory. On peak-sale days, make budget decisions only.
+- **One record per ad, winners and losers alike.** Fill `--features` with the same fixed list every time: format; focus; content type (AI or real); messaging style; hook; headline; offer and where it appears. Fill `--metrics` with the same fixed set: spend; cost per click; add-to-carts; checkouts; purchases; cost per sale; and the source of each number (store analytics vs ads manager).
+- **Write one batch summary a day:** the top and bottom performers side by side. What the winner has that the losers lack, and what the losers share. Study the losers at least as much as the winners. Expect a mix of causes, rarely just one.
+- **Check message match:** does the winners' wording also appear on the product page? Note the phrases under `--keep`.
+- **The next creative brief must say which features it changes and why.** QC fails a new batch that repeats the shared features of the last losers, or re-uploads near-copies of them.
+- Run the same loop for product pages, offers and product choices.
+
 ## 3. Close the loop: make it change behaviour
 - After every **3 or more records on the same pattern**, write a durable rule. Use `bin/jarvis mem add -c <category> --provenance evidence`, or `--provenance user` if it's the owner's call, tagged `feedback-rule` and `for:<agent>`. Then tell mentor-learning so the relevant `blake-*` playbook gains a "What has worked for Urban Supplied" note. That note is kept separate from Blake's cited methods.
 - If feedback shows a skill or playbook step is wrong for this store, flag it in your deliverable. Don't silently ignore it.

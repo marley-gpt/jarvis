@@ -364,7 +364,8 @@ def cmd_feedback_add(conn, args):
     from . import feedback
     e = feedback.add(conn, about=args.about, kind=args.kind, verdict=args.verdict, source=args.source, what=args.what,
                      why=args.why, keep=args.keep or "", change=args.change or "", evidence=args.evidence or "",
-                     product=args.product, agent=args.agent, task=args.task)
+                     product=args.product, agent=args.agent, task=args.task, features=args.features or "",
+                     metrics=args.metrics or "")
     out(f"Feedback saved {e.id} -> {paths.rel(e.path)} (and the ledger at brain/feedback/ledger.md)")
 
 
@@ -674,6 +675,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-p", "--product")
     s.add_argument("--agent", help="the agent whose work this was")
     s.add_argument("--task", help="T<n> it came from")
+    s.add_argument("--features", help="fixed feature list: format; focus; content type; messaging; hook; headline; offer (+ where)")
+    s.add_argument("--metrics", help="fixed metric set: spend; CPC; ATC; checkouts; purchases; cost per sale; source of each")
     s.set_defaults(fn=cmd_feedback_add)
     s = fb.add_parser("list", help="past feedback, newest first")
     s.add_argument("--agent")
