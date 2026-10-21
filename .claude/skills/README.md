@@ -13,6 +13,7 @@ Skills are playbooks that Claude Code and the JARVIS specialists load on demand 
 | skill | used by | what it does |
 |---|---|---|
 | `jarvis-memory` | every agent | How agents read and write the shared brain (`bin/jarvis`). |
+| `jarvis-product-pipeline` | JARVIS | "Start the ads for <product>": gate, research, 15 statics, QC before image spend, PDP, campaign, one review package, launch, daily feedback loop. |
 | `jarvis-feedback-loop` | every agent | Record every verdict on the team's work (owner reviews, test data, QC) as a lesson, and read past feedback before similar work (`bin/jarvis feedback`). |
 
 ## Marketing skills (52): `.claude/skills/`

@@ -19,11 +19,12 @@ Everything durable lives in `brain/` (git-ignored, because this repo is public) 
 
 1. **Small question or one-step job** → answer or do it directly after a memory search. No task record needed.
 2. **Real work** → create a parent task (`bin/jarvis task add "<goal>" [-p product]`, which prints `T<n>`). Register new products first: `bin/jarvis product add "<name>"`.
-3. **Break it down** into subtasks with `--parent T<n> --agent <name>`. Follow the stored workflow when one fits (`bin/jarvis mem search "launch workflow" -c procedures`).
-4. **Delegate** with the Agent tool. In every prompt include: the subtask id, the product slug, the exact deliverable wanted and its path (`bin/jarvis task path T<n>`), stated as a required file, and any memory ids or upstream deliverable paths it needs. Don't paste large content, pass paths and ids instead. Run independent subtasks **in parallel**, in one message, up to `max_parallel_agents` (4).
-5. **Collect**: each specialist saves its deliverable, closes its subtask and returns a short summary. Read the deliverables you need. Pass upstream paths to downstream agents (research → creative → shopify/meta).
-6. **Check** each deliverable against the mentor's methods (`mem search ... --provenance mentor`). Flag anywhere the mentor's methods were missing or not followed.
-7. **Report to the owner** concisely: what was done, where it is saved, what needs a decision, the recommended next step. Then close the parent task with `task done T<n> --summary ... --deliverable <summary file>`.
+3. **Product launches:** for "start the ads for <product>" / "test this product", follow the `jarvis-product-pipeline` skill end to end.
+4. **Break it down** into subtasks with `--parent T<n> --agent <name>`. Follow the stored workflow when one fits (`bin/jarvis mem search "launch workflow" -c procedures`).
+5. **Delegate** with the Agent tool. In every prompt include: the subtask id, the product slug, the exact deliverable wanted and its path (`bin/jarvis task path T<n>`), stated as a required file, and any memory ids or upstream deliverable paths it needs. Don't paste large content, pass paths and ids instead. Run independent subtasks **in parallel**, in one message, up to `max_parallel_agents` (4).
+6. **Collect**: each specialist saves its deliverable, closes its subtask and returns a short summary. Read the deliverables you need. Pass upstream paths to downstream agents (research → creative → shopify/meta).
+7. **Check** each deliverable against the mentor's methods (`mem search ... --provenance mentor`). Flag anywhere the mentor's methods were missing or not followed.
+8. **Report to the owner** concisely: what was done, where it is saved, what needs a decision, the recommended next step. Then close the parent task with `task done T<n> --summary ... --deliverable <summary file>`.
 
 ## Specialists (`.claude/agents/`)
 
