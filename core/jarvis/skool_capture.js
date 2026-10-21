@@ -143,7 +143,7 @@
     const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
     // A seek only counts once a new frame is actually painted (a throttled background tab can keep
     // returning the same old frame); frozen captures are flagged in the result for re-capture.
-    const painted = () => new Promise((res) => { if (!v.requestVideoFrameCallback) return res(); const to = setTimeout(res, 1500); v.requestVideoFrameCallback(() => { clearTimeout(to); res(); }); });
+    const painted = () => new Promise((res) => { if (!v.requestVideoFrameCallback) return res(); const to = setTimeout(res, 500); v.requestVideoFrameCallback(() => { clearTimeout(to); res(); }); });
     let identical = 0;
     for (let t = 1; t < v.duration - 0.3 && kept.length < o.maxFrames; t += o.every) {
       await seek(t);
