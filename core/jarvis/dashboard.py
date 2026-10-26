@@ -34,7 +34,8 @@ from . import brief, db, journal, memory, paths, readiness, records, tts, wakewo
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
-PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/classic": "index.html"}
+PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
+         "/classic": "index.html"}
 ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
@@ -46,6 +47,7 @@ AGENT_LABELS = {
     "creative-research": "Creative Research",
     "creative-director": "Creative Director",
     "shopify": "Shopify",
+    "store-qa": "Store QA",
     "meta-ads": "Meta Ads",
     "meta-ads-auditor": "Meta Auditor",
     "product-testing": "Product Testing",
@@ -58,7 +60,13 @@ VOICE_PROMPT = (
     "in a British voice. Speak as JARVIS from the films: a calm, courteous British butler and engineer, "
     "unflappable, precise and quietly capable, with a dry and understated wit used lightly. "
     "Use British spelling and phrasing. You may address the owner as sir now and then, but sparingly, "
-    "never in every reply. Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
+    "never in every reply. Talk the way he does in the films, as the jarvis-voice skill sets out: "
+    "give status crisply with the number first; offer the next step as a question that starts with Shall I; "
+    "take an instruction with a short As you wish or Very good; deliver bad news calmly and plainly, "
+    "prefaced with I am afraid or Unfortunately, then say what it means and what you suggest; "
+    "push back politely when something is unwise, and if the owner insists, comply with at most one dry aside; "
+    "look after the owner, mentioning rest if they have been at it very late. "
+    "Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
     "no lists, no markdown. Lead with the answer, then the one thing that matters next. "
     "When you hand work to specialists, say plainly who is doing what. Put detail in deliverable files, "
     "not in the spoken reply. Never invent figures or results. Consequential actions such as spending, "

@@ -28,6 +28,15 @@ class JournalTest(BrainTest):
         self.assertIn("Owner", text)
         self.assertIn("Noted ZenSupply", text)
 
+    def test_only_the_owners_own_words_are_journaled(self):
+        self.init()
+        notice = self.run_hook("prompt", {"session_id": "s1", "prompt": "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"})
+        self.assertEqual(notice.stdout.strip(), "")
+        self.run_hook("prompt", {"session_id": "s1", "prompt": '<artifact-view-context artifact="x">\n{"mode":"edit"}\n'
+                                 "</artifact-view-context>\n<artifact-content-authored-by-others/>\n\nwatch these reels"})
+        rows = [dict(r) for r in journal.recent(self.conn, limit=10)]
+        self.assertEqual([(r["role"], r["text"]) for r in rows], [("owner", "watch these reels")])
+
     def test_auto_recall_injects_memory_and_earlier_conversation(self):
         self.init()
         self.run_cli("mem", "add", "--title", "Winning hook style for posture products", "-c", "creative-inspiration",

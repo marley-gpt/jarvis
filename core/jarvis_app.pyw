@@ -2,7 +2,8 @@
 
 Starts the dashboard server in the background (no console window) unless it is already running,
 waits until it answers, then opens it as an app window (no address bar or tabs) in Chrome or Edge.
-`python core/jarvis_app.pyw --install` creates the Desktop and Start-menu shortcuts.
+`--chat` opens the chat window instead of the office.
+`python core/jarvis_app.pyw --install` creates the Desktop and Start-menu shortcuts (JARVIS and JARVIS Chat).
 """
 
 from __future__ import annotations
@@ -48,27 +49,28 @@ def start_server() -> None:
                          creationflags=NO_WINDOW | DETACHED, close_fds=True)
 
 
-def open_window() -> None:
+def open_window(page: str = "") -> None:
     browser = next((b for b in BROWSERS if Path(b).exists()), None)
+    size = "980,860" if page == "chat" else "1440,900"
     if browser:
         # A dedicated profile so the window's flags always apply (they're ignored if Chrome is already running),
         # sound can play when JARVIS wakes without a click first, and mic permission is remembered for JARVIS only.
         profile = Path(os.environ.get("LOCALAPPDATA", str(REPO))) / "JARVIS" / "browser-profile"
-        subprocess.Popen([browser, f"--app={URL}", "--window-size=1440,900", f"--user-data-dir={profile}",
+        subprocess.Popen([browser, f"--app={URL}{page}", f"--window-size={size}", f"--user-data-dir={profile}",
                           "--autoplay-policy=no-user-gesture-required", "--no-first-run", "--no-default-browser-check"],
                          creationflags=DETACHED, close_fds=True)
     else:
-        os.startfile(URL)
+        os.startfile(URL + page)
 
 
-def launch() -> None:
+def launch(page: str = "") -> None:
     if not running():
         start_server()
         for _ in range(60):  # up to ~30 s on a cold start (the voice model loads in the background)
             time.sleep(0.5)
             if running():
                 break
-    open_window()
+    open_window(page)
 
 
 # ---------------------------------------------------------------- icon and shortcuts
@@ -104,14 +106,21 @@ def install() -> None:
     target = str(pyw if pyw.exists() else sys.executable)
     script = str(Path(__file__).resolve())
     # Ask Windows for the real folders: the Desktop is often redirected into OneDrive.
+    shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"), ("JARVIS Chat", " --chat", "Chat with JARVIS"))
     for folder in ("Desktop", "Programs"):
-        ps = ("$d = [Environment]::GetFolderPath('{f}'); $p = Join-Path $d 'JARVIS.lnk'; "
-              "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p); $s.TargetPath = '{t}'; "
-              "$s.Arguments = '\"{a}\"'; $s.WorkingDirectory = '{w}'; $s.IconLocation = '{i},0'; "
-              "$s.Description = 'JARVIS - Urban Supplied AI'; $s.Save(); $p").format(f=folder, t=target, a=script, w=REPO, i=icon)
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, creationflags=NO_WINDOW)
-        print(f"Shortcut: {r.stdout.strip() or r.stderr.strip()}")
+        for name, extra, about in shortcuts:
+            ps = ("$d = [Environment]::GetFolderPath('{f}'); $p = Join-Path $d '{n}.lnk'; "
+                  "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p); $s.TargetPath = '{t}'; "
+                  "$s.Arguments = '\"{a}\"{x}'; $s.WorkingDirectory = '{w}'; $s.IconLocation = '{i},0'; "
+                  "$s.Description = '{d}'; $s.Save(); $p").format(f=folder, n=name, t=target, a=script, x=extra, w=REPO,
+                                                                  i=icon, d=about)
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                               creationflags=NO_WINDOW)
+            print(f"Shortcut: {r.stdout.strip() or r.stderr.strip()}")
 
 
 if __name__ == "__main__":
-    install() if "--install" in sys.argv else launch()
+    if "--install" in sys.argv:
+        install()
+    else:
+        launch("chat" if "--chat" in sys.argv else "")

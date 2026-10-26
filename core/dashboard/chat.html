@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS Chat</title>
+<style>
+/* Messenger layout: team rail on the left, one long conversation with JARVIS on the right. */
+:root {
+  --bg: #05080f; --rail: #080d18; --panel: #0c1322; --panel2: #111c30; --line: #1a2740; --text: #e6ecf7; --muted: #7f8fae;
+  --accent: #38bdf8; --accent2: #818cf8; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --glow: rgba(56,189,248,.35);
+  --me: linear-gradient(135deg, #1d4ed8, #4f46e5);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 14.5px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+button, select, textarea { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.app > * { min-width: 0; min-height: 0; }
+
+/* rail */
+aside { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 12px; }
+.brand b { letter-spacing: .24em; font-size: 14px; }
+.brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: 0; }
+.sect { padding: 14px 20px 6px; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.contact { display: flex; align-items: center; gap: 10px; margin: 0 10px; padding: 9px 10px; border-radius: 10px; cursor: pointer; }
+.contact:hover { background: var(--panel); }
+.contact.on { background: var(--panel2); }
+.contact .av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; flex: none;
+  background: var(--panel2); border: 1px solid var(--line); position: relative; }
+.contact .av.working::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--rail); box-shadow: 0 0 8px var(--accent); }
+.contact .who { min-width: 0; flex: 1; }
+.contact .who b { display: block; font-size: 13.5px; font-weight: 600; }
+.contact .who span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#team { flex: 1; overflow-y: auto; padding-bottom: 10px; }
+.rail-foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.rail-foot a { flex: 1; text-align: center; padding: 7px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
+  color: var(--muted); text-decoration: none; font-size: 12.5px; }
+.rail-foot a:hover { color: var(--text); }
+
+/* the JARVIS core */
+.orb { width: 34px; height: 34px; border-radius: 50%; flex: none; position: relative;
+  background: radial-gradient(circle at 50% 50%, #e0f7ff 0 14%, #7dd3fc 22%, #0ea5e9 42%, #0b3a5c 66%, transparent 70%);
+  box-shadow: 0 0 16px var(--glow); }
+.orb::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1.5px solid rgba(125,211,252,.45); }
+.orb.big { width: 42px; height: 42px; }
+.orb.thinking, .orb.working { animation: spin 1.6s linear infinite; }
+.orb.thinking::after, .orb.working::after { border-style: dashed; }
+.orb.speaking { animation: pulse .9s ease-in-out infinite; }
+.orb.listening { box-shadow: 0 0 22px var(--ok); }
+.orb.listening::after { border-color: var(--ok); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { box-shadow: 0 0 30px rgba(56,189,248,.8); transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .orb { animation: none !important; } }
+
+/* conversation */
+main { display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--rail); }
+header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .04em; }
+#st { font-size: 12.5px; color: var(--muted); }
+#st.live { color: var(--accent); }
+header .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.tog { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line);
+  background: var(--panel); font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.tog input { accent-color: var(--accent); margin: 0; }
+.tog:has(input:checked) { color: var(--text); border-color: rgba(56,189,248,.45); }
+select { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 5px 10px; font-size: 12px; max-width: 200px; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+#banner { display: none; margin: 12px 22px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px;
+  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35); color: var(--warn); }
+
+#thread { flex: 1; overflow-y: auto; padding: 18px 22px 10px; display: flex; flex-direction: column; gap: 8px; }
+.day { align-self: center; font-size: 11.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+  padding: 2px 12px; border-radius: 99px; margin: 10px 0 4px; }
+.row { display: flex; gap: 10px; align-items: flex-end; max-width: 760px; }
+.row.owner { align-self: flex-end; flex-direction: row-reverse; }
+.row .orb { width: 26px; height: 26px; }
+.row .orb::after { inset: -3px; }
+.bubble { padding: 9px 13px 7px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); min-width: 0;
+  overflow-wrap: anywhere; white-space: pre-wrap; }
+.row.jarvis .bubble { border-bottom-left-radius: 5px; }
+.row.owner .bubble { background: var(--me); border: 0; border-bottom-right-radius: 5px; }
+.bubble .t { display: block; text-align: right; font-size: 10.5px; color: rgba(230,236,247,.55); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.bubble code { background: rgba(0,0,0,.3); padding: 0 4px; border-radius: 4px; font-size: 13px; }
+.bubble.clip { max-height: 260px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.more { align-self: flex-start; margin-left: 36px; font-size: 12px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 0; }
+.sys { align-self: center; font-size: 12px; color: var(--muted); max-width: 640px; text-align: center; }
+.sys.err { color: var(--bad); }
+.typing { display: none; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); padding: 2px 22px 8px; }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; animation: blink 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 50% { opacity: .2; } }
+
+/* approvals pinned above the composer */
+#approvals { display: flex; flex-direction: column; gap: 8px; padding: 0 22px; }
+.approval { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 12px;
+  background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.35); font-size: 13px; }
+.approval .what { flex: 1; min-width: 0; }
+.approval .what b { color: var(--warn); font-weight: 600; margin-right: 6px; }
+.approval button { border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 12.5px; }
+.approval .yes { background: var(--ok); color: #04140c; }
+.approval .no { background: var(--panel2); }
+
+/* composer */
+.composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px 22px 16px; }
+.composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 180px; padding: 11px 14px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line); outline: none; }
+.composer textarea:focus { border-color: rgba(56,189,248,.6); }
+.round { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); cursor: pointer;
+  display: grid; place-items: center; font-size: 18px; flex: none; }
+.round:hover { border-color: var(--accent); }
+#mic.on { background: rgba(52,211,153,.18); border-color: var(--ok); }
+#send { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: 0; color: #04101f; font-weight: 700; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  aside { display: none; }
+  header .right .tog.opt, header select { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><div class="orb"></div><div><b>JARVIS</b><small>Urban Supplied</small></div></div>
+    <div class="sect">Chat</div>
+    <div class="contact on"><div class="av" style="background:none;border:0"><div class="orb" style="width:36px;height:36px"></div></div>
+      <div class="who"><b>JARVIS</b><span id="last">Your chief of staff</span></div></div>
+    <div class="sect">The team</div>
+    <div id="team"></div>
+    <div class="rail-foot"><a href="/" title="The isometric office">Office</a><a href="/console" title="Tasks, tests, memory and costs">Console</a></div>
+  </aside>
+  <main>
+    <header>
+      <div class="orb big" id="orb"></div>
+      <div><h1>JARVIS</h1><div id="st">Connecting…</div></div>
+      <div class="right">
+        <label class="tog opt" title="Say &quot;Hey JARVIS&quot; to wake him"><input type="checkbox" id="wake"> Hey JARVIS</label>
+        <label class="tog opt" title="Keep the mic open between replies"><input type="checkbox" id="handsfree"> Hands-free</label>
+        <label class="tog" title="Read replies aloud"><input type="checkbox" id="speak"> Voice</label>
+        <select id="voice" title="JARVIS's voice"></select>
+        <button class="btn" id="new" title="Start a fresh conversation; memory is kept">New chat</button>
+      </div>
+    </header>
+    <div id="banner"></div>
+    <div id="thread"></div>
+    <div class="typing" id="typing"><i></i><i></i><i></i><span id="typing-t">JARVIS is thinking</span></div>
+    <div id="approvals"></div>
+    <div class="composer">
+      <button class="round" id="mic" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
+      <textarea id="text" rows="1" placeholder="Message JARVIS…"></textarea>
+      <button class="round" id="stop" title="Stop JARVIS" hidden>■</button>
+      <button class="round" id="send" title="Send (Enter)">➤</button>
+    </div>
+  </main>
+</div>
+<script>window.JARVIS_TOKEN = "__JARVIS_TOKEN__";</script>
+<script src="/jarvis.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = J.esc;
+const STATUS = { idle: "Online", thinking: "Thinking…", working: "Working…", speaking: "Speaking…", listening: "Listening…" };
+let lastDay = null, loaded = false;
+
+// The journal also holds machine text: task notices, and context blocks wrapped in tags before the owner's words.
+const clean = (t) => /task-notification|^\s*\[SYSTEM/i.test(t) ? ""
+  : t.replace(/<([a-z][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/gi, "").replace(/<[a-z][\w-]*\b[^>]*\/>/gi, "").trim();
+
+function fmt(t) {
+  return esc(t)
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent)">$1</a>')
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*] /gm, "• ");
+}
+function dayLabel(d) {
+  const today = new Date(), y = new Date(Date.now() - 864e5);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  return same(d, today) ? "Today" : same(d, y) ? "Yesterday" : d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+}
+function stick() { const th = $("thread"); return th.scrollHeight - th.scrollTop - th.clientHeight < 80; }
+function bottom() { $("thread").scrollTop = $("thread").scrollHeight; }
+
+function addMsg(role, text, ts) {
+  const at = stick();
+  const d = ts ? new Date(ts.replace(" ", "T")) : new Date();
+  const key = d.toDateString();
+  if (key !== lastDay) { lastDay = key; const s = document.createElement("div"); s.className = "day"; s.textContent = dayLabel(d); $("thread").appendChild(s); }
+  const row = document.createElement("div");
+  row.className = "row " + role;
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  row.innerHTML = (role === "jarvis" ? '<div class="orb"></div>' : "") + `<div class="bubble">${fmt(text)}<span class="t">${time}</span></div>`;
+  $("thread").appendChild(row);
+  const b = row.querySelector(".bubble");
+  if (text.length > 900) {
+    b.classList.add("clip");
+    const more = document.createElement("button");
+    more.className = "more"; more.textContent = "Show all";
+    more.onclick = () => { b.classList.toggle("clip"); more.textContent = b.classList.contains("clip") ? "Show all" : "Show less"; };
+    if (role === "owner") more.style.alignSelf = "flex-end";
+    $("thread").appendChild(more);
+  }
+  if (at || role === "owner") bottom();
+  if (role === "jarvis") $("last").textContent = text.replace(/\s+/g, " ").slice(0, 60);
+}
+function addSys(text, cls) {
+  const at = stick();
+  const el = document.createElement("div");
+  el.className = "sys" + (cls ? " " + cls : ""); el.textContent = text;
+  $("thread").appendChild(el);
+  if (at) bottom();
+}
+
+function loadHistory(s) {
+  const rows = (s.journal || []).map((r) => ({ ...r, text: clean(r.text) })).filter((r) => r.text);
+  rows.forEach((r) => addMsg(r.role === "owner" ? "owner" : "jarvis", r.text, r.ts));
+  if (!rows.length) addMsg("jarvis", J.greeting());
+  bottom();
+}
+
+function renderTeam(s) {
+  $("team").innerHTML = s.agents.map((a) => {
+    const m = J.meta(a.name);
+    const line = a.status === "working" ? (a.now || "Working") : a.status === "queued" ? "Queued: " + (a.now || "") : (a.last_done ? "Done: " + a.last_done.title : m.layer);
+    return `<div class="contact" data-a="${esc(a.name)}" title="${esc(m.blurb)}"><div class="av ${a.status}">${m.icon}</div>
+      <div class="who"><b>${esc(a.label || a.name)}</b><span>${esc(line)}</span></div></div>`;
+  }).join("");
+  document.querySelectorAll("#team .contact").forEach((el) => (el.onclick = () => (location.href = "/console#agents/" + el.dataset.a)));
+}
+function renderApprovals(s) {
+  $("approvals").innerHTML = s.approvals.map((a) => `<div class="approval"><div class="what"><b>${esc(a.id)} · ${esc(a.kind)}</b>${esc(a.summary)}${
+    a.amount ? ` <span style="color:var(--muted)">(${esc(a.amount)} ${esc(a.currency || "")})</span>` : ""}</div>
+    <button class="yes" data-id="${esc(a.id)}" data-ok="1">Approve</button><button class="no" data-id="${esc(a.id)}" data-ok="0">Reject</button></div>`).join("");
+  document.querySelectorAll("#approvals button").forEach((b) => (b.onclick = () => J.decide(b.dataset.id, b.dataset.ok === "1")));
+}
+function banner(t) { $("banner").textContent = t || ""; $("banner").style.display = t ? "block" : "none"; }
+
+function showStatus() {
+  const shown = J.shown();
+  const busy = shown === "thinking" || shown === "working";
+  $("st").textContent = STATUS[shown] || shown;
+  $("st").className = shown === "idle" ? "" : "live";
+  $("orb").className = "orb big " + shown;
+  $("typing").style.display = busy ? "flex" : "none";
+  $("mic").className = "round" + (J.listening ? " on" : "");
+  $("stop").hidden = !(busy || J.speaking);
+}
+
+J.on("state", (s) => {
+  if (!loaded) { loaded = true; loadHistory(s); J.status = (s.jarvis && s.jarvis.status) || "idle"; showStatus(); }
+  renderTeam(s); renderApprovals(s);
+  banner(s.jarvis && s.jarvis.login_needed ? "Claude Code isn't signed in on this computer. Open a terminal, run claude once and sign in, then talk to me again." : "");
+  $("wake").checked = J.settings.wake;
+})
+  .on("status", (e) => { showStatus(e); if (e.status === "idle") $("typing-t").textContent = "JARVIS is thinking"; })
+  .on("owner", (e) => addMsg("owner", e.text))
+  .on("say", (e) => addMsg("jarvis", e.text))
+  .on("interim", (e) => { $("text").value = e.text; grow(); })
+  .on("error", (e) => addSys(e.text, "err"))
+  .on("jarvis_tool", (e) => { $("typing-t").textContent = e.summary || "Working"; })
+  .on("dispatch", (e) => { addSys(`${J.meta(e.agent).icon} ${J.label(e.agent)} is on it: ${e.description || "working"}`); J.refresh(); })
+  .on("agent_done", (e) => { addSys(`✓ ${J.label(e.agent)} finished`); J.refresh(); })
+  .on("reset", () => { $("thread").innerHTML = ""; lastDay = null; addSys("New conversation started. Memory and history are kept."); })
+  .on("connection", (e) => { if (e.live) showStatus(); else $("st").textContent = "Reconnecting…"; })
+  .on("awake", () => addSys("🎙 Awake"))
+  .on("voices", fillVoices);
+
+function fillVoices() {
+  const cur = J.currentVoice();
+  $("voice").innerHTML = J.voiceOptions().map((o) => `<option value="${esc(o.id)}" ${o.id === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("") || "<option>Default voice</option>";
+}
+function grow() { const t = $("text"); t.style.height = "auto"; t.style.height = Math.min(180, t.scrollHeight) + "px"; }
+function send() { const v = $("text").value; if (!v.trim()) return; J.send(v); $("text").value = ""; grow(); }
+$("send").onclick = send;
+$("text").oninput = grow;
+$("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+$("mic").onclick = () => J.listen();
+$("stop").onclick = () => J.stop();
+$("new").onclick = () => J.newConversation();
+$("wake").onchange = (e) => (J.settings.wake = e.target.checked);
+$("handsfree").checked = J.settings.handsfree; $("handsfree").onchange = (e) => (J.settings.handsfree = e.target.checked);
+$("speak").checked = J.settings.speak; $("speak").onchange = (e) => (J.settings.speak = e.target.checked);
+$("voice").onchange = (e) => { J.settings.voice = e.target.value; J.preview(); };
+document.addEventListener("keydown", (e) => { if (e.code === "Space" && e.ctrlKey) { e.preventDefault(); J.listen(); } });
+$("text").focus();
+</script>
+</body>
+</html>

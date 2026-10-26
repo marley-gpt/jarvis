@@ -148,7 +148,9 @@ def main(argv: list[str]) -> int:
                 sys.stderr.write(f"jarvis: daily backup failed: {exc}\n")
             sys.stdout.write(brief.session_brief(conn, session_id=event.get("session_id")) + "\n")
         elif kind == "prompt":
-            prompt = event.get("prompt") or ""
+            prompt = journal.owner_words(event.get("prompt") or "")
+            if not prompt:  # a background-task notice, not the owner
+                return
             session = event.get("session_id")
             context = recall(conn, prompt, session)  # search before recording, so the message can't match itself
             journal.record(conn, "owner", prompt, session)

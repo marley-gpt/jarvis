@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["core/jarvis_cli.py", "dashboard", "--no-open"],
       "port": 8765
+    },
+    {
+      "name": "jarvis-dashboard-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["core/jarvis_cli.py", "dashboard", "--no-open", "--port", "8799"],
+      "port": 8799
     }
   ]
 }

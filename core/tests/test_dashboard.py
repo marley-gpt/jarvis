@@ -58,14 +58,15 @@ class DashboardTest(BrainTest):
         state = json.loads(raw)
         names = [a["name"] for a in state["agents"]]
         self.assertEqual(names[0], "mentor-learning")
-        self.assertEqual(len(names), 10)
+        self.assertEqual(len(names), 11)
+        self.assertIn("store-qa", names)
         pr = next(a for a in state["agents"] if a["name"] == "product-research")
         self.assertEqual(pr["status"], "queued")
         self.assertEqual(pr["now"], "Research posture corrector")
         self.assertTrue(state["jarvis"]["claude"])
 
     def test_prototype_pages_and_shared_client(self):
-        for path in ("/console", "/office", "/classic"):
+        for path in ("/console", "/office", "/chat", "/classic"):
             status, html = self.request("GET", path, token=False)
             self.assertEqual(status, 200, path)
             self.assertIn(self.server.token.encode(), html)

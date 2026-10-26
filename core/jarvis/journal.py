@@ -27,6 +27,18 @@ SECRET = re.compile(
 )
 SECRET_ASSIGN = re.compile(r"(?i)\b(password|passwd|api[_ -]?key|secret|token)(\s*[:=]\s*)(\S{6,})")
 
+# Machine text that arrives as a prompt: background-task notices, and context blocks the app wraps
+# around the owner's words (e.g. <artifact-view-context>). Only the owner's own words are journaled.
+NOTICE = re.compile(r"^\s*(<task-notification>|\[SYSTEM NOTIFICATION)", re.I)
+TAG_BLOCK = re.compile(r"<([a-z][\w-]*)\b[^>]*>.*?</\1>|<[a-z][\w-]*\b[^>]*/>", re.I | re.S)
+
+
+def owner_words(prompt: str) -> str:
+    """The part of a prompt the owner actually wrote ('' for a system notice)."""
+    if NOTICE.match(prompt or ""):
+        return ""
+    return TAG_BLOCK.sub("", prompt or "").strip()
+
 
 def redact(text: str) -> str:
     text = SECRET.sub("[redacted]", text)

@@ -8,6 +8,7 @@
     "creative-research": { icon: "🧲", layer: "Ad intelligence", color: "#fb7185", blurb: "Studies competitor ads and builds the inspiration library." },
     "creative-director": { icon: "🎨", layer: "Creative studio", color: "#f59e0b", blurb: "Develops angles, image briefs and copy for static ads." },
     "shopify":           { icon: "🛍️", layer: "Storefront", color: "#22c55e", blurb: "Drafts product pages and reviews the store, read-only." },
+    "store-qa":          { icon: "🛠️", layer: "Store QA", color: "#f472b6", blurb: "Clicks through the store like a customer, finds bugs and prepares tested fixes." },
     "meta-ads":          { icon: "📣", layer: "Campaign layer", color: "#3b82f6", blurb: "Prepares campaign drafts and analyses ad performance." },
     "meta-ads-auditor":  { icon: "🩺", layer: "Account audit", color: "#06b6d4", blurb: "Read-only deep audit of the Meta ad account: signals, creative, structure, audiences." },
     "product-testing":   { icon: "🧪", layer: "Validation", color: "#a3e635", blurb: "Records every test, judges results and captures lessons." },

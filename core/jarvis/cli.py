@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import feedback, backup, brief, db, journal, memory, paths, records
+from . import feedback, backup, brief, db, journal, media, memory, paths, records
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -414,6 +414,18 @@ def cmd_mentor_status(conn, args):
         out(f"  {d}")
 
 
+def cmd_watch(conn, args):
+    if args.setup:
+        out(f"Video tools ready in {media.setup()}")
+        return
+    if not args.urls:
+        raise media.MediaError("Give one or more links, e.g. bin/jarvis watch https://www.instagram.com/reel/...")
+    for url in args.urls:
+        out(f"Watching {url} ...")
+        entry, folder = media.watch(conn, url, note=args.note or "", category=args.category, product=args.product)
+        out(f"Saved {entry.id}: {entry.title}\n  files: {paths.rel(folder)}")
+
+
 PRIVATE_SKILL_PREFIXES = ("blake-",)
 
 
@@ -703,6 +715,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = mentor.add_parser("status", help="list captured lessons")
     s.set_defaults(fn=cmd_mentor_status)
 
+    s = sub.add_parser("watch", help="watch reels or videos the owner sends: transcript, frames and a memory entry")
+    s.add_argument("urls", nargs="*", help="Instagram, TikTok or YouTube links")
+    s.add_argument("--note", help="what the owner wants taken from it")
+    s.add_argument("-c", "--category", default="creative-inspiration", choices=paths.CATEGORIES)
+    s.add_argument("-p", "--product")
+    s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper)")
+    s.set_defaults(fn=cmd_watch)
+
     skills = sub.add_parser("skills", help="private skills (Blake's playbooks)").add_subparsers(dest="sub", required=True)
     s = skills.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")
     s.add_argument("--restore", action="store_true", help="copy brain/skills back to ~/.claude/skills")
@@ -728,7 +748,7 @@ def main(argv=None) -> int:
     conn = db.connect()
     try:
         return args.fn(conn, args) or 0
-    except (memory.MemoryError, records.RecordError, feedback.FeedbackError) as exc:
+    except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

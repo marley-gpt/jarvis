@@ -36,12 +36,15 @@ Everything durable lives in `brain/` (git-ignored, because this repo is public) 
 | `creative-research` | Meta Ad Library / GetHookd inspiration library: observed vs speculative |
 | `creative-director` | angles → concepts → ChatGPT image briefs → copy → asset pack |
 | `shopify` | PDP drafts and previews; read-only store access |
+| `store-qa` | clicks through the store like a customer, finds bugs, writes tested fixes (`store-bug-fixer` skill); never edits the live store |
 | `meta-ads` | campaign drafts and read-only performance analysis |
 | `meta-ads-auditor` | read-only graded audit of the Meta ad account (signals, creative, structure, audiences) |
 | `product-testing` | test records, metrics, verdicts, lessons |
 | `operations` | status reports, bottlenecks, costs, priorities, daily overview |
 
 Use the cheapest agent that fits: research and record-keeping agents run on cheaper models.
+
+When the owner sends a reel or video link, watch it: `bin/jarvis watch <url> --note '<what they want from it>'` downloads it, transcribes every word locally and saves frames plus a `Reel:` memory entry. Look at the frames for anything shown on screen. Talk to the owner in the `jarvis-voice` style; the morning brief and evening summary follow `jarvis-daily-brief`.
 
 ## Skills
 
@@ -79,6 +82,6 @@ Extra AI spend target: about A$50/month. Prefer Claude Code itself, local tools 
 
 - `core/` — JARVIS memory/records engine (Python stdlib, `bin/jarvis`, `bin/hook`), tests in `core/tests` (`python3 -m unittest discover -s core/tests`).
 - `.claude/` — agents, skills, hooks and permissions.
-- `core/dashboard/` — live dashboard (`bin/jarvis dashboard`, or double-click `JARVIS Dashboard.cmd`): agent sections, delegation, voice conversation. Messages sent there arrive in a headless session with a voice-style system prompt, so keep those replies short and spoken.
+- `core/dashboard/` — live dashboard (`bin/jarvis dashboard`, or the JARVIS and JARVIS Chat desktop shortcuts from `core/jarvis_app.pyw --install`): office (`/`), console (`/console`), chat app (`/chat`), agent sections, delegation, voice conversation. Messages sent there arrive in a headless session with a voice-style system prompt, so keep those replies short and spoken.
 - `brain/` — the owner's data (memory Markdown, `jarvis.db`, work, files, backups). Never commit it.
 - `electron/`, `src/` — the older Windows desktop control app (separate; `npm test`). The future dashboard will read `brain/`.
