@@ -12,6 +12,11 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Windows CREATE_NO_WINDOW for helper processes. The dashboard runs under pythonw (no console), so
+# without it every console program JARVIS runs (PowerShell, bash, python) pops up its own window;
+# with it they share one hidden console instead.
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 CORE_DIR = REPO_ROOT / "core"
 
 # Twelve memory categories. Folder name -> human label.

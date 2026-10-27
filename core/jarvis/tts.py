@@ -90,7 +90,7 @@ class Kokoro:
         if not cmd:
             raise TTSError("Kokoro is not installed (see core/jarvis/tts.py).")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, encoding="utf-8", cwd=paths.REPO_ROOT)
+                                     text=True, encoding="utf-8", cwd=paths.REPO_ROOT, creationflags=paths.NO_WINDOW)
         hello = self.proc.stdout.readline()
         try:
             ready = json.loads(hello)

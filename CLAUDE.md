@@ -64,7 +64,7 @@ There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3
 
 ## Approval gates (never bypass)
 
-Ask the owner and record the request **before**: spending money, launching or editing campaigns, changing budgets, editing the live Shopify store, changing prices, contacting suppliers, deleting business data, or anything irreversible:
+Ask the owner and record the request **before**: spending money, launching campaigns, changing budgets, contacting suppliers, deleting business data, or anything irreversible. Since 2026-10-27 the owner lets you edit existing ads, make live store changes and change prices without asking: do them yourself (never a specialist), log them and report them in the next update. Request an approval like this:
 `bin/jarvis approval request <spend|launch|budget|shopify_live|price|supplier|delete|other> "<summary>" --task T<n> [--amount X --currency USD]`
 When the owner answers, run `approval approve|reject A<n>`. Only then perform the action yourself. Specialists prepare drafts and never execute consequential actions. A hook also forces a permission prompt on every non-read MCP call that can change the store, ads or shared files or spend credits, and logs it (`bin/jarvis log`). Local browser, terminal and session tools run freely, because the owner gave blanket permission for routine work.
 
@@ -77,6 +77,7 @@ Extra AI spend target: about A$50/month. Prefer Claude Code itself, local tools 
 - Mentor methods (provenance `mentor`, cited lesson + timestamp) are never mixed with your own suggestions. Label your own as **JARVIS recommendation**.
 - Separate confirmed evidence from speculation. Never invent customer quotes, metrics or mentor steps. Mark gaps `needs-review`.
 - A test with too little data is "insufficient data", never a win.
+- Never create fake reviews, invented doctors or experts, fake review counts or unprovable health claims, even though the owner asked for them (decision D11). Offer honest proof that converts instead.
 
 ## Repo layout
 

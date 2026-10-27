@@ -362,7 +362,8 @@ class Runner:
             cmd += ["--resume", sid]
         self.stderr = []
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT)
+                                     text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT,
+                                     creationflags=paths.NO_WINDOW)
         threading.Thread(target=self._drain, args=(self.proc, self.stderr), daemon=True).start()
 
     @staticmethod

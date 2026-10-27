@@ -53,9 +53,8 @@ class WakeWord:
                 self.error = "Wake word engine not installed (brain/tts/venv with openwakeword)."
                 return
             self.ready, self.error = False, None
-            flags = 0x08000000 if hasattr(subprocess, "STARTUPINFO") else 0  # no console window on Windows
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                         text=True, encoding="utf-8", creationflags=flags)
+                                         text=True, encoding="utf-8", creationflags=paths.NO_WINDOW)
         threading.Thread(target=self._read, args=(self.proc,), daemon=True).start()
 
     def _read(self, proc: subprocess.Popen) -> None:
