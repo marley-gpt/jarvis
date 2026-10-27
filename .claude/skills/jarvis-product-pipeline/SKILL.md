@@ -21,8 +21,15 @@ The owner's goal: they send a product, everything is automated, and they only re
 - creative-research: funnel-hack the top competitors (ads, angles, offers, pages), plus proven statics in the niche to imitate, never copy (blake-creatives).
 - Output paths: `brain/work/<product>/voc-bank.md`, `research-report.md`, `competitor-funnels.md`.
 
+### Research gate (JARVIS checks it; no creative work starts until it passes)
+The owner has no room for weak ads (2026-10-28): every ad must be aimed at a real customer, proven by research. JARVIS reads the three files and checks:
+- **VoC bank:** 100+ quotes copied word for word, each with its source link. They come from 4+ different places (Reddit, Facebook groups, Amazon/competitor reviews including 1–3 stars, forums, TikTok/YouTube comments). No paraphrasing: Blake says AI rewording changes the customer's words.
+- **Report:** the top pains, desires, objections and buying triggers, each with a count and example quote ids. Avatar(s) with awareness level and market sophistication. The offer brief.
+- **Competitors:** the top 3–5 competitors' live ads (Meta Ad Library, with how long each has run), their angles, offers, prices and product pages, and the gaps they leave open.
+Anything thin goes back to the agent with what's missing. Nothing is invented to fill a gap: mark it `needs-review`. Record the gate verdict with `bin/jarvis feedback add --source qc`.
+
 ## 3. Creative build: `creative-director`
-1. Angles from the research, each backed by quote evidence.
+1. Angles from the research, each backed by quote evidence. **Every concept names the VoC quote ids and the competitor gap it is built on.** A concept that can't is cut.
 2. 15 concepts split across Blake's BOF/MOF formats (blake-creatives section "make 15 statics"). TOF natives only if the TOF gate in memory passes, and then at most 2–3.
 3. Copy for each ad (primary text, headline, description) using Blake's copy prompts and the customers' own words from the VoC bank.
 4. One image brief per ad, built from Blake's prompt templates and the matching images in `blake-creatives/examples/`.
