@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
 from datetime import datetime
 
 from . import paths
@@ -178,7 +180,32 @@ def approval_decide(conn, approval_id, approved: bool, note=None) -> sqlite3.Row
     if row["task_id"]:
         _event(conn, row["task_id"], f"approval:{status}", f"A{aid} {note or ''}".strip())
     conn.commit()
+    if approved:
+        grant_open(aid)
     return _one(conn, "SELECT * FROM approvals WHERE id = ?", (aid,))
+
+
+# An approval opens a short clearance window: the guard hook then lets JARVIS's consequential tool calls
+# through (and logs them), so an action approved from the phone can run in the headless session, where
+# nobody is at the PC to click a permission prompt.
+GRANT_MINUTES = 20
+
+
+def _grant_file():
+    return paths.home() / "grant.json"
+
+
+def grant_open(approval_id: int, minutes: int = GRANT_MINUTES) -> None:
+    _grant_file().write_text(json.dumps({"approval": approval_id, "until": time.time() + minutes * 60}), encoding="utf-8")
+
+
+def grant_active() -> int | None:
+    """The approval id whose clearance window is still open, else None."""
+    try:
+        g = json.loads(_grant_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return g.get("approval") if g.get("until", 0) > time.time() else None
 
 
 # ---------------------------------------------------------------- product tests

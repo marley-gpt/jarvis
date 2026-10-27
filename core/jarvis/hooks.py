@@ -98,6 +98,9 @@ def guard(event: dict) -> dict | None:
             return _allow("JARVIS: local app tool, covered by the owner's blanket permission.")
         if is_read_only_tool(tool):
             return _allow("JARVIS: read-only tool, covered by the owner's blanket permission.")
+        granted = records.grant_active()
+        if granted:
+            return _allow(f"JARVIS: carrying out A{granted}, which the owner approved.")
         return _ask(f"JARVIS approval gate: {tool} can change {server} or spend credits. "
                     "Approve only if the user has agreed to this specific action.")
     return None

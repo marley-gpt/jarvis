@@ -229,6 +229,12 @@ def cmd_approval_request(conn, args):
     aid = records.approval_request(conn, args.kind, args.summary, detail=args.detail, task=args.task,
                                    amount=args.amount, currency=args.currency)
     out(f"A{aid} pending — ask the user to approve or reject it.")
+    if telegram.settings().get("chat_id"):
+        try:
+            telegram.push_approval(conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone())
+            out("Sent to the owner's phone with Approve / Reject buttons.")
+        except telegram.TelegramError as exc:
+            out(f"(Couldn't reach the owner's phone: {exc})")
 
 
 def cmd_approval_list(conn, args):
@@ -452,6 +458,21 @@ def cmd_telegram_send(conn, args):
             kokoro.stop()
     telegram.send(args.text, voice)
     out("Sent to the owner's phone" + (" with a voice note." if voice else "."))
+
+
+def cmd_alert(conn, args):
+    from . import tts
+    kokoro = tts.Kokoro() if args.urgent else None
+    try:
+        sent = telegram.alert(args.text, args.urgent, kokoro)
+    finally:
+        if kokoro:
+            kokoro.stop()
+    out("Alert sent: " + ", ".join(sent) + ".")
+
+
+def cmd_telegram_ring(conn, args):
+    out("Calling the owner: " + telegram.ring())
 
 
 PRIVATE_SKILL_PREFIXES = ("blake-",)
@@ -759,6 +780,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("text")
     s.add_argument("--voice", action="store_true", help="also send it as a voice note in JARVIS's voice")
     s.set_defaults(fn=cmd_telegram_send)
+    tg.add_parser("ring", help="test call: ring the owner's Telegram (CallMeBot, free)").set_defaults(fn=cmd_telegram_ring)
+    s = sub.add_parser("alert", help="push a problem to the owner's phone; --urgent adds a voice note and a call")
+    s.add_argument("text")
+    s.add_argument("--urgent", action="store_true", help="kill rule hit, store down, money at risk: ring the owner")
+    s.set_defaults(fn=cmd_alert)
 
     skills = sub.add_parser("skills", help="private skills (Blake's playbooks)").add_subparsers(dest="sub", required=True)
     s = skills.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")

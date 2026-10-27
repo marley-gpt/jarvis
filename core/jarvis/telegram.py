@@ -10,9 +10,16 @@ Only the owner's chat is served. Until it is known, the bot answers nobody excep
 message containing the pairing code from `bin/jarvis telegram pair`; that chat id is then
 saved and every other chat is ignored.
 
-`bin/jarvis telegram send '<text>' [--voice]` messages the owner from anywhere (briefs,
-approvals, alerts). Commands in the chat: /stop interrupts JARVIS, /new starts a fresh
-conversation. Telegram bots can't place calls, so urgent things come as a voice note.
+`bin/jarvis telegram send '<text>' [--voice]` messages the owner from anywhere (briefs).
+`bin/jarvis alert '<text>' [--urgent]` is for problems: urgent ones also come as a voice note
+and a phone call. Telegram bots can't call, so the call goes through CallMeBot (free), which
+rings the owner's Telegram and reads a fixed line; the details stay in the chat.
+
+Every approval request arrives with Approve / Reject buttons. Approving records it, opens a
+short clearance window (records.grant_open) and tells JARVIS to carry it out.
+
+The chat has a button keyboard: Today (answered from the brain, instantly, no Claude), Brief me,
+Check the store and New product. Commands: /today /brief /store /product /stop /new.
 """
 
 from __future__ import annotations
@@ -31,10 +38,28 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from . import media, paths
+from urllib.parse import urlencode
+
+from . import db, media, paths, records
 
 API = "https://api.telegram.org"
+CALLMEBOT = "https://api.callmebot.com/start.php"
 PREFIX = "(Sent from the owner's phone by Telegram; reply in a few short sentences.) "
+# Only this line goes to the call service; what happened is in the Telegram message.
+CALL_LINE = "Sir, JARVIS here. Something urgent needs you. The details are in Telegram."
+STORE_CHECK_SECONDS = 900
+
+# One-tap actions, shared with the chat app.
+ACTIONS = {
+    "brief": "Brief me now: the jarvis-daily-brief, short, with real numbers.",
+    "store": "Check the store like a customer with the store-qa agent and tell me what's broken, most serious first.",
+    "product": "Start the ads for this product (jarvis-product-pipeline): ",
+}
+BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the store": "/store", "➕ New product": "/product"}
+KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}]],
+            "resize_keyboard": True, "is_persistent": True}
+COMMANDS = [("today", "Today at a glance"), ("brief", "Brief me now"), ("store", "Check the store"),
+            ("product", "Start a new product"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
 
 
 class TelegramError(Exception):
@@ -112,15 +137,111 @@ def to_ogg(wav: bytes) -> bytes | None:
     return proc.stdout if proc.returncode == 0 and proc.stdout else None
 
 
-def send(text: str, voice: bytes | None = None, chat_id=None) -> None:
-    """Message the owner: text (split to Telegram's 4096-character limit) and optionally a voice note."""
+def send(text: str, voice: bytes | None = None, chat_id=None, markup: dict | None = None) -> None:
+    """Message the owner: text (split to Telegram's 4096-character limit) and optionally a voice note.
+    `markup` (buttons or the keyboard) goes on the last part."""
     chat = chat_id or settings().get("chat_id")
     if not chat:
         raise TelegramError("Not paired yet: send the bot the code from `bin/jarvis telegram pair`.")
     if voice:
         call("sendVoice", {"chat_id": chat}, file=("voice", "jarvis.ogg", voice))
-    for i in range(0, len(text or ""), 4000):
-        call("sendMessage", {"chat_id": chat, "text": text[i:i + 4000]})
+    parts = [text[i:i + 4000] for i in range(0, len(text or ""), 4000)]
+    for n, part in enumerate(parts):
+        params = {"chat_id": chat, "text": part}
+        if markup and n == len(parts) - 1:
+            params["reply_markup"] = markup
+        call("sendMessage", params)
+
+
+def buttons(rows: list[list[tuple[str, str]]]) -> dict:
+    return {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in row] for row in rows]}
+
+
+def push_approval(row) -> None:
+    """Send an approval request to the phone with Approve / Reject buttons."""
+    amount = f" ({row['amount']:g} {row['currency'] or ''}".rstrip() + ")" if row["amount"] is not None else ""
+    text = f"Approval needed, A{row['id']} · {row['kind']}{amount}\n\n{row['summary']}"
+    if row["detail"]:
+        text += f"\n\n{row['detail']}"
+    send(text, markup=buttons([[("✅ Approve", f"ap:{row['id']}:y"), ("❌ Reject", f"ap:{row['id']}:n")]]))
+
+
+def ring() -> str:
+    """Ring the owner's Telegram through CallMeBot; it reads CALL_LINE aloud."""
+    user = settings().get("call_user")
+    if not user:
+        raise TelegramError("No Telegram username saved for calls yet: the owner needs a username in Telegram's "
+                            "settings, then any message to the bot saves it.")
+    url = CALLMEBOT + "?" + urlencode({"user": "@" + user, "text": CALL_LINE, "lang": "en-GB-Standard-B", "rpt": 2})
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            body = r.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as exc:
+        raise TelegramError(f"The call service didn't answer: {exc}") from exc
+    plain = re.sub(r"<[^>]+>", " ", body)
+    if re.search(r"not (yet )?(authori[sz]ed|allowed)|error|invalid", plain, re.I):
+        raise TelegramError("The call service refused: " + " ".join(plain.split())[:200]
+                            + " (the owner must allow it once by messaging @CallMeBot_txtbot /start)")
+    return " ".join(plain.split())[:200]
+
+
+def alert(text: str, urgent: bool = False, kokoro=None) -> list[str]:
+    """Push a problem to the owner. Urgent: also a voice note and a phone call. Returns what was sent."""
+    send(("🚨 URGENT: " if urgent else "⚠️ ") + text)
+    sent = ["message"]
+    if urgent:
+        ogg = speak(kokoro, text) if kokoro else None
+        if ogg:
+            call("sendVoice", {"chat_id": settings().get("chat_id")}, file=("voice", "jarvis.ogg", ogg))
+            sent.append("voice note")
+        try:
+            ring()
+            sent.append("call")
+        except TelegramError as exc:
+            sent.append(f"no call: {exc}")
+    return sent
+
+
+def today(conn) -> dict:
+    """Today at a glance, straight from the brain: approvals waiting, live tests, work in progress, AI spend."""
+    tests = []
+    for t in conn.execute("SELECT id, product, angle, status FROM tests WHERE status IN ('running','extended') ORDER BY id"):
+        e = records.evaluate(conn, t["id"])
+        tests.append({"id": f"X{t['id']}", "product": t["product"], "angle": t["angle"], "spend": e["spend"],
+                      "purchases": e["purchases"], "revenue": e["revenue"], "roas": e["roas"], "days": e["days"],
+                      "sufficient": e["sufficient"]})
+    working = [dict(r) for r in conn.execute(
+        "SELECT id, title, agent FROM tasks WHERE status = 'in_progress' ORDER BY updated DESC LIMIT 5")]
+    ok, spent, budget = records.cost_check(conn, 0)
+    return {
+        "approvals": [dict(r) for r in conn.execute(
+            "SELECT id, kind, summary, amount, currency FROM approvals WHERE status = 'pending' ORDER BY id")],
+        "tests": tests,
+        "working": working,
+        "open_tasks": conn.execute(f"SELECT COUNT(*) FROM tasks WHERE status IN ({','.join('?' * len(records.OPEN_TASK_STATUSES))})",
+                                   records.OPEN_TASK_STATUSES).fetchone()[0],
+        "ai_spend": {"spent": round(spent, 2), "budget": budget},
+    }
+
+
+def today_text(d: dict) -> str:
+    lines = ["Today, sir:"]
+    if d["approvals"]:
+        lines.append(f"• {len(d['approvals'])} waiting for you: " + "; ".join(f"A{a['id']} {a['summary']}" for a in d["approvals"]))
+    else:
+        lines.append("• Nothing waiting for your approval.")
+    if d["tests"]:
+        for t in d["tests"]:
+            roas = f", ROAS {t['roas']:.2f}" if t["roas"] else ""
+            note = "" if t["sufficient"] else " (not enough data yet)"
+            lines.append(f"• Test {t['id']} {t['product']}: ${t['spend']:.2f} spent, {t['purchases']} sales over "
+                         f"{t['days']} days{roas}{note}")
+    else:
+        lines.append("• No test running.")
+    if d["working"]:
+        lines.append("• Working on: " + "; ".join(f"T{w['id']} {w['title']}" for w in d["working"]))
+    lines.append(f"• {d['open_tasks']} open tasks. AI spend A${d['ai_spend']['spent']:.2f} of A${d['ai_spend']['budget']:.0f}.")
+    return "\n".join(lines)
 
 
 def speak(kokoro, text: str) -> bytes | None:
@@ -133,7 +254,11 @@ def speak(kokoro, text: str) -> bytes | None:
 
 
 class Bridge:
-    """Long-polls Telegram inside the dashboard server and relays to and from JARVIS."""
+    """Long-polls Telegram inside the dashboard server and relays to and from JARVIS.
+
+    Also watches the store (an alert if it stops answering) and carries out approvals
+    decided by button, here or in the chat app.
+    """
 
     def __init__(self, hub, runner, kokoro):
         self.hub, self.runner, self.kokoro = hub, runner, kokoro
@@ -142,6 +267,9 @@ class Bridge:
         self.voice_reply = False  # the owner sent a voice note, so answer with one too
         self.said: list[str] = []
         self.error: str | None = None
+        self.queued: str | None = None  # an approved action to start once JARVIS is free
+        self.next_prefix = ""           # set by "New product": the next message is the product
+        self.store_failures = 0
 
     def enabled(self) -> bool:
         return bool(settings().get("bot_token"))
@@ -149,14 +277,19 @@ class Bridge:
     def info(self) -> dict:
         s = settings()
         return {"configured": bool(s.get("bot_token")), "paired": bool(s.get("chat_id")), "running": self.running,
-                "error": self.error}
+                "calls": bool(s.get("call_user")), "error": self.error}
 
     def start(self) -> None:
         if self.running or not self.enabled():
             return
         self.running = True
+        try:
+            call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in COMMANDS]}, timeout=20)
+        except TelegramError as exc:
+            self.error = str(exc)
         threading.Thread(target=self._poll, daemon=True).start()
         threading.Thread(target=self._listen, daemon=True).start()
+        threading.Thread(target=self._watch_store, daemon=True).start()
 
     def stop(self) -> None:
         self.running = False
@@ -165,7 +298,8 @@ class Bridge:
         offset = None
         while self.running:
             try:
-                updates = call("getUpdates", {"timeout": 50, "offset": offset, "allowed_updates": ["message"]})
+                updates = call("getUpdates", {"timeout": 50, "offset": offset,
+                                              "allowed_updates": ["message", "callback_query"]})
                 self.error = None
             except TelegramError as exc:
                 self.error = str(exc)
@@ -174,13 +308,18 @@ class Bridge:
             for u in updates:
                 offset = u["update_id"] + 1
                 try:
-                    self._message(u.get("message") or {})
+                    if u.get("callback_query"):
+                        self._button(u["callback_query"])
+                    else:
+                        self._message(u.get("message") or {})
                 except Exception as exc:  # one bad message must not stop the bridge
                     self.error = f"{type(exc).__name__}: {exc}"
 
-    def _reply(self, chat, text: str) -> None:
+    def _reply(self, chat, text: str, markup: dict | None = None) -> None:
+        if not chat:
+            return
         try:
-            send(text, chat_id=chat)
+            send(text, chat_id=chat, markup=markup)
         except TelegramError as exc:
             self.error = str(exc)
 
@@ -194,14 +333,26 @@ class Bridge:
             if pairing_code() in text:
                 save(chat_id=chat, pairing_code=None)
                 self._reply(chat, "Paired. Good to meet you here, sir. Text me, send a voice note or a photo, "
-                                  "and I'll take it from there. /stop interrupts me, /new starts a fresh conversation.")
+                                  "or use the buttons below. /stop interrupts me, /new starts a fresh conversation.",
+                            KEYBOARD)
             else:
                 self._reply(chat, "This is a private assistant. Send the pairing code to connect.")
             return
         if chat != owner:
             return  # strangers are ignored
+        username = (msg.get("from") or {}).get("username")
+        if username and username != settings().get("call_user"):
+            save(call_user=username)  # needed to ring the owner for urgent alerts
+        text = BUTTONS.get(text, text)
         if text in ("/start", "/help"):
-            return self._reply(chat, "At your service, sir. Text, voice note or photo. /stop interrupts me, /new starts fresh.")
+            return self._reply(chat, "At your service, sir. Text, voice note or photo, or a button below. "
+                                     "/stop interrupts me, /new starts fresh.", KEYBOARD)
+        if text == "/today":
+            conn = db.connect()
+            try:
+                return self._reply(chat, today_text(today(conn)), KEYBOARD)
+            finally:
+                conn.close()
         if text == "/stop":
             self.runner.stop()
             return self._reply(chat, "Stopped.")
@@ -210,6 +361,11 @@ class Bridge:
                 return self._reply(chat, "I'm mid-task, sir. Send /stop first.")
             self.runner.reset()
             return self._reply(chat, "Fresh conversation. Memory is kept.")
+        if text == "/product":
+            self.next_prefix = ACTIONS["product"]
+            return self._reply(chat, "Send me the product: a link or a photo, with a line about it.")
+        if text in ("/brief", "/store"):
+            return self._ask(chat, ACTIONS[text[1:]], shown={"/brief": "Brief me", "/store": "Check the store"}[text])
         voice = msg.get("voice") or msg.get("audio")
         if voice:
             with tempfile.TemporaryDirectory() as tmp:
@@ -228,15 +384,94 @@ class Bridge:
             images.append({"media_type": "image/jpeg", "data": base64.b64encode(download(biggest["file_id"])).decode()})
         if not text and not images:
             return
+        prefix, self.next_prefix = self.next_prefix, ""
+        self._ask(chat, prefix + text, images, voice=bool(voice), shown=text or "(photo)")
+
+    def _ask(self, chat, text: str, images=None, voice=False, shown=None) -> None:
+        """Pass a request to JARVIS; the answer comes back to this chat."""
         if self.runner.busy:
             return self._reply(chat, "I'm still on the last request, sir. Send /stop to interrupt it.")
-        self.waiting, self.voice_reply, self.said = True, bool(voice), []
-        self.hub.publish({"type": "owner", "text": text or "(photo)", "via": "telegram"})
+        self.waiting, self.voice_reply, self.said = True, voice, []
+        self.hub.publish({"type": "owner", "text": shown or text, "via": "telegram"})
         try:
-            self.runner.start(PREFIX + text if text else PREFIX, images)
+            self.runner.start(PREFIX + text, images or [])
         except (RuntimeError, FileNotFoundError, ValueError) as exc:
             self.waiting = False
             self._reply(chat, f"I can't do that right now: {exc}")
+
+    def _button(self, cq: dict) -> None:
+        msg = cq.get("message") or {}
+        chat = (msg.get("chat") or {}).get("id")
+        if not chat or chat != settings().get("chat_id"):
+            return
+        kind, _, rest = (cq.get("data") or "").partition(":")
+        if kind != "ap":
+            return
+        aid, _, verdict = rest.partition(":")
+        conn = db.connect()
+        try:
+            row = records.approval_decide(conn, aid, verdict == "y", "decided on the phone")
+            note = "✅ Approved. On it." if verdict == "y" else "❌ Rejected. I won't do it."
+        except records.RecordError as exc:
+            row, note = None, str(exc)
+        finally:
+            conn.close()
+        try:
+            call("answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": note[:190]}, timeout=20)
+            call("editMessageText", {"chat_id": chat, "message_id": msg.get("message_id"),
+                                     "text": (msg.get("text") or "") + "\n\n" + note}, timeout=20)
+        except TelegramError as exc:
+            self.error = str(exc)
+        if row:
+            self.decided(row, via="phone")
+
+    def decided(self, row, via: str = "dashboard") -> None:
+        """An approval was decided: refresh the screens and, if approved, have JARVIS carry it out."""
+        self.hub.publish({"type": "approval", "id": row["id"], "status": row["status"]})
+        if row["status"] != "approved":
+            return
+        text = (f"I approved A{row['id']} ({row['kind']}: {row['summary']}) on the {via}. It's recorded and you're "
+                f"cleared for {records.GRANT_MINUTES} minutes. Carry it out now, log it, and tell me when it's done.")
+        if self.runner.busy:
+            self.queued = text
+            if via == "phone":
+                self._reply(settings().get("chat_id"), "I'll do it as soon as I finish the current job, sir.")
+        elif via == "phone":
+            self._ask(settings().get("chat_id"), text, shown=f"Approved A{row['id']}")
+        else:
+            try:
+                self.runner.start(text)
+            except (RuntimeError, FileNotFoundError, ValueError) as exc:
+                self.hub.publish({"type": "error", "text": f"Couldn't start A{row['id']}: {exc}"})
+
+    def _watch_store(self) -> None:
+        """Alert the owner if the store stops answering (two checks in a row), and when it's back."""
+        while self.running:
+            url = paths.config().get("store_url")
+            if url:
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 JARVIS store check"})
+                    with urllib.request.urlopen(req, timeout=30):
+                        up = True
+                except urllib.error.HTTPError as exc:
+                    up = exc.code < 500  # 403/429 is Shopify's bot check: the store is answering
+                except (urllib.error.URLError, OSError):
+                    up = False
+                if up and self.store_failures >= 2:
+                    self._safe_alert(f"The store is back up ({url}).")
+                self.store_failures = 0 if up else self.store_failures + 1
+                if self.store_failures == 2:
+                    self._safe_alert(f"The store isn't loading ({url}). Customers can't buy right now.", urgent=True)
+            for _ in range(STORE_CHECK_SECONDS):
+                if not self.running:
+                    return
+                time.sleep(1)
+
+    def _safe_alert(self, text: str, urgent: bool = False) -> None:
+        try:
+            alert(text, urgent, self.kokoro)
+        except TelegramError as exc:
+            self.error = str(exc)
 
     def _listen(self) -> None:
         q = self.hub.subscribe()
@@ -246,27 +481,30 @@ class Bridge:
                     ev = q.get(timeout=1)
                 except Exception:
                     continue
-                if not self.waiting:
-                    continue
                 kind, owner = ev.get("type"), settings().get("chat_id")
-                if kind == "say" and ev.get("text"):
-                    self.said.append(ev["text"])
-                elif kind == "reply" and ev.get("text") and (ev.get("is_error") or not self.said):
-                    self.said.append(ev["text"])
-                elif kind == "dispatch":  # long jobs: say who's on it now, the answer comes at the end
-                    self._reply(owner, f"On it: the {ev.get('agent')} agent is working on {ev.get('description') or 'it'}.")
-                elif kind == "error":
-                    self.said.append("Problem: " + ev.get("text", "something went wrong."))
-                elif kind == "status" and ev.get("status") == "idle":
-                    self.waiting = False
-                    if self.said:  # one message with the whole answer
-                        self._reply(owner, "\n\n".join(self.said))
-                    if self.voice_reply and self.said:
-                        ogg = speak(self.kokoro, self.said[-1][:600])
-                        if ogg:
-                            try:
-                                call("sendVoice", {"chat_id": owner}, file=("voice", "jarvis.ogg", ogg))
-                            except TelegramError as exc:
-                                self.error = str(exc)
+                idle = kind == "status" and ev.get("status") == "idle"
+                if self.waiting:
+                    if kind == "say" and ev.get("text"):
+                        self.said.append(ev["text"])
+                    elif kind == "reply" and ev.get("text") and (ev.get("is_error") or not self.said):
+                        self.said.append(ev["text"])
+                    elif kind == "dispatch":  # long jobs: say who's on it now, the answer comes at the end
+                        self._reply(owner, f"On it: the {ev.get('agent')} agent is working on {ev.get('description') or 'it'}.")
+                    elif kind == "error":
+                        self.said.append("Problem: " + ev.get("text", "something went wrong."))
+                    elif idle:
+                        self.waiting = False
+                        if self.said:  # one message with the whole answer
+                            self._reply(owner, "\n\n".join(self.said))
+                        if self.voice_reply and self.said:
+                            ogg = speak(self.kokoro, self.said[-1][:600])
+                            if ogg:
+                                try:
+                                    call("sendVoice", {"chat_id": owner}, file=("voice", "jarvis.ogg", ogg))
+                                except TelegramError as exc:
+                                    self.error = str(exc)
+                if idle and self.queued and not self.runner.busy:
+                    text, self.queued = self.queued, None
+                    self._ask(owner, text, shown="Carrying out the approval")
         finally:
             self.hub.unsubscribe(q)

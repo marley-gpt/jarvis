@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     # specialists keep their own models.
     "dashboard_model": "opus",
     "dashboard_effort": "low",
+    "store_url": "https://urbansupplied.com",  # watched by the dashboard; the owner is alerted if it stops loading
 }
 
 

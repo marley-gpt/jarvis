@@ -173,6 +173,8 @@ def snapshot(conn, live: dict | None = None) -> dict:
         "tests": tests,
         "counts": counts,
         "progress": readiness.summary(conn),
+        "today": telegram.today(conn),
+        "actions": telegram.ACTIONS,
         "brain": str(paths.home()),
         "jarvis": {"status": live.get("status", "idle"), "request": live.get("request"),
                    "claude": live.get("claude"), "login_needed": bool(db.get_meta(conn, "claude_login_needed"))},
@@ -681,6 +683,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     return self._json(400, {"error": str(exc)})
                 finally:
                     conn.close()
+                phone.decided(row, via="dashboard")  # approved: JARVIS carries it out now
                 return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/stop":
                 runner.stop()

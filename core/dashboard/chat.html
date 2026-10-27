@@ -95,6 +95,20 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
 .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 50% { opacity: .2; } }
 
+/* today at a glance, and the one-tap actions */
+#today { display: none; margin: 12px 22px 0; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+#today.on { display: grid; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; min-width: 0; }
+.card h4 { margin: 0 0 4px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.card .big { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card .big.warn { color: var(--warn); }
+.card div + div { margin-top: 2px; }
+.card .dim { color: var(--muted); }
+.chips { display: flex; gap: 8px; padding: 10px 22px 0; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 6px 12px; font-size: 12.5px; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip.on { border-color: rgba(56,189,248,.6); color: var(--accent); }
+
 /* approvals pinned above the composer */
 #approvals { display: flex; flex-direction: column; gap: 8px; padding: 0 22px; }
 .approval { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 12px;
@@ -160,9 +174,16 @@ main.drop { outline: 2px dashed var(--accent); outline-offset: -8px; }
       </div>
     </header>
     <div id="banner"></div>
+    <div id="today" aria-label="Today at a glance"></div>
     <div id="thread"></div>
     <div class="typing" id="typing"><i></i><i></i><i></i><span id="typing-t">JARVIS is thinking</span></div>
     <div id="approvals"></div>
+    <div class="chips">
+      <button class="chip" id="a-today" title="Approvals, live tests, work in progress and spend">📋 Today</button>
+      <button class="chip" data-act="brief" title="The morning-brief style summary, now">🎙 Brief me</button>
+      <button class="chip" data-act="store" title="The store-qa agent clicks through the store like a customer">🛒 Check the store</button>
+      <button class="chip" id="a-product" title="Paste a link or image and the full launch pipeline starts">➕ New product</button>
+    </div>
     <div id="pending"></div>
     <div class="composer">
       <button class="round" id="mic" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
@@ -276,6 +297,29 @@ function renderApprovals(s) {
     <button class="yes" data-id="${esc(a.id)}" data-ok="1">Approve</button><button class="no" data-id="${esc(a.id)}" data-ok="0">Reject</button></div>`).join("");
   document.querySelectorAll("#approvals button").forEach((b) => (b.onclick = () => J.decide(b.dataset.id, b.dataset.ok === "1")));
 }
+function renderToday(s) {
+  const d = s.today;
+  if (!d) return;
+  const money = (n) => "$" + (+n || 0).toFixed(2);
+  const tests = d.tests.length ? d.tests.map((t) => `<div><b>${esc(t.product)}</b> ${money(t.spend)} · ${esc(t.purchases)} sales${
+    t.roas ? " · ROAS " + (+t.roas).toFixed(2) : ""}${t.sufficient ? "" : ' <span class="dim">(not enough data yet)</span>'}</div>`).join("")
+    : '<div class="dim">No test running.</div>';
+  const work = d.working.length ? d.working.map((w) => `<div>${esc(w.title)}</div>`).join("") : '<div class="dim">Nothing in progress.</div>';
+  $("today").innerHTML = `
+    <div class="card"><h4>Waiting for you</h4><div class="big ${d.approvals.length ? "warn" : ""}">${d.approvals.length}</div>
+      <div class="dim">${d.approvals.length ? "approval" + (d.approvals.length > 1 ? "s" : "") + " below" : "Nothing to approve"}</div></div>
+    <div class="card"><h4>Live tests</h4>${tests}</div>
+    <div class="card"><h4>The team</h4><div class="big">${esc(d.open_tasks)}</div><div class="dim">open tasks</div>${work}</div>
+    <div class="card"><h4>AI spend this month</h4><div class="big">A${money(d.ai_spend.spent)}</div><div class="dim">of A$${esc(d.ai_spend.budget)}</div></div>`;
+}
+let actions = {};
+const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+function showToday(on) { $("today").classList.toggle("on", on); $("a-today").classList.toggle("on", on); pref("jarvis.today", on ? "1" : "0"); }
+showToday(pref("jarvis.today") !== "0");
+$("a-today").onclick = () => showToday(!$("today").classList.contains("on"));
+document.querySelectorAll(".chip[data-act]").forEach((b) => (b.onclick = () => actions[b.dataset.act] && J.send(actions[b.dataset.act], [])));
+$("a-product").onclick = () => { $("text").value = actions.product || "Start the ads for this product: "; grow(); $("text").focus(); };
+
 function banner(t) { $("banner").textContent = t || ""; $("banner").style.display = t ? "block" : "none"; }
 
 function showStatus() {
@@ -291,7 +335,7 @@ function showStatus() {
 
 J.on("state", (s) => {
   if (!loaded) { loaded = true; loadHistory(s); J.status = (s.jarvis && s.jarvis.status) || "idle"; showStatus(); }
-  renderTeam(s); renderApprovals(s);
+  renderTeam(s); renderApprovals(s); renderToday(s); actions = s.actions || actions;
   banner(s.jarvis && s.jarvis.login_needed ? "Claude Code isn't signed in on this computer. Open a terminal, run claude once and sign in, then talk to me again." : "");
   $("wake").checked = J.settings.wake;
 })
@@ -304,6 +348,7 @@ J.on("state", (s) => {
   .on("jarvis_tool", (e) => { $("typing-t").textContent = e.summary || "Working"; })
   .on("dispatch", (e) => { addSys(`${J.meta(e.agent).icon} ${J.label(e.agent)} is on it: ${e.description || "working"}`); J.refresh(); })
   .on("agent_done", (e) => { addSys(`✓ ${J.label(e.agent)} finished`); J.refresh(); })
+  .on("approval", (e) => { addSys(`${e.status === "approved" ? "✅" : "❌"} A${e.id} ${e.status}`); J.refresh(); })
   .on("reset", () => { $("thread").innerHTML = ""; lastDay = null; addSys("New conversation started. Memory and history are kept."); })
   .on("connection", (e) => { if (e.live) showStatus(); else $("st").textContent = "Reconnecting…"; })
   .on("awake", () => addSys("🎙 Awake"))
