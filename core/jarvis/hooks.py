@@ -25,8 +25,10 @@ WRITE_WORDS = {"create", "update", "delete", "set", "publish", "unpublish", "bul
                "import", "write", "edit", "merge", "submit", "pay", "buy", "order", "spend", "budget"}
 
 # MCP servers that only act inside this PC or this app (browser, desktop, terminal, sessions, views).
-# The owner gave blanket permission for routine work, so these run without the approval gate; the gate
-# stays on servers that can change the store, ads, shared files or spend credits.
+# The owner gave blanket permission for routine work, so these, and read-only tools on any server, are
+# allowed outright: the headless dashboard/Telegram session has nobody to click a prompt, and connector
+# names differ between apps (mcp__Shopify__ here, mcp__claude_ai_Shopify__ headless). The gate stays on
+# tools that can change the store, ads or shared files or spend credits; headless, its prompt is a refusal.
 LOCAL_MCP_SERVERS = re.compile(r"^(claude-in-chrome|Claude_Browser|computer-use|terminal|visualize|scheduled-tasks|"
                                r"mcp-registry|ccd_[a-z_]+)$", re.I)
 
@@ -40,6 +42,11 @@ SQL_WRITE = re.compile(r"\b(drop\s+table|delete\s+from|update\s+\w+\s+set|insert
 
 def _deny(reason: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}
+
+
+def _allow(reason: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                    "permissionDecisionReason": reason}}
 
 
@@ -85,10 +92,12 @@ def guard(event: dict) -> dict | None:
                          "It must never be committed.")
         return None
 
-    if tool.startswith("mcp__") and not is_read_only_tool(tool):
+    if tool.startswith("mcp__"):
         server = tool.split("__")[1] if tool.count("__") >= 2 else tool
         if LOCAL_MCP_SERVERS.match(server):
-            return None
+            return _allow("JARVIS: local app tool, covered by the owner's blanket permission.")
+        if is_read_only_tool(tool):
+            return _allow("JARVIS: read-only tool, covered by the owner's blanket permission.")
         return _ask(f"JARVIS approval gate: {tool} can change {server} or spend credits. "
                     "Approve only if the user has agreed to this specific action.")
     return None

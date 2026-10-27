@@ -42,15 +42,20 @@ class GuardTest(BrainTest):
                      "mcp__Higgsfield__generate_image", "mcp__Google_Drive__trash_file",
                      "mcp__Shopify__create-discount"):
             self.assertEqual(decision(tool), "ask", tool)
+        self.assertEqual(decision("mcp__claude_ai_Shopify__graphql_mutation"), "ask")
+
+    def test_reads_are_allowed_whatever_the_connector_is_called(self):
+        # headless (dashboard, Telegram) nobody can click a prompt, and connector names differ per app
         for tool in ("mcp__Shopify__get-product", "mcp__Shopify__search_products", "mcp__Shopify__graphql_query",
+                     "mcp__claude_ai_Shopify__get-shop-info", "mcp__plugin_github_github__get_me",
                      "mcp__Google_Drive__read_file_content", "mcp__Higgsfield__balance"):
-            self.assertIsNone(decision(tool), tool)
+            self.assertEqual(decision(tool), "allow", tool)
 
     def test_local_app_tools_run_without_the_gate(self):
         for tool in ("mcp__claude-in-chrome__computer", "mcp__claude-in-chrome__navigate",
                      "mcp__Claude_Browser__computer", "mcp__terminal__run_in_terminal",
                      "mcp__ccd_session__start_session", "mcp__computer-use__left_click"):
-            self.assertIsNone(decision(tool), tool)
+            self.assertEqual(decision(tool), "allow", tool)
 
 
 class HookProcessTest(BrainTest):

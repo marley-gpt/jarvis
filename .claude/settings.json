@@ -7,6 +7,8 @@
       "Bash(ffmpeg:*)",
       "Bash(ffprobe:*)",
       "Skill(jarvis-memory)",
+      "WebFetch",
+      "WebSearch",
       "mcp__Shopify__get-shop-info",
       "mcp__Shopify__get-product",
       "mcp__Shopify__search_products",

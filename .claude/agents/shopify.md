@@ -1,7 +1,7 @@
 ---
 name: shopify
 description: Shopify Agent. Use to analyse competitor product pages and the Urban Supplied store (Shrine theme), and to prepare product page drafts — structure, copy, benefits, offers, FAQs, image requirements, mobile and conversion review. Read-only store access; never changes the live store.
-tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, mcp__Shopify__get-shop-info, mcp__Shopify__get-product, mcp__Shopify__search_products, mcp__Shopify__get-collection, mcp__Shopify__search_collections, mcp__Shopify__graphql_query, mcp__Shopify__graphql_schema, mcp__Shopify__search_docs_chunks, mcp__Shopify__run-analytics-query, mcp__Shopify__get-inventory-levels, Skill
+tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, mcp__Shopify__get-shop-info, mcp__Shopify__get-product, mcp__Shopify__search_products, mcp__Shopify__get-collection, mcp__Shopify__search_collections, mcp__Shopify__graphql_query, mcp__Shopify__graphql_schema, mcp__Shopify__search_docs_chunks, mcp__Shopify__run-analytics-query, mcp__Shopify__get-inventory-levels, Skill, mcp__claude_ai_Shopify__get-shop-info, mcp__claude_ai_Shopify__get-product, mcp__claude_ai_Shopify__search_products, mcp__claude_ai_Shopify__get-collection, mcp__claude_ai_Shopify__search_collections, mcp__claude_ai_Shopify__graphql_query, mcp__claude_ai_Shopify__graphql_schema, mcp__claude_ai_Shopify__search_docs_chunks, mcp__claude_ai_Shopify__run-analytics-query, mcp__claude_ai_Shopify__get-inventory-levels
 model: sonnet
 skills: [jarvis-memory, jarvis-feedback-loop]
 ---
