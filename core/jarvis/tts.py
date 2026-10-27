@@ -35,6 +35,14 @@ BRITISH_VOICES = {
     "bm_george": "George", "bm_lewis": "Lewis", "bm_daniel": "Daniel", "bm_fable": "Fable",
     "bf_emma": "Emma", "bf_isabella": "Isabella", "bf_alice": "Alice", "bf_lily": "Lily",
 }
+# Tuned toward the films' JARVIS without cloning anyone: George's pitch already matches his (about 140 Hz
+# median), a little Fable or Daniel adds range or crispness, a touch faster, and the house-AI sound (fx).
+VOICE_PRESETS = {
+    "jarvis": {"name": "JARVIS", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05, "fx": "jarvis"},
+    "jarvis_crisp": {"name": "JARVIS (crisp)", "blend": {"bm_george": 0.7, "bm_daniel": 0.3}, "speed": 1.05, "fx": "jarvis"},
+    "jarvis_dry": {"name": "JARVIS (no effect)", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05},
+}
+DEFAULT_VOICE = "jarvis"
 MAX_CHARS = 600
 
 
@@ -72,8 +80,10 @@ class Kokoro:
     def info(self) -> dict:
         cfg = paths.config()
         voices = [v for v in BRITISH_VOICES if not self.voices or v in self.voices]
-        return {"available": bool(self.command()) and not self.error, "voice": cfg.get("tts_voice", "bm_george"),
-                "voices": [{"id": v, "name": BRITISH_VOICES[v]} for v in voices], "error": self.error}
+        presets = [{"id": k, "name": p["name"]} for k, p in VOICE_PRESETS.items()
+                   if not self.voices or all(v in self.voices for v in p["blend"])]
+        return {"available": bool(self.command()) and not self.error, "voice": cfg.get("tts_voice", DEFAULT_VOICE),
+                "voices": presets + [{"id": v, "name": BRITISH_VOICES[v]} for v in voices], "error": self.error}
 
     def _start(self) -> None:
         cmd = self.command()
@@ -107,8 +117,14 @@ class Kokoro:
         if not text:
             raise TTSError("Nothing to say.")
         cfg = paths.config()
-        req = {"text": text, "voice": voice if voice in BRITISH_VOICES else cfg.get("tts_voice", "bm_george"),
-               "speed": speed or cfg.get("tts_speed", 1.0)}
+        if voice not in BRITISH_VOICES and voice not in VOICE_PRESETS:
+            voice = cfg.get("tts_voice", DEFAULT_VOICE)
+        preset = VOICE_PRESETS.get(voice)
+        if preset:
+            req = {"text": text, "voice": next(iter(preset["blend"])), "blend": preset["blend"],
+                   "speed": speed or preset["speed"], "fx": preset.get("fx")}
+        else:
+            req = {"text": text, "voice": voice, "speed": speed or cfg.get("tts_speed", 1.0)}
         with self.lock:
             for attempt in (1, 2):  # restart once if the worker died
                 if not (self.proc and self.proc.poll() is None):

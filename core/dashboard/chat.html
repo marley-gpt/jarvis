@@ -12,6 +12,7 @@
   --me: linear-gradient(135deg, #1d4ed8, #4f46e5);
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14.5px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
 button, select, textarea { font: inherit; color: inherit; }
@@ -104,6 +105,18 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
 .approval .yes { background: var(--ok); color: #04140c; }
 .approval .no { background: var(--panel2); }
 
+/* images: in bubbles, waiting to send, and the drop zone */
+.bubble .imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.bubble .imgs img { max-width: 220px; max-height: 180px; border-radius: 10px; display: block; cursor: zoom-in; }
+#pending { display: none; gap: 8px; padding: 10px 22px 0; flex-wrap: wrap; }
+#pending .th { position: relative; }
+#pending img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+#pending button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0;
+  background: var(--bad); color: #fff; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
+main.drop { outline: 2px dashed var(--accent); outline-offset: -8px; }
+#zoom { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: none; place-items: center; z-index: 20; cursor: zoom-out; }
+#zoom img { max-width: 92vw; max-height: 92vh; border-radius: 10px; }
+
 /* composer */
 .composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px 22px 16px; }
 .composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 180px; padding: 11px 14px; border-radius: 14px;
@@ -150,14 +163,18 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
     <div id="thread"></div>
     <div class="typing" id="typing"><i></i><i></i><i></i><span id="typing-t">JARVIS is thinking</span></div>
     <div id="approvals"></div>
+    <div id="pending"></div>
     <div class="composer">
       <button class="round" id="mic" title="Talk to JARVIS (Ctrl+Space)">🎙</button>
-      <textarea id="text" rows="1" placeholder="Message JARVIS…"></textarea>
+      <button class="round" id="attach" title="Add images (or paste with Ctrl+V, or drop them here)">📎</button>
+      <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+      <textarea id="text" rows="1" placeholder="Message JARVIS… paste or drop images too"></textarea>
       <button class="round" id="stop" title="Stop JARVIS" hidden>■</button>
       <button class="round" id="send" title="Send (Enter)">➤</button>
     </div>
   </main>
 </div>
+<div id="zoom"><img alt=""></div>
 <script>window.JARVIS_TOKEN = "__JARVIS_TOKEN__";</script>
 <script src="/jarvis.js"></script>
 <script>
@@ -186,7 +203,7 @@ function dayLabel(d) {
 function stick() { const th = $("thread"); return th.scrollHeight - th.scrollTop - th.clientHeight < 80; }
 function bottom() { $("thread").scrollTop = $("thread").scrollHeight; }
 
-function addMsg(role, text, ts) {
+function addMsg(role, text, ts, images) {
   const at = stick();
   const d = ts ? new Date(ts.replace(" ", "T")) : new Date();
   const key = d.toDateString();
@@ -194,9 +211,12 @@ function addMsg(role, text, ts) {
   const row = document.createElement("div");
   row.className = "row " + role;
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  row.innerHTML = (role === "jarvis" ? '<div class="orb"></div>' : "") + `<div class="bubble">${fmt(text)}<span class="t">${time}</span></div>`;
+  const pics = (images || []).filter((i) => i.url).map((i) => `<img src="${i.url}" alt="Image you sent">`).join("");
+  row.innerHTML = (role === "jarvis" ? '<div class="orb"></div>' : "")
+    + `<div class="bubble">${pics ? `<div class="imgs">${pics}</div>` : ""}${fmt(text)}<span class="t">${time}</span></div>`;
   $("thread").appendChild(row);
   const b = row.querySelector(".bubble");
+  b.querySelectorAll("img").forEach((img) => (img.onclick = () => { $("zoom").querySelector("img").src = img.src; $("zoom").style.display = "grid"; }));
   if (text.length > 900) {
     b.classList.add("clip");
     const more = document.createElement("button");
@@ -207,6 +227,24 @@ function addMsg(role, text, ts) {
   }
   if (at || role === "owner") bottom();
   if (role === "jarvis") $("last").textContent = text.replace(/\s+/g, " ").slice(0, 60);
+  return row;
+}
+
+// A reply being spoken sentence by sentence grows in one bubble; the full paragraph replaces it at the end.
+let live = null;
+function liveChunk(text) {
+  if (!live) { live = addMsg("jarvis", ""); live.dataset.text = ""; }
+  live.dataset.text += (live.dataset.text ? " " : "") + text;
+  const b = live.querySelector(".bubble"), t = b.querySelector(".t");
+  b.innerHTML = fmt(live.dataset.text); b.appendChild(t);
+  if (stick()) bottom();
+}
+function liveDone(text) {
+  if (!live) return addMsg("jarvis", text);
+  const b = live.querySelector(".bubble"), t = b.querySelector(".t");
+  b.innerHTML = fmt(text); b.appendChild(t);
+  $("last").textContent = text.replace(/\s+/g, " ").slice(0, 60);
+  live = null;
 }
 function addSys(text, cls) {
   const at = stick();
@@ -258,8 +296,9 @@ J.on("state", (s) => {
   $("wake").checked = J.settings.wake;
 })
   .on("status", (e) => { showStatus(e); if (e.status === "idle") $("typing-t").textContent = "JARVIS is thinking"; })
-  .on("owner", (e) => addMsg("owner", e.text))
-  .on("say", (e) => addMsg("jarvis", e.text))
+  .on("owner", (e) => { live = null; addMsg("owner", e.text || (e.images && e.images.length ? "" : "…"), null, e.images); })
+  .on("say_chunk", (e) => liveChunk(e.text))
+  .on("say", (e) => (e.streamed ? liveDone(e.text) : addMsg("jarvis", e.text)))
   .on("interim", (e) => { $("text").value = e.text; grow(); })
   .on("error", (e) => addSys(e.text, "err"))
   .on("jarvis_tool", (e) => { $("typing-t").textContent = e.summary || "Working"; })
@@ -275,7 +314,39 @@ function fillVoices() {
   $("voice").innerHTML = J.voiceOptions().map((o) => `<option value="${esc(o.id)}" ${o.id === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("") || "<option>Default voice</option>";
 }
 function grow() { const t = $("text"); t.style.height = "auto"; t.style.height = Math.min(180, t.scrollHeight) + "px"; }
-function send() { const v = $("text").value; if (!v.trim()) return; J.send(v); $("text").value = ""; grow(); }
+
+// Images waiting to go with the next message: pasted, dropped or picked with the 📎 button.
+let pending = [];
+function showPending() {
+  $("pending").style.display = pending.length ? "flex" : "none";
+  $("pending").innerHTML = pending.map((p, i) => `<div class="th"><img src="${p.url}" alt="Image to send"><button data-i="${i}" title="Remove">×</button></div>`).join("");
+  $("pending").querySelectorAll("button").forEach((b) => (b.onclick = () => { pending.splice(+b.dataset.i, 1); showPending(); }));
+}
+async function addFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    if (pending.length >= 4) { addSys("Up to 4 images per message.", "err"); break; }
+    try { pending.push(await J.readImage(f)); } catch (e) { addSys(e.message, "err"); }
+  }
+  showPending();
+}
+function send() {
+  const v = $("text").value;
+  if (!v.trim() && !pending.length) return;
+  J.send(v, pending); pending = []; showPending();
+  $("text").value = ""; grow();
+}
+$("attach").onclick = () => $("file").click();
+$("file").onchange = (e) => { addFiles(e.target.files); e.target.value = ""; };
+document.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+const main = document.querySelector("main");
+main.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); main.classList.add("drop"); } });
+main.addEventListener("dragleave", (e) => { if (e.target === main || !main.contains(e.relatedTarget)) main.classList.remove("drop"); });
+main.addEventListener("drop", (e) => { e.preventDefault(); main.classList.remove("drop"); addFiles(e.dataTransfer.files); });
+$("zoom").onclick = () => ($("zoom").style.display = "none");
 $("send").onclick = send;
 $("text").oninput = grow;
 $("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };

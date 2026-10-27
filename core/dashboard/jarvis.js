@@ -54,14 +54,25 @@
   J.newConversation = () => post("/api/new").catch((e) => J.emit("error", { text: e.message }));
 
   let saidThisTurn = false, failedTurn = false;
-  J.send = async (text) => {
+  // images: [{ media_type: "image/png", data: "<base64>" , url?: "<object URL for showing it>" }]
+  J.send = async (text, images) => {
     text = (text || "").trim();
-    if (!text) return;
+    images = images || [];
+    if (!text && !images.length) return;
     saidThisTurn = false; failedTurn = false;
-    J.emit("owner", { text });
-    try { await post("/api/chat", { text }); }
+    J.emit("owner", { text, images });
+    try { await post("/api/chat", { text, images: images.map(({ media_type, data }) => ({ media_type, data })) }); }
     catch (e) { failedTurn = true; J.emit("error", { text: e.message }); }
   };
+  // Read a pasted, dropped or chosen image file into what J.send expects.
+  J.readImage = (file) => new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return reject(new Error("Only PNG, JPEG, GIF or WebP images."));
+    if (file.size > 5 * 1024 * 1024) return reject(new Error("Images must be under 5 MB."));
+    const r = new FileReader();
+    r.onload = () => resolve({ media_type: file.type, data: String(r.result).split(",")[1], url: URL.createObjectURL(file) });
+    r.onerror = () => reject(new Error("That image couldn't be read."));
+    r.readAsDataURL(file);
+  });
 
   function setStatus(s) { J.status = s; J.emit("status", { status: s, shown: shown() }); }
   function shown() { return J.speaking ? "speaking" : J.listening ? "listening" : J.status; }
@@ -72,7 +83,10 @@
     switch (e.type) {
       case "changed": clearTimeout(refreshTimer); refreshTimer = setTimeout(J.refresh, 150); return;
       case "status": J.status = e.status; J.emit("status", { ...e, shown: shown() }); if (e.status === "idle") afterTurn(); return;
-      case "say": saidThisTurn = true; J.emit("say", e); say(e.text); return;
+      // Replies stream in a sentence at a time (say_chunk) and are spoken as they arrive;
+      // "say" then carries the whole paragraph for display, already spoken if it was streamed.
+      case "say_chunk": saidThisTurn = true; J.emit("say_chunk", e); say(e.text); return;
+      case "say": saidThisTurn = true; J.emit("say", e); if (!e.streamed) say(e.text); return;
       case "reply":
         if (!saidThisTurn && e.text && !e.is_error) { J.emit("say", { text: e.text }); say(e.text); }
         if (e.is_error) {
@@ -135,7 +149,8 @@
 
   // ---------------------------------------------------------- voice out
   // JARVIS speaks with Kokoro (a local neural voice served by /api/tts) when it is installed,
-  // otherwise with the browser's own voice. Voice ids: "kokoro:bm_george" or a browser voice name.
+  // otherwise with the browser's own voice. Voice ids: "kokoro:jarvis" (a tuned preset), "kokoro:bm_george",
+  // or a browser voice name.
   J.settings = {
     get handsfree() { return J.pref("handsfree") === "1"; }, set handsfree(v) { J.pref("handsfree", v ? "1" : "0"); if (v) { failedTurn = false; afterTurn(); } },
     get speak() { return J.pref("speak") !== "0"; }, set speak(v) { J.pref("speak", v ? "1" : "0"); if (!v) cancelSpeech(); },
@@ -152,6 +167,9 @@
     ...(kokoroOn() ? J.state.tts.voices.map((v) => ({ id: "kokoro:" + v.id, label: `JARVIS (Kokoro) · ${v.name}` })) : []),
     ...J.voices().map((v) => ({ id: v.name, label: v.name })),
   ];
+  // George was the default before the JARVIS-tuned voice existed: move people who never chose otherwise.
+  if (J.pref("speechVoice") === "kokoro:bm_george" && J.pref("voiceUpgrade") !== "1") J.pref("speechVoice", "kokoro:jarvis");
+  J.pref("voiceUpgrade", "1");
   J.currentVoice = () => {
     const saved = J.settings.voice, opts = J.voiceOptions();
     if (saved && opts.some((o) => o.id === saved)) return saved;

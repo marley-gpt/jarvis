@@ -493,7 +493,7 @@ function toast(text, color) {
 
 J.on("state", onState)
   .on("status", (e) => { showStatus(e.status, e.request); if (e.status === "thinking" && e.request) current = null; })
-  .on("owner", (e) => { addMsg("owner", e.text); current = null; })
+  .on("owner", (e) => { addMsg("owner", [e.images?.length ? "🖼 image" : "", e.text].filter(Boolean).join(" ")); current = null; })
   .on("say", (e) => { current = addMsg("jarvis", e.text); })
   .on("interim", (e) => { $("text").value = e.text; })
   .on("error", (e) => { addMsg("err", e.text); toast(e.text, "var(--bad)"); })

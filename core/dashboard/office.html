@@ -396,7 +396,7 @@ function showStatus() {
 }
 J.on("state", (s) => { render(s); showStatus(); })
   .on("status", (e) => { if (J.state && e.request !== undefined) J.state.jarvis.request = e.request; showStatus(); })
-  .on("owner", (e) => setCap("owner", "You: " + e.text))
+  .on("owner", (e) => setCap("owner", "You: " + (e.text || "🖼 image")))
   .on("interim", (e) => setCap("owner", "You: " + e.text + " …"))
   .on("say", (e) => { if (!J.settings.speak) setCap(null, J.spoken(e.text)); })
   .on("error", (e) => toast(e.mic ? "Microphone" : e.login ? "Sign-in needed" : "JARVIS", e.text, "#f87171"))

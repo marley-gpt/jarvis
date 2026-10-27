@@ -1,3 +1,4 @@
+import base64
 import http.client
 import json
 import sys
@@ -25,6 +26,7 @@ class DashboardTest(BrainTest):
 
     def tearDown(self):
         self.server.shutdown()
+        self.server.runner.close()
         self.server.tts.stop()
         self.server.server_close()
         super().tearDown()
@@ -128,18 +130,47 @@ class DashboardTest(BrainTest):
         self.assertEqual(db.get_meta(conn, "dashboard_session"), "sess-123")
         conn.close()
 
-        # The next message continues the same conversation.
+        # The next message goes to the same running process: no start-up wait.
         self.events.clear()
         self.request("POST", "/api/chat", {"text": "and the angles?"})
         self.wait_idle()
         say = next(e for e in self.events if e["type"] == "say")
-        self.assertIn("Resumed=True", say["text"])
+        self.assertIn("Resumed=False. Turn=2", say["text"])
+
+        # After a stop the process is gone; the next message resumes the saved conversation.
+        self.assertEqual(self.request("POST", "/api/stop", {})[0], 200)
+        self.events.clear()
+        self.request("POST", "/api/chat", {"text": "carry on"})
+        self.wait_idle()
+        say = next(e for e in self.events if e["type"] == "say")
+        self.assertIn("Resumed=True. Turn=1", say["text"])
 
         # New conversation forgets the session id (memory and journal stay).
         self.assertEqual(self.request("POST", "/api/new", {})[0], 200)
         conn = db.connect()
         self.assertFalse(db.get_meta(conn, "dashboard_session"))
         conn.close()
+
+    def test_reply_is_spoken_sentence_by_sentence(self):
+        self.use_fake("--fake-stream")
+        self.request("POST", "/api/chat", {"text": "start the research"})
+        self.wait_idle()
+        chunks = [e["text"] for e in self.events if e["type"] == "say_chunk"]
+        self.assertEqual(chunks, ["On it, sir.", "The research team is starting now.", "Shall I brief the creative team too?"])
+        say = next(e for e in self.events if e["type"] == "say")
+        self.assertTrue(say["streamed"])  # shown in full, but not spoken twice
+
+    def test_pasted_images_reach_jarvis_and_are_saved(self):
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\0" * 32).decode()
+        status, _ = self.request("POST", "/api/chat", {"text": "", "images": [{"media_type": "image/png", "data": png}]})
+        self.assertEqual(status, 202)
+        self.wait_idle()
+        say = next(e for e in self.events if e["type"] == "say")
+        self.assertIn("Images=1", say["text"])
+        self.assertIn("files/uploads/", say["text"].replace("\\", "/"))  # the path, so agents can open it
+        self.assertEqual(len(list((self.home / "files" / "uploads").glob("*.png"))), 1)
+        bad = {"text": "x", "images": [{"media_type": "image/svg+xml", "data": png}]}
+        self.assertEqual(self.request("POST", "/api/chat", bad)[0], 400)
 
     def use_fake(self, *flags):
         (self.home / "config.json").write_text(json.dumps({"claude_command": [*FAKE, *flags]}), encoding="utf-8")
@@ -180,15 +211,19 @@ class DashboardTest(BrainTest):
                                               encoding="utf-8")
         state = json.loads(self.request("GET", "/api/state", token=False)[1])
         self.assertTrue(state["tts"]["available"])
-        self.assertEqual(state["tts"]["voice"], "bm_george")
+        self.assertEqual(state["tts"]["voice"], "jarvis")
         self.assertIn("bm_george", [v["id"] for v in state["tts"]["voices"]])
+        self.assertIn("jarvis", [v["id"] for v in state["tts"]["voices"]])
         self.assertEqual(self.request("POST", "/api/tts", {"text": "Good evening."}, token=False)[0], 403)
         status, wav = self.request("POST", "/api/tts", {"text": "Good evening, sir.", "voice": "bm_lewis"})
         self.assertEqual(status, 200)
         self.assertEqual(wav[:4], b"RIFF")
-        # Once the worker reports its voices, only those are offered.
+        # Once the worker reports its voices, only those (and presets built from them) are offered.
         state = json.loads(self.request("GET", "/api/state", token=False)[1])
-        self.assertEqual([v["id"] for v in state["tts"]["voices"]], ["bm_george", "bm_lewis", "bm_daniel", "bf_emma"])
+        self.assertEqual([v["id"] for v in state["tts"]["voices"]],
+                         ["jarvis_crisp", "bm_george", "bm_lewis", "bm_daniel", "bf_emma"])
+        status, wav = self.request("POST", "/api/tts", {"text": "Good evening, sir.", "voice": "jarvis_crisp"})
+        self.assertEqual((status, wav[:4]), (200, b"RIFF"))
         self.assertEqual(self.request("POST", "/api/tts", {"text": "boom"})[0], 503)
         self.assertEqual(self.request("POST", "/api/tts", {"text": "  "})[0], 503)
         # A crashed worker is restarted on the next request.

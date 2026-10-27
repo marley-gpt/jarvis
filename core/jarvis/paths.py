@@ -46,9 +46,13 @@ DEFAULT_CONFIG = {
     # Below these, a test result is reported as "insufficient data" and never as a win.
     "min_spend_for_verdict_usd": 30.0,
     "min_clicks_for_verdict": 50,
-    # Dashboard voice: a Kokoro voice id (see core/jarvis/tts.py) and speaking speed.
-    "tts_voice": "bm_george",
+    # Dashboard voice: a Kokoro voice id or preset (see core/jarvis/tts.py) and speaking speed.
+    "tts_voice": "jarvis",
     "tts_speed": 1.0,
+    # The dashboard conversation's model and effort: low effort keeps spoken replies quick;
+    # specialists keep their own models.
+    "dashboard_model": "opus",
+    "dashboard_effort": "low",
 }
 
 

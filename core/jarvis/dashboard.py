@@ -1,21 +1,23 @@
 """Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
 
 `bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
-isometric office at `/`, the sidebar console at `/console`, the first version at
-`/classic`, all sharing jarvis.js) and streams
-state over Server-Sent Events. Talking to JARVIS runs Claude Code headless
-(`claude -p --output-format stream-json`), resuming one conversation, so it uses
-the owner's existing Claude subscription. Each delegation (Agent tool call) and
-each specialist's tool use is pushed to the page as it happens. Durable state
-(tasks, approvals, memory, journal) comes from the brain, so the page also shows
-work done from any other Claude Code session.
+isometric office at `/`, the sidebar console at `/console`, the chat app at
+`/chat`, the first version at `/classic`, all sharing jarvis.js) and streams
+state over Server-Sent Events. Talking to JARVIS runs one headless Claude Code
+process (`claude -p`, stream-json in and out) that stays running between
+messages and resumes the saved conversation if restarted, so it uses the
+owner's existing Claude subscription. Pasted images go in with the message.
+Each delegation (Agent tool call) and each specialist's tool use is pushed to
+the page as it happens. Durable state (tasks, approvals, memory, journal) comes
+from the brain, so the page also shows work done from any other Claude Code session.
 
-Voice is handled in the browser (Web Speech API for listening and speaking), so
-it costs nothing extra.
+Listening uses the browser's speech recognition; speaking uses local Kokoro
+(core/jarvis/tts.py) with the browser's voice as a fallback, so it costs nothing extra.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -245,14 +247,56 @@ def _summary(tool: str, data: dict) -> str:
     return tool
 
 
+IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+MAX_IMAGES, MAX_IMAGE_BYTES = 4, 5 * 1024 * 1024
+MAX_BODY = MAX_IMAGES * MAX_IMAGE_BYTES * 4 // 3 + 64 * 1024  # base64 images plus the text
+# Where streamed text is cut into sentences to speak: end punctuation followed by a space, or a line break.
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def save_images(images: list) -> tuple[list[dict], list[str]]:
+    """Validate pasted images; returns Claude content blocks and the brain paths they were saved to."""
+    if len(images) > MAX_IMAGES:
+        raise ValueError(f"At most {MAX_IMAGES} images per message.")
+    blocks, saved = [], []
+    folder = paths.files_dir() / "uploads"
+    stamp = paths.now()[:19].replace("-", "").replace(":", "").replace(" ", "-").replace("T", "-")
+    for n, img in enumerate(images, 1):
+        kind = (img or {}).get("media_type")
+        if kind not in IMAGE_TYPES:
+            raise ValueError("Images must be PNG, JPEG, GIF or WebP.")
+        try:
+            data = base64.b64decode(img.get("data") or "", validate=True)
+        except (ValueError, TypeError):
+            raise ValueError("That image couldn't be read.")
+        if not data or len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("Each image must be under 5 MB.")
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{stamp}-{n}.{IMAGE_TYPES[kind]}"
+        path.write_bytes(data)
+        saved.append(paths.rel(path))
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": kind, "data": img["data"]}})
+    return blocks, saved
+
+
 class Runner:
-    """One conversation with JARVIS through headless Claude Code, one message at a time."""
+    """One conversation with JARVIS through headless Claude Code.
+
+    The Claude Code process stays running between messages (stream-json in and out), so a reply
+    doesn't wait for Claude Code to start up each time, and its text is streamed sentence by
+    sentence ("say_chunk") so the voice can start speaking before the reply is finished. If the
+    process ends (stopped, crashed, signed out) the next message starts a new one that resumes
+    the saved conversation.
+    """
 
     def __init__(self, hub: Hub):
         self.hub = hub
         self.proc: subprocess.Popen | None = None
+        self.stderr: list[str] = []
         self.lock = threading.Lock()
         self.live: dict = {"status": "idle", "agents": {}, "activity": {}}
+        self.buf = ""          # streamed text not yet spoken
+        self.streamed = False  # this text block was already spoken in chunks
 
     @property
     def busy(self) -> bool:
@@ -266,6 +310,7 @@ class Runner:
             conn.close()
 
     def reset(self, announce: bool = True) -> None:
+        self.close()
         conn = db.connect()
         try:
             db.set_meta(conn, "dashboard_session", "")
@@ -274,7 +319,7 @@ class Runner:
         if announce:
             self.hub.publish({"type": "reset"})
 
-    def start(self, text: str) -> None:
+    def start(self, text: str, images: list | None = None) -> None:
         with self.lock:
             if self.busy:
                 raise RuntimeError("JARVIS is still answering the last message.")
@@ -283,54 +328,117 @@ class Runner:
                 raise FileNotFoundError(
                     "Claude Code CLI not found. Install it (it uses your existing Claude subscription), "
                     "or set \"claude_command\" in brain/config.json.")
+            blocks, saved = save_images(images or [])
+            if saved:
+                text = (text or "Take a look at this.") + (
+                    "\n\n(Image" + ("s" if len(saved) > 1 else "") + " attached above, also saved at "
+                    + ", ".join(saved) + ": pass the path to any agent that needs to see it.)")
             self.live = {"status": "thinking", "request": text, "agents": {}, "activity": {}}
         self.hub.publish({"type": "status", "status": "thinking", "request": text})
-        threading.Thread(target=self._run, args=(claude, text), daemon=True).start()
+        threading.Thread(target=self._turn, args=(claude, text, blocks), daemon=True).start()
 
     def stop(self) -> None:
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
+        """Interrupt the reply. The process ends; the next message resumes the conversation."""
+        self.close()
 
-    def _run(self, claude: list[str], text: str) -> None:
+    def close(self) -> None:
+        proc, self.proc = self.proc, None
+        if proc and proc.poll() is None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            proc.terminate()
+
+    def _spawn(self, claude: list[str], sid: str | None) -> None:
+        cfg = paths.config()
+        cmd = [*claude, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+               "--include-partial-messages", "--permission-mode", "acceptEdits", "--append-system-prompt", VOICE_PROMPT]
+        if cfg.get("dashboard_model"):
+            cmd += ["--model", cfg["dashboard_model"]]
+        if cfg.get("dashboard_effort"):
+            cmd += ["--effort", cfg["dashboard_effort"]]
+        if sid:
+            cmd += ["--resume", sid]
+        self.stderr = []
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT)
+        threading.Thread(target=self._drain, args=(self.proc, self.stderr), daemon=True).start()
+
+    @staticmethod
+    def _drain(proc: subprocess.Popen, sink: list[str]) -> None:
+        for line in proc.stderr:  # keep stderr flowing so the process never blocks on it
+            sink.append(line)
+            del sink[:-50]
+
+    def _turn(self, claude: list[str], text: str, images: list[dict]) -> None:
         try:
-            sid = self.session()
-            got_result, err = self._attempt(claude, text, sid)
-            if not got_result and sid and MISSING_SESSION.search(err):
-                # The saved conversation is gone (e.g. cleared by Claude Code): start a fresh one.
-                self.reset(announce=False)
-                got_result, err = self._attempt(claude, text, None)
-            if not got_result:
+            for attempt in (1, 2):
+                sid = self.session()
+                if not (self.proc and self.proc.poll() is None):
+                    self._spawn(claude, sid)
+                answered, err = self._exchange(text, images)
+                if answered:
+                    break
+                if attempt == 1 and sid and MISSING_SESSION.search(err):
+                    # The saved conversation is gone (e.g. cleared by Claude Code): start a fresh one.
+                    self.reset(announce=False)
+                    continue
+                if self.live.get("stopped"):
+                    break
                 self.hub.publish({"type": "error", "text": journal.short(err or "JARVIS stopped without answering.", 400)})
+                break
         except OSError as exc:
             self.hub.publish({"type": "error", "text": f"Could not start Claude Code: {exc}"})
         finally:
-            self.proc = None
             self.live = {"status": "idle", "agents": {}, "activity": self.live.get("activity", {})}
             self.hub.publish({"type": "status", "status": "idle"})
 
-    def _attempt(self, claude: list[str], text: str, sid: str | None) -> tuple[bool, str]:
-        cmd = [*claude, "-p", "--output-format", "stream-json", "--verbose",
-               "--permission-mode", "acceptEdits", "--append-system-prompt", VOICE_PROMPT]
-        if sid:
-            cmd += ["--resume", sid]
+    def _exchange(self, text: str, images: list[dict]) -> tuple[bool, str]:
+        """Send one message to the running process and read events until its result."""
+        proc = self.proc
         dispatched: dict[str, str] = {}
-        got_result = False
-        proc = self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            text=True, encoding="utf-8", errors="replace", cwd=paths.REPO_ROOT)
+        self.buf, self.streamed = "", False
+        msg = {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}, *images]}}
         try:
-            proc.stdin.write(text)
-            proc.stdin.close()
+            proc.stdin.write(json.dumps(msg) + "\n")
+            proc.stdin.flush()
             for line in proc.stdout:
                 try:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                got_result |= self._handle(ev, dispatched)
-            proc.wait()
-            return got_result, ("" if got_result else (proc.stderr.read() or "").strip())
-        finally:
-            proc.stdout.close()
-            proc.stderr.close()
+                if self._handle(ev, dispatched):
+                    return True, ""
+        except (OSError, ValueError):  # the process went away mid-message
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        if self.proc is proc:
+            self.proc = None
+        else:
+            self.live["stopped"] = True  # stop() closed it on purpose
+        time.sleep(0.05)  # let the stderr reader catch the last lines
+        return False, "".join(self.stderr).strip()
+
+    def _stream(self, ev: dict) -> None:
+        """Speak top-level text as it arrives, a sentence at a time."""
+        e = ev.get("event") or {}
+        if e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
+            self.buf += e["delta"].get("text", "")
+            *done, self.buf = SENTENCE_END.split(self.buf)
+            for sentence in done:  # a short opener ("Very good, sir.") is spoken at once: it's what feels quick
+                self._chunk(sentence)
+        elif e.get("type") == "content_block_stop" and self.buf.strip():
+            self._chunk(self.buf)
+            self.buf = ""
+
+    def _chunk(self, text: str) -> None:
+        if text.strip() and not LOGIN_PROBLEM.search(text):
+            self.streamed = True
+            self.hub.publish({"type": "say_chunk", "text": text.strip()})
 
     def _login_needed(self, needed: bool) -> None:
         conn = db.connect()
@@ -342,6 +450,10 @@ class Runner:
 
     def _handle(self, ev: dict, dispatched: dict) -> bool:
         kind = ev.get("type")
+        if kind == "stream_event":
+            if not ev.get("parent_tool_use_id"):
+                self._stream(ev)
+            return False
         if kind == "result":
             text = ev.get("result") or ""
             if ev.get("is_error") and LOGIN_PROBLEM.search(text):
@@ -367,7 +479,8 @@ class Runner:
                     if parent and parent in dispatched:
                         self._agent_line(dispatched[parent], journal.short(block["text"], 110))
                     elif not parent:
-                        self.hub.publish({"type": "say", "text": block["text"]})
+                        self.hub.publish({"type": "say", "text": block["text"], "streamed": self.streamed})
+                        self.streamed = False
                 elif block.get("type") == "tool_use":
                     name, data = block.get("name", ""), block.get("input") or {}
                     if name in ("Agent", "Task"):
@@ -517,7 +630,11 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 
         def do_POST(self):
             # Read the body first so a rejected request doesn't leave bytes on a kept-alive connection.
-            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY:
+                self.close_connection = True
+                return self._json(413, {"error": "That's too large to send (images must be under 5 MB each)."})
+            raw = self.rfile.read(length)
             if not self._host_ok() or self.headers.get("X-Jarvis-Token") != token:
                 return self._json(403, {"error": "forbidden"})
             try:
@@ -526,12 +643,15 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(400, {"error": "bad json"})
             if self.path == "/api/chat":
                 text = (body.get("text") or "").strip()
-                if not text:
+                images = body.get("images") or []
+                if not text and not images:
                     return self._json(400, {"error": "empty message"})
                 try:
-                    runner.start(text)
+                    runner.start(text, images if isinstance(images, list) else [])
                 except RuntimeError as exc:
                     return self._json(409, {"error": str(exc)})
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
                 except FileNotFoundError as exc:
                     return self._json(503, {"error": str(exc)})
                 return self._json(202, {"ok": True})
