@@ -32,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, readiness, records, tts, wakeword
+from . import brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -523,6 +523,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     runner = Runner(hub)
     kokoro = tts.Kokoro()
     wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}))
+    phone = telegram.Bridge(hub, runner, kokoro)
     token = secrets.token_urlsafe(24)
 
     class Handler(BaseHTTPRequestHandler):
@@ -577,6 +578,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 data["jarvis"]["claude"] = bool(find_claude())
                 data["tts"] = kokoro.info()
                 data["wake"] = {**wake.info(), "enabled": wake.enabled()}
+                data["telegram"] = phone.info()
                 return self._json(200, data)
             if self.path == "/api/events":
                 return self._events()
@@ -703,6 +705,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 
     server = Server((host, port), Handler)
     server.hub, server.runner, server.token, server.tts, server.wake = hub, runner, token, kokoro, wake
+    server.telegram = phone
     return server
 
 
@@ -726,6 +729,8 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         print("Note: Kokoro voice not installed, so JARVIS will use the browser's voice.", flush=True)
     if server.wake.enabled():
         server.wake.start()
+    if server.telegram.enabled():
+        server.telegram.start()  # the owner's phone: texts, voice notes and photos to JARVIS
     if open_browser:
         webbrowser.open(url)
     try:
@@ -734,5 +739,7 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         pass
     finally:
         server.wake.stop()
+        server.telegram.stop()
+        server.runner.close()
         server.tts.stop()
         server.server_close()

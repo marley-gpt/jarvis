@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import feedback, backup, brief, db, journal, media, memory, paths, records
+from . import feedback, backup, brief, db, journal, media, memory, paths, records, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -426,6 +426,34 @@ def cmd_watch(conn, args):
         out(f"Saved {entry.id}: {entry.title}\n  files: {paths.rel(folder)}")
 
 
+def cmd_telegram_pair(conn, args):
+    if telegram.settings().get("chat_id"):
+        out("Already paired with the owner's chat.")
+        return
+    out(f"Send this code to the bot from the owner's phone: {telegram.pairing_code()}")
+
+
+def cmd_telegram_status(conn, args):
+    s = telegram.settings()
+    out(f"Token: {'set' if s.get('bot_token') else 'missing'}; paired: {'yes' if s.get('chat_id') else 'no'}")
+    if s.get("bot_token"):
+        bot = telegram.call("getMe")
+        out(f"Bot: @{bot.get('username')} ({bot.get('first_name')})")
+
+
+def cmd_telegram_send(conn, args):
+    from . import tts
+    voice = None
+    if args.voice:
+        kokoro = tts.Kokoro()
+        try:
+            voice = telegram.speak(kokoro, args.text)
+        finally:
+            kokoro.stop()
+    telegram.send(args.text, voice)
+    out("Sent to the owner's phone" + (" with a voice note." if voice else "."))
+
+
 PRIVATE_SKILL_PREFIXES = ("blake-",)
 
 
@@ -723,6 +751,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper)")
     s.set_defaults(fn=cmd_watch)
 
+    tg = sub.add_parser("telegram", help="the owner's phone: pair the bot, check it, send a message").add_subparsers(
+        dest="sub", required=True)
+    tg.add_parser("pair", help="print the code the owner sends the bot to pair").set_defaults(fn=cmd_telegram_pair)
+    tg.add_parser("status", help="token, pairing and bot name").set_defaults(fn=cmd_telegram_status)
+    s = tg.add_parser("send", help="message the owner's phone (briefs, approvals, alerts)")
+    s.add_argument("text")
+    s.add_argument("--voice", action="store_true", help="also send it as a voice note in JARVIS's voice")
+    s.set_defaults(fn=cmd_telegram_send)
+
     skills = sub.add_parser("skills", help="private skills (Blake's playbooks)").add_subparsers(dest="sub", required=True)
     s = skills.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")
     s.add_argument("--restore", action="store_true", help="copy brain/skills back to ~/.claude/skills")
@@ -748,7 +785,8 @@ def main(argv=None) -> int:
     conn = db.connect()
     try:
         return args.fn(conn, args) or 0
-    except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError) as exc:
+    except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
+            telegram.TelegramError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

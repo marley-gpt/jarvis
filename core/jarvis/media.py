@@ -44,6 +44,18 @@ def setup() -> str:
     return str(venv())
 
 
+def transcribe(path: Path) -> str:
+    """Words spoken in an audio file (a Telegram voice note), transcribed locally."""
+    if not venv_python().exists():
+        raise MediaError("The transcriber isn't installed yet. Run: bin/jarvis watch --setup")
+    proc = subprocess.run([str(venv_python()), "-I", str(WORKER), "--transcribe", str(path)], capture_output=True,
+                          text=True, encoding="utf-8", errors="replace", creationflags=paths.NO_WINDOW,
+                          env=dict(os.environ, HF_HUB_DISABLE_SYMLINKS_WARNING="1"))
+    if proc.returncode != 0:
+        raise MediaError("Couldn't transcribe that voice note.")
+    return proc.stdout.strip()
+
+
 def reel_dir(url: str) -> Path:
     m = re.search(r"/(?:reel|reels|p|shorts|video)/([\w-]+)|[?&]v=([\w-]+)|youtu\.be/([\w-]+)", url)
     key = next((g for g in (m.groups() if m else ()) if g), None) or re.sub(r"[^\w]+", "-", url)[-40:]
@@ -56,7 +68,8 @@ def watch(conn, url: str, *, note: str = "", category: str = "creative-inspirati
         raise MediaError("The video tools aren't installed yet. Run: bin/jarvis watch --setup")
     out = reel_dir(url)
     proc = subprocess.run([str(venv_python()), "-I", str(WORKER), url, str(out)], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=dict(os.environ, HF_HUB_DISABLE_SYMLINKS_WARNING="1"))
+                          encoding="utf-8", errors="replace", creationflags=paths.NO_WINDOW,
+                          env=dict(os.environ, HF_HUB_DISABLE_SYMLINKS_WARNING="1"))
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
         raise MediaError("Couldn't watch that video: " + " ".join(tail))

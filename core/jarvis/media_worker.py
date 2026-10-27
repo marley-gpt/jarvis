@@ -54,5 +54,17 @@ def main(url: str, out: Path) -> None:
     print(json.dumps(info))
 
 
+def transcribe(path: str) -> None:
+    """`media_worker.py --transcribe <audio file>`: print what was said (for Telegram voice notes)."""
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "16000", "-"],
+                         check=True, capture_output=True).stdout
+    audio = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+    segments, _ = WhisperModel("small.en", device="cpu", compute_type="int8").transcribe(audio, vad_filter=True)
+    print(" ".join(s.text.strip() for s in segments))
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], Path(sys.argv[2]))
+    if sys.argv[1] == "--transcribe":
+        transcribe(sys.argv[2])
+    else:
+        main(sys.argv[1], Path(sys.argv[2]))

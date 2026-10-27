@@ -23,7 +23,8 @@ MAX_CHARS = 6000
 SECRET = re.compile(
     r"(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{16,}|shp(at|ca|pa|ss)_[A-Fa-f0-9]{20,}"
     r"|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|EAA[A-Za-z0-9]{40,}|AIza[A-Za-z0-9_-]{30,}"
-    r"|xox[abpr]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})"
+    r"|xox[abpr]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+    r"|\d{8,12}:AA[A-Za-z0-9_-]{30,})"  # Telegram bot token (often pasted straight after a word)
 )
 SECRET_ASSIGN = re.compile(r"(?i)\b(password|passwd|api[_ -]?key|secret|token)(\s*[:=]\s*)(\S{6,})")
 
