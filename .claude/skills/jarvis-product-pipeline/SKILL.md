@@ -33,6 +33,8 @@ Anything thin goes back to the agent with what's missing. Nothing is invented to
 2. 15 concepts split across Blake's BOF/MOF formats (blake-creatives section "make 15 statics"). TOF natives only if the TOF gate in memory passes, and then at most 2–3.
 3. Copy for each ad (primary text, headline, description) using Blake's copy prompts and the customers' own words from the VoC bank.
 4. One image brief per ad, built from Blake's prompt templates and the matching images in `blake-creatives/examples/`.
+5. **Split the job between image and copy (owner, 2026-10-28).** The image does one thing: stop the scroll and make one point, with a short hook or offer at most. Don't cram claims, benefits and bullets into it. The primary text does the selling: killer long-form copy in the customers' own words is welcome.
+6. **Destination per angle:** the product page by default (Blake's testing setup), or a **pre-lander** (advertorial, listicle or comparison, from Blake's swipe library M-261021-e8c6) when the angle needs education first (problem-aware or unaware buyers). Say which ads go where and why, and brief the pre-lander for step 6.
 
 ## 4. QC gate, BEFORE any image is generated: a second agent
 - A fresh `creative-director` instance, or `creative-research`, reviews every concept, brief and copy against Blake's QC checklist, the VoC bank (does it use real pain and real words?), the owner's rules (15 ads, statics, honesty defaults, offer-on-image default) and `bin/jarvis feedback list --kind ad`.
@@ -40,12 +42,14 @@ Anything thin goes back to the agent with what's missing. Nothing is invented to
 
 ## 5. Images: JARVIS, within the approved budget
 - Generate **one image per approved brief** with Blake's tool and settings (blake-creatives). No variant batches.
-- Check each result against its brief. Re-generate only the failing element. Max 2 attempts, then flag it for the owner.
+- **Quality bar (owner, 2026-10-28: image ads only sell if they look good).** Reject any image with: warped or misspelt text, a product that doesn't match the real one, AI tells (extra fingers, plastic skin, melted labels, odd shadows), low resolution or artefacts, clutter, or anything a thumb would scroll past. Check it full-size and as a phone-feed thumbnail.
+- Check each result against its brief. Re-generate only the failing element. Max 2 attempts, then flag it for the owner. A weak image is cut, not shipped: 12 great ads beat 15 with filler.
 - `bin/jarvis cost log <service> <AUD>` for every paid call. Save to `brain/files/<product>/ads/NN-<concept>.png`.
 
 ## 6. Product page: `shopify`
 - Build the PDP exactly as blake-shopify-cro sets out (section order, offer, social proof, settings), then run its **review checklist** (every item pass or fail) before the owner sees it.
 - Draft only: a local preview or draft spec, with no changes to the live store until the launch approval (`shopify_live`). Real, attributable reviews only. Empty slots are flagged.
+- **Pre-lander** when step 3 calls for one: a Shopify page in the advertorial or listicle format from Blake's swipe library, written from the VoC bank, ending in a clear button to the product page. The honesty rules apply in full: no invented doctors, experts, studies or review counts (D11).
 
 ## 7. Campaign and test plan: `meta-ads` + `product-testing`
 - meta-ads: the campaign draft per blake-meta-ads (structure, one ad set with the 15 ads, budget, region, naming, tracking checks).
