@@ -525,7 +525,19 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     hub = Hub()
     runner = Runner(hub)
     kokoro = tts.Kokoro()
-    wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}))
+    def heard(text: str) -> None:
+        """The owner spoke a request (after "Hey JARVIS", the mic button or a follow-up): send it to JARVIS."""
+        text = text.strip()
+        if not text:
+            return
+        hub.publish({"type": "owner", "text": text, "via": "voice"})
+        try:
+            runner.start(text)
+        except (RuntimeError, FileNotFoundError, ValueError) as exc:
+            hub.publish({"type": "error", "text": str(exc)})
+
+    wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}), heard,
+                             lambda state: hub.publish({"type": "ears", "state": state}))
     phone = telegram.Bridge(hub, runner, kokoro)
     token = secrets.token_urlsafe(24)
 
@@ -676,6 +688,15 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 if "paused" in body:
                     wake.send("pause" if body["paused"] else "resume")
                 return self._json(200, {**wake.info(), "enabled": wake.enabled()})
+            if self.path == "/api/listen":
+                # Record one request through the local ears (no wake word): the mic button, or a
+                # follow-up in a conversation. 409 tells the page to use the browser's recogniser.
+                if body.get("cancel"):
+                    wake.send("cancel")
+                    return self._json(200, {"ok": True})
+                if not wake.listen(bool(body.get("followup"))):
+                    return self._json(409, {"error": "local speech recognition isn't running"})
+                return self._json(202, {"ok": True})
             if self.path == "/api/approval":
                 conn = db.connect()
                 try:

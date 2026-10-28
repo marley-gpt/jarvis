@@ -54,13 +54,13 @@
   J.stop = () => { cancelSpeech(); if (J.listening) rec?.stop(); post("/api/stop").catch(() => {}); };
   J.newConversation = () => post("/api/new").catch((e) => J.emit("error", { text: e.message }));
 
-  let saidThisTurn = false, failedTurn = false;
+  let saidThisTurn = false, failedTurn = false, voiceTurn = false;
   // images: [{ media_type: "image/png", data: "<base64>" , url?: "<object URL for showing it>" }]
   J.send = async (text, images) => {
     text = (text || "").trim();
     images = images || [];
     if (!text && !images.length) return;
-    saidThisTurn = false; failedTurn = false;
+    saidThisTurn = false; failedTurn = false; voiceTurn = false;
     J.emit("owner", { text, images });
     try { await post("/api/chat", { text, images: images.map(({ media_type, data }) => ({ media_type, data })) }); }
     catch (e) { failedTurn = true; J.emit("error", { text: e.message }); }
@@ -76,7 +76,26 @@
   });
 
   function setStatus(s) { J.status = s; J.emit("status", { status: s, shown: shown() }); }
-  function shown() { return J.speaking ? "speaking" : J.listening ? "listening" : J.status; }
+  function shown() {
+    return J.speaking ? "speaking" : J.listening ? "listening" : J.ears === "thinking" ? "thinking" : J.status;
+  }
+  // The PC can transcribe locally (faster word-for-word, no internet, doesn't cut you off at a pause).
+  const localEars = () => !!(J.state && J.state.wake && J.state.wake.stt);
+  // A short rising two-note tone: JARVIS is listening. Quieter and quicker than speaking a greeting.
+  let audioCtx = null;
+  function chime() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = audioCtx.currentTime;
+      [[660, 0], [990, 0.09]].forEach(([f, at]) => {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = f; o.type = "sine";
+        g.gain.setValueAtTime(0.0001, t + at); g.gain.exponentialRampToValueAtTime(0.18, t + at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.16);
+        o.connect(g).connect(audioCtx.destination); o.start(t + at); o.stop(t + at + 0.18);
+      });
+    } catch (e) { /* no sound is fine */ }
+  }
   J.shown = shown;
 
   let refreshTimer = null;
@@ -98,6 +117,20 @@
         return;
       case "error": failedTurn = true; J.emit("error", e); return;
       case "wake": J.wake(); return;
+      // The local ears (core/jarvis/wake_worker.py) report what they're doing: listening, thinking
+      // (transcribing), heard, nospeech. What was heard arrives as an "owner" event with via "voice".
+      case "ears":
+        J.ears = e.state;
+        J.listening = e.state === "listening";
+        if (e.state === "listening") chime();
+        setStatus(J.status);
+        J.emit("ears", e);
+        return;
+      case "owner":
+        voiceTurn = e.via === "voice";  // a phone or typed message doesn't reopen the mic afterwards
+        if (voiceTurn) { saidThisTurn = false; failedTurn = false; }
+        J.emit("owner", e);
+        return;
       default: J.emit(e.type, e);
     }
   }
@@ -140,7 +173,13 @@
     };
     rec.onend = () => { J.listening = false; setStatus(J.status); const t = finalText.trim(); if (t) J.send(t); };
   }
-  J.listen = () => {
+  J.listen = async (followup) => {
+    if (localEars()) {
+      if (J.listening) return post("/api/listen", { cancel: true }).catch(() => {});
+      cancelSpeech();
+      failedTurn = false;
+      try { return await post("/api/listen", { followup: !!followup }); } catch (e) { /* fall back to the browser */ }
+    }
     if (!rec) return J.emit("error", { text: "Voice input needs Chrome or Edge. You can still type." });
     if (J.listening) return rec.stop();
     failedTurn = false;
@@ -265,11 +304,14 @@
   }
   J.preview = () => { cancelSpeech(); say("Very good. This is how I shall sound from now on."); };
   J.say = say;
+  // Conversation: after JARVIS answers something you said, he listens for a follow-up (no wake word
+  // needed) when "Hands-free" is on, or always after a "Hey JARVIS" turn. Silence ends it.
   function afterTurn() {
     if (failedTurn) return;  // don't keep reopening the mic after an error
-    if (J.settings.handsfree && J.status === "idle" && !J.speaking && !J.listening) setTimeout(() => {
-      if (J.status === "idle" && !J.speaking && !J.listening) J.listen();
-    }, 350);
+    const converse = J.settings.handsfree || (voiceTurn && localEars());
+    if (converse && J.status === "idle" && !J.speaking && !J.listening) setTimeout(() => {
+      if (J.status === "idle" && !J.speaking && !J.listening) J.listen(true);
+    }, 300);
   }
 
   // ---------------------------------------------------------- "Hey JARVIS"
@@ -279,7 +321,7 @@
   // listens for the request. The listener is paused while JARVIS is speaking or already listening.
   let lastPause = null;
   function syncWakePause() {
-    const paused = J.speaking || J.listening;
+    const paused = J.speaking;  // while JARVIS talks, only a clear "Hey JARVIS" interrupts him
     if (paused !== lastPause) { lastPause = paused; post("/api/wake", { paused }).catch(() => {}); }
   }
   J.on("status", syncWakePause);
@@ -298,9 +340,15 @@
     return bits.join(" ");
   };
   J.wake = () => {
+    if (localEars()) {  // the PC is already recording the request; stop talking and show we're listening
+      cancelSpeech();
+      voiceTurn = true;
+      J.emit("awake", {});
+      return;
+    }
     if (J.speaking || J.listening || J.status !== "idle") return;
     J.emit("awake", {});
-    say(J.greeting());
+    say("Yes, sir?");
     if (!J.canListen) return;
     const t0 = Date.now();
     const wait = setInterval(() => {  // listen as soon as the greeting has been spoken

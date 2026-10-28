@@ -276,3 +276,45 @@ class WakeWordTest(BrainTest):
             server.wake.stop()
             server.shutdown()
             server.server_close()
+
+
+class LocalEarsTest(BrainTest):
+    def test_spoken_requests_reach_jarvis_and_the_mic_button_listens_locally(self):
+        self.init()
+        fake = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_ears.py")]
+        (self.home / "config.json").write_text(json.dumps({"claude_command": FAKE, "wake_command": fake}), encoding="utf-8")
+        server = dashboard.make_server(port=0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        q = server.hub.subscribe()
+        events = []
+
+        def until(pred, timeout=15):
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    ev = q.get(timeout=0.5)
+                except Exception:
+                    continue
+                events.append(ev)
+                if pred(ev):
+                    return ev
+            self.fail(f"never saw it; events: {[e.get('type') for e in events]}")
+
+        try:
+            server.wake.start()
+            until(lambda e: e["type"] == "ears" and e["state"] == "listening")
+            owner = until(lambda e: e["type"] == "owner")
+            self.assertEqual((owner["text"], owner["via"]), ("how are the ads going", "voice"))
+            until(lambda e: e["type"] == "status" and e["status"] == "idle")
+            self.assertTrue(server.wake.info()["stt"])
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+            conn.request("POST", "/api/listen", json.dumps({"followup": True}),
+                         {"Host": f"127.0.0.1:{server.server_address[1]}", "X-Jarvis-Token": server.token})
+            self.assertEqual(conn.getresponse().status, 202)
+            conn.close()
+            self.assertEqual(until(lambda e: e["type"] == "owner")["text"], "and the store")
+        finally:
+            server.wake.stop()
+            server.runner.close()
+            server.shutdown()
+            server.server_close()
