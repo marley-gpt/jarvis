@@ -49,7 +49,7 @@
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*",
-        "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" guard", "timeout": 10 }]
+        "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" guard", "timeout": 330 }]
       }
     ],
     "PostToolUse": [

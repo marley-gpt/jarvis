@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 
 from . import backup, brief, cli, db, journal, memory, paths, records
 
@@ -101,9 +102,62 @@ def guard(event: dict) -> dict | None:
         granted = records.grant_active()
         if granted:
             return _allow(f"JARVIS: carrying out A{granted}, which the owner approved.")
+        decided = phone_approval(tool, server, data)
+        if decided:
+            return decided
         return _ask(f"JARVIS approval gate: {tool} can change {server} or spend credits. "
                     "Approve only if the user has agreed to this specific action.")
     return None
+
+
+SERVICES = (("shopify", "Shopify"), ("meta", "Meta Ads"), ("ads_", "Meta Ads"), ("higgsfield", "Higgsfield"),
+            ("drive", "Google Drive"), ("github", "GitHub"), ("graphql", "Shopify"), ("product", "Shopify"),
+            ("collection", "Shopify"), ("discount", "Shopify"), ("inventory", "Shopify"), ("generate", "Higgsfield"),
+            ("file", "Google Drive"))
+
+
+def service_name(tool: str, server: str) -> str:
+    """A name the owner recognises. Connectors in the desktop app are named by an id, so fall back to the tool."""
+    for key, name in SERVICES:
+        if key in server.lower():
+            return name
+    for key, name in SERVICES:
+        if key in tool.split("__")[-1].lower():
+            return name
+    return server
+
+
+def phone_approval(tool: str, server: str, data: dict) -> dict | None:
+    """Ask the owner on Telegram (Approve / Reject buttons) and wait for the tap.
+
+    Approved: allowed, and the clearance window opens for the rest of the job. Rejected: denied.
+    No phone, or no answer in time: None, so the normal permission prompt decides (headless, a refusal).
+    """
+    from . import telegram
+    cfg = paths.config()
+    if not cfg.get("phone_approvals", True) or not telegram.settings().get("chat_id"):
+        return None
+    conn = db.connect()
+    try:
+        aid = records.approval_request(conn, "tool", f"Let JARVIS use {tool.split('__')[-1]} on {service_name(tool, server)}",
+                                       detail=_summarise(data))
+        try:
+            telegram.push_approval(conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone())
+        except telegram.TelegramError:
+            records.approval_decide(conn, aid, False, "couldn't reach the phone")
+            return None
+        deadline = time.time() + cfg.get("phone_approval_wait_seconds", 300)
+        while time.time() < deadline:
+            status = conn.execute("SELECT status FROM approvals WHERE id = ?", (aid,)).fetchone()[0]
+            if status == "approved":
+                return _allow(f"JARVIS: the owner approved A{aid} on their phone.")
+            if status == "rejected":
+                return _deny(f"The owner rejected A{aid} on their phone. Don't retry it; ask what they want instead.")
+            time.sleep(1)
+        records.approval_decide(conn, aid, False, "no answer in time")
+        return None
+    finally:
+        conn.close()
 
 
 SAVE_NUDGE = ("If this message states a fact, preference, correction, rule or decision, save it now "

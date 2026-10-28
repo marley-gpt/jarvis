@@ -13,7 +13,7 @@ from .memory import slugify
 TASK_STATUSES = ("todo", "in_progress", "blocked", "waiting_approval", "done", "cancelled")
 OPEN_TASK_STATUSES = ("todo", "in_progress", "blocked", "waiting_approval")
 PRODUCT_STAGES = ("idea", "researching", "preparing", "ready", "testing", "passed", "failed", "scaling", "archived")
-APPROVAL_KINDS = ("spend", "launch", "budget", "shopify_live", "price", "supplier", "delete", "other")
+APPROVAL_KINDS = ("spend", "launch", "budget", "shopify_live", "price", "supplier", "delete", "tool", "other")
 TEST_STATUSES = ("planned", "running", "stopped", "extended", "passed", "failed")
 
 

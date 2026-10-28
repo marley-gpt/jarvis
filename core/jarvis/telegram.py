@@ -452,8 +452,8 @@ class Bridge:
     def decided(self, row, via: str = "dashboard") -> None:
         """An approval was decided: refresh the screens and, if approved, have JARVIS carry it out."""
         self.hub.publish({"type": "approval", "id": row["id"], "status": row["status"]})
-        if row["status"] != "approved":
-            return
+        if row["status"] != "approved" or row["kind"] == "tool":
+            return  # a tool approval: the session that asked is waiting for it and carries on by itself
         text = (f"I approved A{row['id']} ({row['kind']}: {row['summary']}) on the {via}. It's recorded and you're "
                 f"cleared for {records.GRANT_MINUTES} minutes. Carry it out now, log it, and tell me when it's done.")
         if self.runner.busy:

@@ -25,7 +25,7 @@ The owner's goal: they send a product, everything is automated, and they only re
 The owner has no room for weak ads (2026-10-28): every ad must be aimed at a real customer, proven by research. JARVIS reads the three files and checks:
 - **VoC bank:** 100+ quotes copied word for word, each with its source link. They come from 4+ different places (Reddit, Facebook groups, Amazon/competitor reviews including 1–3 stars, forums, TikTok/YouTube comments). No paraphrasing: Blake says AI rewording changes the customer's words.
 - **Report:** the top pains, desires, objections and buying triggers, each with a count and example quote ids. Avatar(s) with awareness level and market sophistication. The offer brief.
-- **Competitors:** the top 3–5 competitors' live ads (Meta Ad Library, with how long each has run), their angles, offers, prices and product pages, and the gaps they leave open.
+- **Competitors:** the top 3–5 competitors' live ads (Meta Ad Library: number of active ads, impressions where shown, and how long each has run), their angles, offers, prices and product pages, and the gaps they leave open. Rank them by those three signals; the ranking picks the PDP model in step 6.
 Anything thin goes back to the agent with what's missing. Nothing is invented to fill a gap: mark it `needs-review`. Record the gate verdict with `bin/jarvis feedback add --source qc`.
 
 ## 3. Creative build: `creative-director`
@@ -47,7 +47,8 @@ Anything thin goes back to the agent with what's missing. Nothing is invented to
 - `bin/jarvis cost log <service> <AUD>` for every paid call. Save to `brain/files/<product>/ads/NN-<concept>.png`.
 
 ## 6. Product page: `shopify`
-- Build the PDP exactly as blake-shopify-cro sets out (section order, offer, social proof, settings), then run its **review checklist** (every item pass or fail) before the owner sees it.
+- **Model it on the winning competitor (owner, 2026-10-28).** From `competitor-funnels.md`, rank the competitors' pages by how well their ads are doing: the number of active ads, impressions (Meta Ad Library ranges where shown) and how long the ads have run. Base the PDP on the top one or two: their structure, section order, offer and proof approach. Rewrite every word from our VoC bank, never copy theirs. Name the competitor and the evidence in the package. The old store's pages are reference only.
+- Build the PDP as blake-shopify-cro sets out (section order, offer, social proof, settings), then run its **review checklist** (every item pass or fail) before the owner sees it.
 - Draft only: a local preview or draft spec, with no changes to the live store until the launch approval (`shopify_live`). Real, attributable reviews only. Empty slots are flagged.
 - **Pre-lander** when step 3 calls for one: a Shopify page in the advertorial or listicle format from Blake's swipe library, written from the VoC bank, ending in a clear button to the product page. The honesty rules apply in full: no invented doctors, experts, studies or review counts (D11).
 

@@ -82,6 +82,9 @@ class PhoneControlTest(BridgeCase):
     def setUp(self):
         super().setUp()
         telegram.save(chat_id=222)
+        cfg = json.loads((self.home / "config.json").read_text(encoding="utf-8"))
+        cfg["phone_approvals"] = False  # tool-call approvals on the phone are tested in PhoneToolApprovalTest
+        (self.home / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
 
     def approval(self):
         from jarvis import db, records
@@ -161,3 +164,46 @@ class PhoneControlTest(BridgeCase):
     def test_owner_username_is_saved_for_calls(self):
         self.bridge._message({"chat": {"id": 222}, "from": {"username": "marley"}, "text": "/today"})
         self.assertEqual(telegram.settings()["call_user"], "marley")
+
+
+class PhoneToolApprovalTest(BridgeCase):
+    """A consequential tool call waits for the owner's tap on the phone."""
+
+    def setUp(self):
+        super().setUp()
+        telegram.save(chat_id=222)
+        cfg = json.loads((self.home / "config.json").read_text(encoding="utf-8"))
+        cfg["phone_approval_wait_seconds"] = 3
+        (self.home / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def tap(self, verdict):
+        from jarvis import db
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if any(m == "sendMessage" and "reply_markup" in p for m, p in self.sent):
+                break
+            time.sleep(0.05)
+        conn = db.connect()
+        try:
+            aid = conn.execute("SELECT id FROM approvals WHERE kind = 'tool' ORDER BY id DESC").fetchone()[0]
+        finally:
+            conn.close()
+        self.bridge._button({"id": "cb", "data": f"ap:{aid}:{verdict}", "message": {"chat": {"id": 222}, "message_id": 3}})
+
+    def guard(self):
+        from jarvis import hooks
+        out = hooks.guard({"tool_name": "mcp__claude_ai_Shopify__graphql_mutation", "tool_input": {"query": "mutation x"}})
+        return out["hookSpecificOutput"]["permissionDecision"]
+
+    def test_approve_on_phone_lets_the_call_through(self):
+        threading.Thread(target=self.tap, args=("y",), daemon=True).start()
+        self.assertEqual(self.guard(), "allow")
+        self.assertIn("graphql_mutation", next(p["text"] for m, p in self.sent if "reply_markup" in p))
+        self.assertFalse(self.server.runner.busy)  # the waiting session carries on; nothing new is started
+
+    def test_reject_on_phone_blocks_it(self):
+        threading.Thread(target=self.tap, args=("n",), daemon=True).start()
+        self.assertEqual(self.guard(), "deny")
+
+    def test_no_answer_falls_back_to_the_normal_prompt(self):
+        self.assertEqual(self.guard(), "ask")
