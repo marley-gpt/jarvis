@@ -222,7 +222,7 @@ class DashboardTest(BrainTest):
         # Once the worker reports its voices, only those (and presets built from them) are offered.
         state = json.loads(self.request("GET", "/api/state", token=False)[1])
         self.assertEqual([v["id"] for v in state["tts"]["voices"]],
-                         ["jarvis_crisp", "bm_george", "bm_lewis", "bm_daniel", "bf_emma"])
+                         ["jarvis_warm", "jarvis_crisp", "bm_george", "bm_lewis", "bm_daniel", "bf_emma"])
         status, wav = self.request("POST", "/api/tts", {"text": "Good evening, sir.", "voice": "jarvis_crisp"})
         self.assertEqual((status, wav[:4]), (200, b"RIFF"))
         self.assertEqual(self.request("POST", "/api/tts", {"text": "boom"})[0], 503)

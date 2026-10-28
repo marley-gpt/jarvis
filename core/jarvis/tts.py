@@ -36,11 +36,14 @@ BRITISH_VOICES = {
     "bf_emma": "Emma", "bf_isabella": "Isabella", "bf_alice": "Alice", "bf_lily": "Lily",
 }
 # Tuned toward the films' JARVIS without cloning anyone: George's pitch already matches his (about 140 Hz
-# median), a little Fable or Daniel adds range or crispness, a touch faster, and the house-AI sound (fx).
+# median) and a little Fable adds range. The owner picked the clean version (sample A, 2026-10-29): the
+# old "house AI" effect (echo and doubling) made it sound robotic, so it's kept only as an option.
 VOICE_PRESETS = {
-    "jarvis": {"name": "JARVIS", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05, "fx": "jarvis"},
-    "jarvis_crisp": {"name": "JARVIS (crisp)", "blend": {"bm_george": 0.7, "bm_daniel": 0.3}, "speed": 1.05, "fx": "jarvis"},
-    "jarvis_dry": {"name": "JARVIS (no effect)", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05},
+    "jarvis": {"name": "JARVIS", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.0},
+    "jarvis_warm": {"name": "JARVIS (warmer)", "blend": {"bm_george": 0.6, "bm_lewis": 0.4}, "speed": 0.97},
+    "jarvis_crisp": {"name": "JARVIS (crisp)", "blend": {"bm_daniel": 0.6, "bm_george": 0.4}, "speed": 1.0},
+    "jarvis_fx": {"name": "JARVIS (house-AI effect)", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05,
+                  "fx": "jarvis"},
 }
 DEFAULT_VOICE = "jarvis"
 MAX_CHARS = 600
