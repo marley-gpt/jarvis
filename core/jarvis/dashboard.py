@@ -54,6 +54,7 @@ AGENT_LABELS = {
     "meta-ads-auditor": "Meta Auditor",
     "product-testing": "Product Testing",
     "operations": "Operations",
+    "accountant": "Accountant",
 }
 
 # Kept free of cmd.exe metacharacters: on Windows `claude` is often a .cmd shim.

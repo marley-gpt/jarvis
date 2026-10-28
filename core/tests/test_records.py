@@ -112,3 +112,45 @@ class FeedbackTest(BrainTest):
         self.assertIn("WORKED", feedback.ledger_path().read_text(encoding="utf-8"))
         with self.assertRaises(feedback.FeedbackError):
             feedback.add(self.conn, about="x", kind="nope", verdict="good", source="owner", what="a", why="b")
+
+
+class MoneyTest(BrainTest):
+    """The accountant's ledger: costs, sales, profit and loss for a period and for a product test."""
+
+    def setUp(self):
+        super().setUp()
+        self.slug = records.product_add(self.conn, "Posture Corrector")
+
+    def test_report_totals_against_the_weekly_target(self):
+        records.money_add(self.conn, "income", "sales", 300, day="2026-11-02")
+        records.money_add(self.conn, "expense", "ads", 160, day="2026-11-02", ref="meta:2026-11-02")
+        records.money_add(self.conn, "expense", "subscriptions", 20, currency="USD", day="2026-11-03", note="Higgsfield")
+        records.cost_log(self.conn, "claude-api", 5)  # AI usage logged today, outside the period
+        rep = records.money_report(self.conn, "2026-11-02", "2026-11-08")
+        self.assertEqual(rep["total_income"], 300)
+        self.assertEqual(rep["expenses"]["subscriptions"], round(20 * 1.52, 2))  # USD converted
+        self.assertEqual(rep["profit"], round(300 - 160 - 30.4, 2))
+        self.assertEqual(rep["target"], 380)
+        self.assertNotIn("ai_api", rep["expenses"])
+
+    def test_same_ref_updates_instead_of_double_counting(self):
+        records.money_add(self.conn, "expense", "ads", 40, day="2026-11-02", ref="meta:2026-11-02")
+        records.money_add(self.conn, "expense", "ads", 95, day="2026-11-02", ref="meta:2026-11-02")  # day finished
+        rep = records.money_report(self.conn, "2026-11-02", "2026-11-02")
+        self.assertEqual(rep["expenses"], {"ads": 95})
+
+    def test_unknown_category_and_currency_are_refused(self):
+        with self.assertRaises(records.RecordError):
+            records.money_add(self.conn, "expense", "lunch", 10)
+        with self.assertRaises(records.RecordError):
+            records.money_add(self.conn, "expense", "ads", 10, currency="EUR")
+
+    def test_product_test_profit_and_loss(self):
+        tid = records.test_add(self.conn, self.slug, "Neck pain angle beats posture angle")
+        records.test_metric(self.conn, tid, "2026-11-02", spend=75, clicks=60, purchases=3, revenue=150)
+        records.money_add(self.conn, "expense", "cogs", 24, test=f"X{tid}", product=self.slug)
+        records.money_add(self.conn, "expense", "ads", 75, test=f"X{tid}")  # already in the metrics, not counted twice
+        p = records.test_pnl(self.conn, f"X{tid}")
+        self.assertEqual(p["ad_spend"], 75)
+        self.assertEqual(p["other_costs"], {"cogs": 24})
+        self.assertEqual(p["profit"], 150 - 75 - 24)

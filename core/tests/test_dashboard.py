@@ -60,8 +60,9 @@ class DashboardTest(BrainTest):
         state = json.loads(raw)
         names = [a["name"] for a in state["agents"]]
         self.assertEqual(names[0], "mentor-learning")
-        self.assertEqual(len(names), 11)
+        self.assertEqual(len(names), 12)
         self.assertIn("store-qa", names)
+        self.assertIn("accountant", names)
         pr = next(a for a in state["agents"] if a["name"] == "product-research")
         self.assertEqual(pr["status"], "queued")
         self.assertEqual(pr["now"], "Research posture corrector")

@@ -41,6 +41,7 @@ Everything durable lives in `brain/` (git-ignored, because this repo is public) 
 | `meta-ads-auditor` | read-only graded audit of the Meta ad account (signals, creative, structure, audiences) |
 | `product-testing` | test records, metrics, verdicts, lessons |
 | `operations` | status reports, bottlenecks, costs, priorities, daily overview |
+| `accountant` | the money ledger (`bin/jarvis money`): every cost and sale, weekly and monthly profit and loss against the A$380/week target, P&L per product test |
 
 Use the cheapest agent that fits: research and record-keeping agents run on cheaper models.
 

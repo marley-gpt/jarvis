@@ -207,3 +207,42 @@ class PhoneToolApprovalTest(BridgeCase):
 
     def test_no_answer_falls_back_to_the_normal_prompt(self):
         self.assertEqual(self.guard(), "ask")
+
+
+class PhoneMediaTest(BridgeCase):
+    """Videos, files and forwarded messages reach JARVIS instead of being dropped."""
+
+    def setUp(self):
+        super().setUp()
+        telegram.save(chat_id=222)
+        self._real_download = telegram.download
+        telegram.download = lambda file_id: b"%PDF-1.4 fake"
+
+    def tearDown(self):
+        telegram.download = self._real_download
+        super().tearDown()
+
+    def test_a_file_is_saved_and_passed_on(self):
+        self.bridge._message({"chat": {"id": 222}, "message_id": 7, "caption": "blake's new doc",
+                              "document": {"file_id": "f1", "file_name": "Blake Offer Guide.pdf",
+                                           "mime_type": "application/pdf", "file_size": 13}})
+        request = self.server.runner.live["request"]
+        self.assertIn("blake's new doc", request)
+        self.assertIn("Blake_Offer_Guide.pdf", request)
+        saved = list((self.home / "files" / "telegram").rglob("*.pdf"))
+        self.assertEqual(len(saved), 1)
+
+    def test_a_forwarded_message_says_where_it_came_from(self):
+        self.bridge._message({"chat": {"id": 222}, "text": "run 3 ad sets not 1",
+                              "forward_origin": {"type": "user", "sender_user": {"first_name": "Blake"}}})
+        self.assertIn("originally from Blake", self.server.runner.live["request"])
+
+    def test_a_video_with_no_caption_is_no_longer_dropped(self):
+        self.bridge._message({"chat": {"id": 222}, "message_id": 8,
+                              "video": {"file_id": "v1", "mime_type": "video/mp4", "file_size": 13}})
+        self.assertTrue(self.server.runner.busy)
+        self.assertIn("sent a video", self.server.runner.live["request"])
+
+    def test_too_big_files_get_a_reply(self):
+        self.bridge._message({"chat": {"id": 222}, "video": {"file_id": "v2", "file_size": 50 * 1024 * 1024}})
+        self.assertIn("20 MB", self.texts(222)[0])

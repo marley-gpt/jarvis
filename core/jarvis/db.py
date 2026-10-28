@@ -6,7 +6,7 @@ import sqlite3
 
 from . import paths
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory (
@@ -126,6 +126,25 @@ CREATE TABLE IF NOT EXISTS costs (
     task_id INTEGER,
     note TEXT
 );
+
+-- The accountant's ledger: every business cost and sale, in AUD. `ref` makes re-imports idempotent
+-- (e.g. "meta:2026-10-28" for a day's ad spend, "order:1001" for a sale).
+CREATE TABLE IF NOT EXISTS money (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('expense', 'income')),
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'AUD',
+    amount_aud REAL NOT NULL,
+    product TEXT,
+    test_id INTEGER,
+    note TEXT,
+    source TEXT,
+    ref TEXT UNIQUE,
+    recorded TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS money_day ON money(day);
 
 CREATE TABLE IF NOT EXISTS agent_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

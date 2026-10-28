@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import feedback, backup, brief, db, journal, media, memory, paths, records, telegram
@@ -309,6 +310,59 @@ def cmd_cost_check(conn, args):
     ok, spent, budget = records.cost_check(conn, args.amount)
     out(f"{'OK' if ok else 'OVER BUDGET'}: A${spent:.2f} spent + A${args.amount:.2f} vs A${budget:.2f} budget.")
     return 0 if ok else 1
+
+
+def cmd_money_add(conn, args):
+    mid = records.money_add(conn, args.kind, args.category, args.amount, currency=args.currency, aud=args.aud,
+                            day=args.date, product=args.product, test=args.test, note=args.note, source=args.source,
+                            ref=args.ref)
+    row = conn.execute("SELECT * FROM money WHERE id = ?", (mid,)).fetchone()
+    out(f"M{mid}: {row['day']} {row['kind']} {row['category']} A${row['amount_aud']:.2f}")
+
+
+def cmd_money_list(conn, args):
+    since = (datetime.now() - timedelta(days=args.days - 1)).strftime("%Y-%m-%d")
+    rows = conn.execute("SELECT * FROM money WHERE day >= ? ORDER BY day DESC, id DESC", (since,)).fetchall()
+    if not rows:
+        out(f"Nothing recorded in the last {args.days} days.")
+    for r in rows:
+        sign = "+" if r["kind"] == "income" else "-"
+        extra = " ".join(filter(None, [f"[{r['product']}]" if r["product"] else "",
+                                        f"X{r['test_id']}" if r["test_id"] else "", r["note"] or ""]))
+        out(f"{r['day']}  {sign}A${r['amount_aud']:>9.2f}  {r['category']:13s} {extra}".rstrip())
+
+
+def money_lines(rep: dict) -> list[str]:
+    lines = [f"Profit and loss {rep['start']} to {rep['end']} ({rep['days']} days):",
+             f"  Sales in:   A${rep['total_income']:.2f}"]
+    lines += [f"    {k}: A${v:.2f}" for k, v in rep["income"].items()]
+    lines.append(f"  Costs out:  A${rep['total_expenses']:.2f}")
+    lines += [f"    {k}: A${v:.2f}" for k, v in rep["expenses"].items()]
+    verdict = "ahead of" if rep["gap"] >= 0 else "behind"
+    lines.append(f"  Profit:     A${rep['profit']:.2f}  (target A${rep['target']:.2f}, {verdict} by A${abs(rep['gap']):.2f})")
+    return lines
+
+
+def cmd_money_report(conn, args):
+    end = args.end or datetime.now().strftime("%Y-%m-%d")
+    start = args.start or (datetime.fromisoformat(end) - timedelta(days=args.days - 1)).strftime("%Y-%m-%d")
+    rep = records.money_report(conn, start, end)
+    if args.json:
+        out(json.dumps(rep, indent=2))
+    else:
+        out("\n".join(money_lines(rep)))
+
+
+def cmd_money_test(conn, args):
+    p = records.test_pnl(conn, args.id)
+    if args.json:
+        out(json.dumps(p, indent=2))
+        return
+    out(f"Test {p['test']} {p['product']} ({p['status']}, {p['days']} days, {p['purchases']} sales):")
+    out(f"  Sales A${p['revenue']:.2f} - ad spend A${p['ad_spend']:.2f}"
+        + "".join(f" - {k} A${v:.2f}" for k, v in p["other_costs"].items()) + f" = profit A${p['profit']:.2f}")
+    if not p["sufficient"]:
+        out("  Not enough data for a verdict yet.")
 
 
 def cmd_cost_summary(conn, args):
@@ -697,6 +751,36 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("amount", type=float, help="AUD")
     s.set_defaults(fn=cmd_cost_check)
     cost.add_parser("summary").set_defaults(fn=cmd_cost_summary)
+
+    money = sub.add_parser("money", help="the accountant's ledger: every cost and sale, profit and loss").add_subparsers(
+        dest="sub", required=True)
+    s = money.add_parser("add", help="record a cost (expense) or a sale (income)")
+    s.add_argument("kind", choices=("expense", "income"))
+    s.add_argument("category", help="expense: " + ", ".join(records.EXPENSE_CATEGORIES)
+                   + "; income: " + ", ".join(records.INCOME_CATEGORIES))
+    s.add_argument("amount", type=float)
+    s.add_argument("--currency", default="AUD")
+    s.add_argument("--aud", type=float, help="the AUD value, when the amount is in another currency")
+    s.add_argument("--date", help="YYYY-MM-DD (default today)")
+    s.add_argument("-p", "--product")
+    s.add_argument("--test", help="X<n>: the product test this belongs to")
+    s.add_argument("--note")
+    s.add_argument("--source", help="where the figure came from (Meta, Shopify order, receipt...)")
+    s.add_argument("--ref", help="unique id; recording the same ref again updates it (e.g. meta:2026-10-28)")
+    s.set_defaults(fn=cmd_money_add)
+    s = money.add_parser("list")
+    s.add_argument("--days", type=int, default=30)
+    s.set_defaults(fn=cmd_money_list)
+    s = money.add_parser("report", help="profit and loss for a period against the weekly target")
+    s.add_argument("--days", type=int, default=7)
+    s.add_argument("--start")
+    s.add_argument("--end")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_money_report)
+    s = money.add_parser("test", help="profit and loss for one product test")
+    s.add_argument("id")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_money_test)
 
     s = sub.add_parser("recall", help="search earlier conversations (the journal)")
     s.add_argument("query")

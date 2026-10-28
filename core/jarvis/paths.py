@@ -40,6 +40,8 @@ PROVENANCES = ("mentor", "user", "evidence", "agent")
 
 DEFAULT_CONFIG = {
     "monthly_ai_budget_aud": 50.0,
+    "weekly_profit_target_aud": 380.0,  # covers Claude Max 5x, Higgsfield and 2 tests a week at worst (M-261028-d357)
+    "usd_aud": 1.52,  # used when an amount is entered in USD without its AUD value
     "default_test_budget_usd": 50.0,
     "default_test_days": 3,
     "max_parallel_agents": 4,

@@ -11,6 +11,7 @@
     "store-qa":          { icon: "🛠️", layer: "Store QA", color: "#f472b6", blurb: "Clicks through the store like a customer, finds bugs and prepares tested fixes." },
     "meta-ads":          { icon: "📣", layer: "Campaign layer", color: "#3b82f6", blurb: "Prepares campaign drafts and analyses ad performance." },
     "meta-ads-auditor":  { icon: "🩺", layer: "Account audit", color: "#06b6d4", blurb: "Read-only deep audit of the Meta ad account: signals, creative, structure, audiences." },
+    "accountant":        { icon: "🧾", layer: "Money", color: "#facc15", blurb: "Tracks every cost and sale, and reports profit and loss for each week and each product test." },
     "product-testing":   { icon: "🧪", layer: "Validation", color: "#a3e635", blurb: "Records every test, judges results and captures lessons." },
     "operations":        { icon: "📊", layer: "Signal layer", color: "#818cf8", blurb: "Tracks tasks, bottlenecks and costs, and writes the daily overview." },
   };

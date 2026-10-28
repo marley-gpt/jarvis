@@ -266,6 +266,39 @@ def speak(kokoro, text: str) -> bytes | None:
         return None
 
 
+MAX_DOWNLOAD = 20 * 1024 * 1024  # the Bot API's getFile limit
+
+
+def forwarded(msg: dict) -> str:
+    """Who a forwarded message came from, so JARVIS knows it isn't the owner's own words."""
+    origin = msg.get("forward_origin") or {}
+    who = (origin.get("sender_user") or {}).get("first_name") or origin.get("sender_user_name")         or (origin.get("chat") or {}).get("title") or (msg.get("forward_from") or {}).get("first_name")
+    if not (origin or msg.get("forward_from") or msg.get("forward_from_chat")):
+        return ""
+    return f"(Forwarded by the owner, originally from {who or 'someone else'}.)"
+
+
+def video_frames(path: Path, count: int = 3) -> list[dict]:
+    """A few frames from a video as JPEG images for JARVIS to look at (empty if ffmpeg isn't available)."""
+    if not shutil.which("ffmpeg"):
+        return []
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                               capture_output=True, text=True, creationflags=paths.NO_WINDOW)
+        duration = float(probe.stdout.strip() or 0)
+    except (OSError, ValueError):
+        duration = 0
+    frames = []
+    for i in range(count):
+        at = duration * (i + 0.5) / count if duration else i
+        proc = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{at:.2f}", "-i", str(path), "-frames:v", "1",
+                               "-vf", "scale=720:-2", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+                              capture_output=True, creationflags=paths.NO_WINDOW)
+        if proc.returncode == 0 and proc.stdout:
+            frames.append({"media_type": "image/jpeg", "data": base64.b64encode(proc.stdout).decode()})
+    return frames
+
+
 class Bridge:
     """Long-polls Telegram inside the dashboard server and relays to and from JARVIS.
 
@@ -404,10 +437,41 @@ class Bridge:
         if msg.get("photo"):
             biggest = max(msg["photo"], key=lambda p: p.get("file_size") or 0)
             images.append({"media_type": "image/jpeg", "data": base64.b64encode(download(biggest["file_id"])).decode()})
+        note, more = self._attachment(chat, msg)
+        images += more
+        text = "\n\n".join(filter(None, [forwarded(msg), text, note]))
         if not text and not images:
             return
         prefix, self.next_prefix = self.next_prefix, ""
         self._ask(chat, prefix + text, images, voice=bool(voice), shown=text or "(photo)")
+
+    def _attachment(self, chat, msg: dict) -> tuple[str, list]:
+        """Videos, video messages, GIFs and files: saved to brain/files/telegram/<day>/. A video's speech is
+        transcribed and three frames go to JARVIS as images; an image sent as a file goes as an image."""
+        kind = next((k for k in ("video", "video_note", "animation", "document") if msg.get(k)), None)
+        if not kind:
+            return "", []
+        item = msg[kind]
+        if (item.get("file_size") or 0) > MAX_DOWNLOAD:
+            self._reply(chat, "That file is over Telegram's 20 MB limit for bots, sir. Send me a link to it instead.")
+            return f"(The owner sent a {kind} too large to download: {item.get('file_name') or 'no name'}.)", []
+        mime = item.get("mime_type") or ("video/mp4" if kind != "document" else "")
+        name = item.get("file_name") or f"{kind}-{msg.get('message_id', int(time.time()))}" + (".mp4" if "video" in mime or kind != "document" else "")
+        folder = paths.files_dir() / "telegram" / paths.now()[:10]
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / re.sub(r"[^\w.-]+", "_", name)
+        path.write_bytes(download(item["file_id"]))
+        if mime.startswith("image/") and mime in ("image/png", "image/jpeg", "image/gif", "image/webp"):
+            return f"(Image file saved at {paths.rel(path)}.)", [{"media_type": mime, "data": base64.b64encode(path.read_bytes()).decode()}]
+        if not mime.startswith("video/"):
+            return f"(The owner sent a file, saved at {paths.rel(path)}. Read it.)", []
+        try:
+            heard = media.transcribe(path)
+        except media.MediaError:
+            heard = ""
+        frames = video_frames(path)
+        return (f"(The owner sent a video, saved at {paths.rel(path)}. Frames attached above. "
+                f"What's said in it: {heard or 'no speech'})"), frames
 
     def _ask(self, chat, text: str, images=None, voice=False, shown=None) -> None:
         """Pass a request to JARVIS; the answer comes back to this chat."""

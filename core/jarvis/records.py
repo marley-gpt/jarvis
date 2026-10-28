@@ -278,6 +278,78 @@ def evaluate(conn, test_id) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- money (the accountant's ledger)
+
+EXPENSE_CATEGORIES = ("ads", "cogs", "shipping", "fees", "refunds", "shopify", "apps", "ai_tools", "subscriptions",
+                      "other")
+INCOME_CATEGORIES = ("sales", "other")
+
+
+def to_aud(amount: float, currency: str = "AUD", aud: float | None = None) -> float:
+    if aud is not None:
+        return round(aud, 2)
+    currency = currency.upper()
+    if currency == "AUD":
+        return round(amount, 2)
+    if currency == "USD":
+        return round(amount * paths.config()["usd_aud"], 2)
+    raise RecordError(f"Give the AUD value too (--aud) for an amount in {currency}.")
+
+
+def money_add(conn, kind, category, amount, *, currency="AUD", aud=None, day=None, product=None, test=None,
+              note=None, source=None, ref=None) -> int:
+    """Record a cost or a sale. A known `ref` updates the existing line instead of adding a second one."""
+    allowed = EXPENSE_CATEGORIES if kind == "expense" else INCOME_CATEGORIES if kind == "income" else None
+    if allowed is None:
+        raise RecordError("kind must be 'expense' or 'income'")
+    if category not in allowed:
+        raise RecordError(f"Unknown {kind} category '{category}'. Use one of: {', '.join(allowed)}")
+    tid = int(str(test).upper().lstrip("X")) if test else None
+    row = (day or paths.now()[:10], kind, category, amount, currency.upper(), to_aud(amount, currency, aud), product,
+           tid, note, source, ref, paths.now())
+    cur = conn.execute(
+        """INSERT INTO money (day, kind, category, amount, currency, amount_aud, product, test_id, note, source, ref,
+                              recorded) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(ref) DO UPDATE SET day=excluded.day, category=excluded.category, amount=excluded.amount,
+             currency=excluded.currency, amount_aud=excluded.amount_aud, product=excluded.product,
+             test_id=excluded.test_id, note=excluded.note, source=excluded.source, recorded=excluded.recorded""", row)
+    conn.commit()
+    return cur.lastrowid or conn.execute("SELECT id FROM money WHERE ref = ?", (ref,)).fetchone()[0]
+
+
+def money_report(conn, start: str, end: str) -> dict:
+    """Profit and loss between two dates (inclusive, YYYY-MM-DD), including logged AI/API costs."""
+    rows = conn.execute("SELECT kind, category, ROUND(SUM(amount_aud), 2) aud FROM money WHERE day BETWEEN ? AND ? "
+                        "GROUP BY kind, category ORDER BY aud DESC", (start, end)).fetchall()
+    income = {r["category"]: r["aud"] for r in rows if r["kind"] == "income"}
+    expenses = {r["category"]: r["aud"] for r in rows if r["kind"] == "expense"}
+    api = conn.execute("SELECT COALESCE(SUM(amount_aud), 0) FROM costs WHERE substr(ts, 1, 10) BETWEEN ? AND ?",
+                       (start, end)).fetchone()[0]
+    if api:
+        expenses["ai_api"] = round(api, 2)
+    total_in, total_out = round(sum(income.values()), 2), round(sum(expenses.values()), 2)
+    days = (datetime.fromisoformat(end) - datetime.fromisoformat(start)).days + 1
+    target = round(paths.config()["weekly_profit_target_aud"] * days / 7, 2)
+    profit = round(total_in - total_out, 2)
+    return {"start": start, "end": end, "days": days, "income": income, "expenses": expenses, "total_income": total_in,
+            "total_expenses": total_out, "profit": profit, "target": target, "gap": round(profit - target, 2)}
+
+
+def test_pnl(conn, test_id) -> dict:
+    """A product test's profit and loss: its sales and ad spend (test metrics) less the costs logged against it."""
+    tid = int(str(test_id).upper().lstrip("X"))
+    t = _one(conn, "SELECT * FROM tests WHERE id = ?", (tid,))
+    e = evaluate(conn, tid)
+    other = {r["category"]: r["aud"] for r in conn.execute(
+        "SELECT category, ROUND(SUM(amount_aud), 2) aud FROM money WHERE test_id = ? AND kind = 'expense' "
+        "AND category != 'ads' GROUP BY category", (tid,))}
+    costs = round(e["spend"] + sum(other.values()), 2)
+    return {"test": f"X{tid}", "product": t["product"], "status": t["status"], "revenue": round(e["revenue"], 2),
+            "ad_spend": round(e["spend"], 2), "other_costs": other, "total_costs": costs,
+            "profit": round(e["revenue"] - costs, 2), "purchases": e["purchases"], "days": e["days"],
+            "sufficient": e["sufficient"]}
+
+
 # ---------------------------------------------------------------- costs and logs
 
 def month_spend(conn, when: datetime | None = None) -> float:
