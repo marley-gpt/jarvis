@@ -59,7 +59,7 @@ BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the st
 KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}]],
             "resize_keyboard": True, "is_persistent": True}
 COMMANDS = [("today", "Today at a glance"), ("brief", "Brief me now"), ("store", "Check the store"),
-            ("product", "Start a new product"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
+            ("product", "Start a new product"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
 
 
 class TelegramError(Exception):
@@ -157,13 +157,25 @@ def buttons(rows: list[list[tuple[str, str]]]) -> dict:
     return {"inline_keyboard": [[{"text": label, "callback_data": data} for label, data in row] for row in rows]}
 
 
-def push_approval(row) -> None:
+def push_approval(row, chat_id=None) -> None:
     """Send an approval request to the phone with Approve / Reject buttons."""
     amount = f" ({row['amount']:g} {row['currency'] or ''}".rstrip() + ")" if row["amount"] is not None else ""
-    text = f"Approval needed, A{row['id']} · {row['kind']}{amount}\n\n{row['summary']}"
+    task = f" · task T{row['task_id']}" if row["task_id"] else ""
+    text = f"Approval needed, A{row['id']} · {row['kind']}{amount}{task}\n\n{row['summary']}"
     if row["detail"]:
         text += f"\n\n{row['detail']}"
-    send(text, markup=buttons([[("✅ Approve", f"ap:{row['id']}:y"), ("❌ Reject", f"ap:{row['id']}:n")]]))
+    send(text, chat_id=chat_id,
+         markup=buttons([[("✅ Approve", f"ap:{row['id']}:y"), ("❌ Reject", f"ap:{row['id']}:n")]]))
+
+
+def push_pending(conn, chat_id=None) -> int:
+    """/approvals: every pending approval, each with its own buttons. Returns how many."""
+    rows = conn.execute("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id").fetchall()
+    if not rows:
+        send("Nothing waiting for your approval, sir.", chat_id=chat_id)
+    for row in rows:
+        push_approval(row, chat_id=chat_id)
+    return len(rows)
 
 
 def ring() -> str:
@@ -178,8 +190,9 @@ def ring() -> str:
             body = r.read().decode("utf-8", "replace")
     except (urllib.error.URLError, OSError) as exc:
         raise TelegramError(f"The call service didn't answer: {exc}") from exc
-    plain = re.sub(r"<[^>]+>", " ", body)
-    if re.search(r"not (yet )?(authori[sz]ed|allowed)|error|invalid", plain, re.I):
+    plain = re.sub(r"<(script|style)\b.*?</\1>", " ", body, flags=re.S | re.I)  # the page's analytics code
+    plain = re.sub(r"<[^>]+>", " ", plain)
+    if re.search(r"not (yet )?(authori[sz]ed|allowed)|\berror\b|invalid", plain, re.I):
         raise TelegramError("The call service refused: " + " ".join(plain.split())[:200]
                             + " (the owner must allow it once by messaging @CallMeBot_txtbot /start)")
     return " ".join(plain.split())[:200]
@@ -353,6 +366,15 @@ class Bridge:
                 return self._reply(chat, today_text(today(conn)), KEYBOARD)
             finally:
                 conn.close()
+        if text == "/approvals":
+            conn = db.connect()
+            try:
+                push_pending(conn, chat_id=chat)
+            except TelegramError as exc:
+                self.error = str(exc)
+            finally:
+                conn.close()
+            return
         if text == "/stop":
             self.runner.stop()
             return self._reply(chat, "Stopped.")
@@ -408,12 +430,14 @@ class Bridge:
         if kind != "ap":
             return
         aid, _, verdict = rest.partition(":")
+        if not aid.isdigit() or verdict not in ("y", "n"):
+            return
         conn = db.connect()
         try:
             row = records.approval_decide(conn, aid, verdict == "y", "decided on the phone")
             note = "✅ Approved. On it." if verdict == "y" else "❌ Rejected. I won't do it."
-        except records.RecordError as exc:
-            row, note = None, str(exc)
+        except records.RecordError as exc:  # already decided elsewhere, or gone
+            row, note = None, f"ℹ️ No change: {exc}."
         finally:
             conn.close()
         try:

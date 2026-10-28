@@ -2,8 +2,10 @@
 
 Starts the dashboard server in the background (no console window) unless it is already running,
 waits until it answers, then opens it as an app window (no address bar or tabs) in Chrome or Edge.
-`--chat` opens the chat window instead of the office.
-`python core/jarvis_app.pyw --install` creates the Desktop and Start-menu shortcuts (JARVIS and JARVIS Chat).
+`--chat` opens the chat window instead of the office. `--server` only starts the server, with no window:
+the Startup-folder shortcut uses it so JARVIS (and the owner's Telegram) is back after every restart.
+`python core/jarvis_app.pyw --install` creates the Desktop and Start-menu shortcuts (JARVIS and JARVIS Chat)
+and the Startup shortcut (JARVIS background).
 """
 
 from __future__ import annotations
@@ -107,20 +109,24 @@ def install() -> None:
     script = str(Path(__file__).resolve())
     # Ask Windows for the real folders: the Desktop is often redirected into OneDrive.
     shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"), ("JARVIS Chat", " --chat", "Chat with JARVIS"))
-    for folder in ("Desktop", "Programs"):
-        for name, extra, about in shortcuts:
-            ps = ("$d = [Environment]::GetFolderPath('{f}'); $p = Join-Path $d '{n}.lnk'; "
-                  "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p); $s.TargetPath = '{t}'; "
-                  "$s.Arguments = '\"{a}\"{x}'; $s.WorkingDirectory = '{w}'; $s.IconLocation = '{i},0'; "
-                  "$s.Description = '{d}'; $s.Save(); $p").format(f=folder, n=name, t=target, a=script, x=extra, w=REPO,
-                                                                  i=icon, d=about)
-            r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                               creationflags=NO_WINDOW)
-            print(f"Shortcut: {r.stdout.strip() or r.stderr.strip()}")
+    places = [(folder, s) for folder in ("Desktop", "Programs") for s in shortcuts]
+    places.append(("Startup", ("JARVIS background", " --server", "Starts JARVIS and the phone bridge at sign-in")))
+    for folder, (name, extra, about) in places:
+        ps = ("$d = [Environment]::GetFolderPath('{f}'); $p = Join-Path $d '{n}.lnk'; "
+              "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p); $s.TargetPath = '{t}'; "
+              "$s.Arguments = '\"{a}\"{x}'; $s.WorkingDirectory = '{w}'; $s.IconLocation = '{i},0'; "
+              "$s.Description = '{d}'; $s.Save(); $p").format(f=folder, n=name, t=target, a=script, x=extra, w=REPO,
+                                                              i=icon, d=about)
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                           creationflags=NO_WINDOW)
+        print(f"Shortcut: {r.stdout.strip() or r.stderr.strip()}")
 
 
 if __name__ == "__main__":
     if "--install" in sys.argv:
         install()
+    elif "--server" in sys.argv:
+        if not running():
+            start_server()
     else:
         launch("chat" if "--chat" in sys.argv else "")
