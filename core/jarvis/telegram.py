@@ -269,6 +269,20 @@ def speak(kokoro, text: str) -> bytes | None:
 MAX_DOWNLOAD = 20 * 1024 * 1024  # the Bot API's getFile limit
 
 
+def archive(msg: dict) -> None:
+    """Every message the owner sends is kept, before anything else happens to it: brain/telegram/<day>.jsonl."""
+    folder = paths.home() / "telegram"
+    folder.mkdir(parents=True, exist_ok=True)
+    sent = msg.get("date") or time.time()
+    kinds = [k for k in ("text", "caption", "voice", "audio", "photo", "video", "video_note", "animation", "document",
+                         "sticker", "location", "contact") if msg.get(k)]
+    line = {"sent": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sent)), "received": paths.now(),
+            "kinds": kinds, "text": msg.get("text") or msg.get("caption") or "", "forwarded": forwarded(msg) or None,
+            "message_id": msg.get("message_id")}
+    with open(folder / f"{time.strftime('%Y-%m-%d', time.localtime(sent))}.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
 def forwarded(msg: dict) -> str:
     """Who a forwarded message came from, so JARVIS knows it isn't the owner's own words."""
     origin = msg.get("forward_origin") or {}
@@ -314,6 +328,7 @@ class Bridge:
         self.said: list[str] = []
         self.error: str | None = None
         self.queued: str | None = None  # an approved action to start once JARVIS is free
+        self.pending: list[dict] = []   # owner messages that arrived while JARVIS was busy, answered next in order
         self.next_prefix = ""           # set by "New product": the next message is the product
         self.store_failures = 0
 
@@ -386,6 +401,10 @@ class Bridge:
             return
         if chat != owner:
             return  # strangers are ignored
+        archive(msg)
+        late = time.time() - (msg.get("date") or time.time())
+        if late > 300 and text:  # sent while the PC or JARVIS was off; Telegram held it
+            text = f"(Sent at {time.strftime('%H:%M', time.localtime(msg['date']))}, while I was offline.) {text}"
         username = (msg.get("from") or {}).get("username")
         if username and username != settings().get("call_user"):
             save(call_user=username)  # needed to ring the owner for urgent alerts
@@ -474,9 +493,13 @@ class Bridge:
                 f"What's said in it: {heard or 'no speech'})"), frames
 
     def _ask(self, chat, text: str, images=None, voice=False, shown=None) -> None:
-        """Pass a request to JARVIS; the answer comes back to this chat."""
+        """Pass a request to JARVIS; the answer comes back to this chat. Never dropped: if JARVIS is busy
+        (or a burst arrives after the PC was off), it waits its turn and is answered in order."""
         if self.runner.busy:
-            return self._reply(chat, "I'm still on the last request, sir. Send /stop to interrupt it.")
+            self.pending.append({"text": text, "images": images or [], "voice": voice, "shown": shown or text})
+            n = len(self.pending)
+            return self._reply(chat, "Noted, sir. I'm finishing something first; this is next."
+                               if n == 1 else f"Noted, sir. {n} messages waiting; I'll take them in order.")
         self.waiting, self.voice_reply, self.said = True, voice, []
         self.hub.publish({"type": "owner", "text": shown or text, "via": "telegram"})
         try:
@@ -484,6 +507,17 @@ class Bridge:
         except (RuntimeError, FileNotFoundError, ValueError) as exc:
             self.waiting = False
             self._reply(chat, f"I can't do that right now: {exc}")
+
+    def _ask_pending(self, chat) -> None:
+        batch, self.pending = self.pending, []
+        if len(batch) == 1:
+            b = batch[0]
+            return self._ask(chat, b["text"], b["images"], b["voice"], b["shown"])
+        lines = [f"{i}. {b['text']}" for i, b in enumerate(batch, 1)]
+        text = (f"While I was busy you sent these {len(batch)} messages. Go through them in order, answer each one "
+                "by its number, and save anything worth remembering to memory:\n\n" + "\n\n".join(lines))
+        images = [img for b in batch for img in b["images"]][:4]
+        self._ask(chat, text, images, any(b["voice"] for b in batch), shown=f"{len(batch)} messages")
 
     def _button(self, cq: dict) -> None:
         msg = cq.get("message") or {}
@@ -594,5 +628,7 @@ class Bridge:
                 if idle and self.queued and not self.runner.busy:
                     text, self.queued = self.queued, None
                     self._ask(owner, text, shown="Carrying out the approval")
+                elif idle and self.pending and not self.runner.busy:
+                    self._ask_pending(owner)
         finally:
             self.hub.unsubscribe(q)

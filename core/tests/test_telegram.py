@@ -246,3 +246,40 @@ class PhoneMediaTest(BridgeCase):
     def test_too_big_files_get_a_reply(self):
         self.bridge._message({"chat": {"id": 222}, "video": {"file_id": "v2", "file_size": 50 * 1024 * 1024}})
         self.assertIn("20 MB", self.texts(222)[0])
+
+
+class PhoneQueueTest(BridgeCase):
+    """Nothing the owner sends is lost: busy means queued, a burst after downtime is answered in order."""
+
+    def setUp(self):
+        super().setUp()
+        telegram.save(chat_id=222)
+
+    def test_messages_while_busy_are_queued_then_answered_together(self):
+        asked = []
+        self.server.runner.start = lambda text, images=None: asked.append(text)
+        self.bridge.running = True
+        threading.Thread(target=self.bridge._listen, daemon=True).start()
+        time.sleep(0.2)
+        self.server.runner.live["status"] = "thinking"  # JARVIS is mid-job
+        self.msg(222, "second thing")
+        self.msg(222, "third thing")
+        self.assertEqual([p["text"] for p in self.bridge.pending], ["second thing", "third thing"])
+        self.assertIn("2 messages waiting", self.texts(222)[-1])
+        self.server.runner.live["status"] = "idle"
+        self.server.hub.publish({"type": "status", "status": "idle"})
+        deadline = time.time() + 15
+        while time.time() < deadline and not asked:
+            time.sleep(0.1)
+        request = asked[0]
+        self.assertIn("1. second thing", request)
+        self.assertIn("2. third thing", request)
+        self.assertEqual(self.bridge.pending, [])
+
+    def test_every_message_is_archived_and_late_ones_are_marked(self):
+        self.bridge._message({"chat": {"id": 222}, "message_id": 5, "text": "use the TikTok angle",
+                              "date": int(time.time()) - 3 * 3600})
+        archived = (self.home / "telegram").glob("*.jsonl")
+        lines = [json.loads(l) for f in archived for l in f.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(lines[0]["text"], "use the TikTok angle")
+        self.assertIn("while I was offline", self.server.runner.live["request"])
