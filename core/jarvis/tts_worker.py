@@ -57,6 +57,19 @@ def jarvis_fx(x, rate: int):
     return (y / max(1e-6, np.abs(y).max()) * 0.89).astype("float32")
 
 
+def polish_fx(x, rate: int):
+    """A light studio polish only: rumble cut, a little clarity and gentle levelling. No echo or doubling,
+    which is what made the "house AI" effect sound robotic."""
+    import numpy as np
+    from scipy import signal
+
+    x = signal.sosfilt(signal.butter(2, 80, "highpass", fs=rate, output="sos"), x)
+    x = x + 0.15 * signal.sosfilt(signal.butter(2, [3000, 7000], "bandpass", fs=rate, output="sos"), x)
+    env = np.sqrt(signal.sosfilt(signal.butter(1, 10, fs=rate, output="sos"), x * x).clip(1e-9))
+    x = x * np.minimum(1.0, (0.15 / env) ** 0.25)
+    return (x / max(1e-6, np.abs(x).max()) * 0.89).astype("float32")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -81,6 +94,8 @@ def main() -> None:
                                           lang="en-gb" if voice[:1] == "b" else "en-us")
             if req.get("fx") == "jarvis":
                 samples = jarvis_fx(samples, rate)
+            elif req.get("fx") == "polish":
+                samples = polish_fx(samples, rate)
             reply = {"ok": True, "wav": base64.b64encode(wav_bytes(samples, rate)).decode(),
                      "seconds": round(len(samples) / rate, 3)}
         except Exception as exc:  # report and keep serving
