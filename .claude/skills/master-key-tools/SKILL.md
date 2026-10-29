@@ -20,7 +20,7 @@ The owner pays for **Master Key** (about US$30 a month, Blake's recommended way 
 | Text overlays on ad images (Blake) | **Canva Pro** | owner must join once | Opens a Canva Teams invite ("discord.gg/spycom"). The owner signs in with their own free Canva account once; JARVIS never signs in or creates accounts. |
 | Video editing (later, video stage) | **CapCut Pro** | not working | Blank sign-in page even after a reset (2026-10-29). Retry before relying on it. |
 | Voiceover (later) | **ElevenLabs** | not in the owner's plan | Clicking it opens Master Key's sales page on Whop. |
-| Trends and spotting winners | **TrendTrack** | under maintenance | The provider warned it was banning accounts. Don't use until Master Key says it's back. |
+| Trends and spotting winners | **TrendTrack** | under maintenance (still on 2026-10-30) | The provider warned it was banning accounts. Don't use until Master Key says it's back. |
 | **Ad images** | **not Master Key** | | The owner says the Master Key image generators are poor (M-261029-ed74). Use our own **Higgsfield** connector (Nano Banana Pro, Blake's settings) for every ad image. |
 
 Also on the dashboard, not part of our method: ChatGPT Plus, Claude MAX, Gemini Ultra, Perplexity, RunwayML, HeyGen, Flow (Veo 3), Magnific, Envato. Don't use them for ad images. Market research quotes must come from real customers, not AI rewording (Blake, M-261021-88e6).
@@ -43,6 +43,29 @@ Computer use works in the desktop app: the main JARVIS session, desktop schedule
 10. **Close the tool tab** (click the page, then Ctrl+W) to go back to the dashboard. When finished, unlock the screen.
 
 If the dashboard page goes blank, click inside it and press F5, then wait 20 seconds. If it stays blank, use the extension's **Reset current site** on the dashboard tab.
+
+## Tool-by-tool tips (learned 2026-10-29/30)
+- **PiPiAds**
+  - Blake's product search goes straight to `pipiads.com/product-search?sort=5&sort_type=desc&video_count_min=10&play_count_max=500000`.
+  - Then set Start Date → "15 days" → Apply.
+  - Keyword searches use `&keyword=<words>`.
+  - The list view (icon right of "Edit searches") shows ads, impressions and dates per product.
+  - The TikTok/Facebook buttons filter by platform: use **Facebook** to judge Meta competition.
+  - Keyword matching is loose, so read the results before trusting the count.
+- **Kalodata**
+  - Use `kalodata.com/product` and check the tab title says United States.
+  - Filters in the left panel: Launch Date (with a "Clear" link), Revenue Source (Content) → Video → Apply, Revenue Growth Rate → >0%, then **Submit**.
+  - Set 50 per page at the bottom, and use "Go to" for Blake's slow-burn pages.
+  - Keep the mouse off the video thumbnails, because they open a preview over the table.
+- **ShopHunter**
+  - Scroll to the top first. Then click the search box, Ctrl+A, type, and click the purple **Search** button. Enter alone doesn't always run it.
+  - The list view (icon right of Search) shows weekly revenue and Meta ads per product.
+  - It matches words loosely, so judge relevance by eye.
+- **Google Trends** (JARVIS's own browser): load `trends.google.com/trends/` first, then `.../explore?date=all&q=<term>`. Going straight to explore can return a 429 error.
+- **General**
+  - Never move the mouse to the screen edge: it opens a Windows panel that blocks control. Run `bin/jarvis dicloak show` to recover.
+  - Misclicks often open a product in a new tab: close it with Ctrl+W.
+  - Most top results in Kalodata are big brands, which can't be sourced. Skip them.
 
 ## Rules
 - Research and reading only. No purchases, upgrades, account changes, messages or posts from these accounts.
