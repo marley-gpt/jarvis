@@ -25,7 +25,7 @@ public class W { [DllImport("user32.dll")] public static extern bool ShowWindow(
                  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); }
 "@
 Get-Process ginsbrowser -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
-  [W]::ShowWindow($_.MainWindowHandle, 9) | Out-Null; [W]::SetForegroundWindow($_.MainWindowHandle) | Out-Null
+  [W]::ShowWindow($_.MainWindowHandle, 3) | Out-Null; [W]::SetForegroundWindow($_.MainWindowHandle) | Out-Null
   $_.MainWindowTitle }
 """
 
@@ -54,7 +54,7 @@ def windows() -> list[str]:
 
 
 def show() -> list[str]:
-    """Restore the profile window and bring it to the front, ready for screenshots."""
+    """Maximise the profile window and bring it to the front, ready for screenshots."""
     titles = [t for t in _powershell(SHOW_WINDOW).splitlines() if t.strip()]
     if not titles:
         raise DICloakError("The Master Key profile isn't open. Open DICloak and start the Master Key profile "
