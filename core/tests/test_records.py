@@ -154,3 +154,23 @@ class MoneyTest(BrainTest):
         self.assertEqual(p["ad_spend"], 75)
         self.assertEqual(p["other_costs"], {"cogs": 24})
         self.assertEqual(p["profit"], 150 - 75 - 24)
+
+
+class DICloakLockTest(BrainTest):
+    """One agent on the DICloak screen at a time; a stale lock is ignored."""
+
+    def test_lock_unlock_and_stale(self):
+        from jarvis import dicloak
+        dicloak.lock("creative-research")
+        with self.assertRaises(dicloak.DICloakError):
+            dicloak.lock("product-research")
+        self.assertFalse(dicloak.unlock("product-research"))  # only the holder can unlock
+        self.assertTrue(dicloak.unlock("creative-research"))
+        dicloak.lock("product-research")
+        lock = dicloak._lock_file()
+        data = __import__("json").loads(lock.read_text(encoding="utf-8"))
+        data["since"] -= (dicloak.LOCK_MINUTES + 1) * 60  # abandoned
+        lock.write_text(__import__("json").dumps(data), encoding="utf-8")
+        self.assertIsNone(dicloak.holder())
+        dicloak.lock("market-research")
+        self.assertEqual(dicloak.holder()["who"], "market-research")

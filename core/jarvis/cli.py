@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import feedback, backup, brief, db, journal, media, memory, paths, records, telegram
+from . import backup, dicloak, feedback, brief, db, journal, media, memory, paths, records, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -486,6 +486,21 @@ def cmd_watch(conn, args):
         out(f"Saved {entry.id}: {entry.title}\n  files: {paths.rel(folder)}")
 
 
+def cmd_dicloak(conn, args):
+    if args.sub == "status":
+        titles = dicloak.windows()
+        out("Master Key profile: " + ("open (" + "; ".join(titles) + ")" if titles else "not open"))
+        h = dicloak.holder()
+        out("Screen: " + (f"in use by {h['who']}" if h else "free"))
+    elif args.sub == "show":
+        out("Brought to the front: " + "; ".join(dicloak.show()))
+    elif args.sub == "lock":
+        dicloak.lock(args.who)
+        out(f"DICloak screen locked for {args.who}. Run `bin/jarvis dicloak unlock {args.who}` when done.")
+    elif args.sub == "unlock":
+        out("Unlocked." if dicloak.unlock(args.who) else "Not yours to unlock.")
+
+
 def cmd_telegram_pair(conn, args):
     if telegram.settings().get("chat_id"):
         out("Already paired with the owner's chat.")
@@ -856,6 +871,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper)")
     s.set_defaults(fn=cmd_watch)
 
+    dc = sub.add_parser("dicloak", help="the Master Key tools in the DICloak browser: status, show, lock, unlock")
+    dc.add_argument("sub", choices=("status", "show", "lock", "unlock"))
+    dc.add_argument("who", nargs="?", default="jarvis", help="who is using the screen (lock/unlock)")
+    dc.set_defaults(fn=cmd_dicloak)
+
     tg = sub.add_parser("telegram", help="the owner's phone: pair the bot, check it, send a message").add_subparsers(
         dest="sub", required=True)
     tg.add_parser("pair", help="print the code the owner sends the bot to pair").set_defaults(fn=cmd_telegram_pair)
@@ -896,7 +916,7 @@ def main(argv=None) -> int:
     try:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
-            telegram.TelegramError) as exc:
+            telegram.TelegramError, dicloak.DICloakError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

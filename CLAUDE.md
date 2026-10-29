@@ -60,7 +60,7 @@ There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3
 - **Feedback loop:** every verdict on the team's work (your ad and PDP reviews, test data, QC) is recorded with `bin/jarvis feedback add`. When the owner gives feedback in chat or by voice, JARVIS records it straight away. Agents read `feedback list` / `digest` before similar work.
 - **Save every mistake** to memory (`-c procedures`, tag `mistake`) and check them before similar work.
 - **New agents** may be added when a recurring job isn't covered. Tell the owner.
-- **Product research is lowest priority:** the owner brings the products.
+- **Product research:** the owner brings products, and since 2026-10-29 JARVIS also hunts for candidates itself with the Master Key tools and Blake's checklist, and sends a short list for the owner's yes.
 - These rules are repeated for the specialists in the `jarvis-memory` skill (section 0).
 
 ## Approval gates (never bypass)

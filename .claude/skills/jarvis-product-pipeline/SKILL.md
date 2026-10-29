@@ -13,6 +13,7 @@ The owner's goal: they send a product, everything is automated, and they only re
 3. **One spend approval up front**, for image generation: estimate the number of images, about 15 plus about 30% retries, times the per-image credit cost. Run `bin/jarvis cost check <AUD>`, then `bin/jarvis approval request spend "Image generation for <product> test" --task T<p> --amount X --currency AUD`. Nothing paid happens until it's approved.
 
 ## 1. Pre-test gate: `product-testing` + `product-research` (parallel)
+- **Master Key tools first (owner rule, 2026-10-29):** every research step uses the best tool in the owner's DICloak/Master Key browser (ShopHunter, Kalodata, PiPiAds for demand and ad volume; GetHookd and AdSpy for competitor ads and funnels). Load the `master-key-tools` skill. Ad images still come from our own Higgsfield, never the Master Key image tools.
 - Blake's pre-test checks (blake-testing, blake-product-research): price from his pricing formula, minimum margin on landed cost, Meta competition, trend direction, market size, USP.
 - Output: a one-page go / caution / stop with reasons. **Stop** needs the owner's call. **Caution** carries on, with the risk shown in the package.
 
