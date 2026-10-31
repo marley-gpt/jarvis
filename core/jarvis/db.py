@@ -6,7 +6,7 @@ import sqlite3
 
 from . import paths
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory (
@@ -145,6 +145,18 @@ CREATE TABLE IF NOT EXISTS money (
     recorded TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS money_day ON money(day);
+
+-- Desktop jobs: screen work queued from the phone or a schedule for the job runner session.
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    text TEXT NOT NULL,
+    source TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    started TEXT,
+    finished TEXT,
+    summary TEXT
+);
 
 CREATE TABLE IF NOT EXISTS agent_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

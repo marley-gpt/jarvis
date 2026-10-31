@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import backup, dicloak, feedback, brief, db, journal, media, memory, paths, records, telegram
+from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -486,6 +486,36 @@ def cmd_watch(conn, args):
         out(f"Saved {entry.id}: {entry.title}\n  files: {paths.rel(folder)}")
 
 
+def cmd_job_add(conn, args):
+    jid = jobs.add(conn, args.text, args.source)
+    out(f"J{jid} queued for the desktop runner." + ("" if jobs.runner_alive() else
+        " The runner isn't running right now, so it starts when the owner next opens it at the PC."))
+
+
+def cmd_job_list(conn, args):
+    rows = jobs.listing(conn, args.n)
+    out(f"Runner: {'running' if jobs.runner_alive() else 'not running'}")
+    if not rows:
+        out("No jobs yet.")
+    for r in rows:
+        out(f"J{r['id']} [{r['status']}] {r['text'][:90]}" + (f" -> {r['summary'][:90]}" if r["summary"] else ""))
+
+
+def cmd_job_wait(conn, args):
+    job = jobs.wait(conn, args.timeout)
+    out(f"J{job['id']} from {job['source']}: {job['text']}" if job else "No job yet: run this again to keep waiting.")
+
+
+def cmd_job_finish(ok):
+    def run(conn, args):
+        row = jobs.finish(conn, args.id, args.summary, ok)
+        out(f"J{row['id']} {row['status']}")
+        if not args.quiet and telegram.settings().get("chat_id"):
+            telegram.send(("" if ok else "Sir, that job failed. ") + args.summary)
+            out("Sent to the owner's phone.")
+    return run
+
+
 def cmd_dicloak(conn, args):
     if args.sub == "status":
         titles = dicloak.windows()
@@ -871,6 +901,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper)")
     s.set_defaults(fn=cmd_watch)
 
+    jb = sub.add_parser("job", help="desktop jobs: screen work queued from the phone or a schedule").add_subparsers(
+        dest="sub", required=True)
+    s = jb.add_parser("add", help="queue a job for the desktop runner")
+    s.add_argument("text")
+    s.add_argument("--source", default="owner")
+    s.set_defaults(fn=cmd_job_add)
+    s = jb.add_parser("list")
+    s.add_argument("-n", type=int, default=15)
+    s.set_defaults(fn=cmd_job_list)
+    s = jb.add_parser("wait", help="the runner blocks here until a job arrives, and claims it")
+    s.add_argument("--timeout", type=float, default=3000, help="seconds before giving up (run it again to keep waiting)")
+    s.set_defaults(fn=cmd_job_wait)
+    for name, ok in (("done", True), ("fail", False)):
+        s = jb.add_parser(name, help="report the job's result; the owner's phone gets the summary")
+        s.add_argument("id")
+        s.add_argument("--summary", required=True)
+        s.add_argument("--quiet", action="store_true", help="don't message the phone")
+        s.set_defaults(fn=cmd_job_finish(ok))
+
     dc = sub.add_parser("dicloak", help="the Master Key tools in the DICloak browser: status, show, lock, unlock")
     dc.add_argument("sub", choices=("status", "show", "lock", "unlock"))
     dc.add_argument("who", nargs="?", default="jarvis", help="who is using the screen (lock/unlock)")
@@ -916,7 +965,7 @@ def main(argv=None) -> int:
     try:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
-            telegram.TelegramError, dicloak.DICloakError) as exc:
+            telegram.TelegramError, dicloak.DICloakError, jobs.JobError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

@@ -174,3 +174,27 @@ class DICloakLockTest(BrainTest):
         self.assertIsNone(dicloak.holder())
         dicloak.lock("market-research")
         self.assertEqual(dicloak.holder()["who"], "market-research")
+
+
+class JobQueueTest(BrainTest):
+    """Screen work queued from the phone or a schedule, picked up by the desktop job runner."""
+
+    def test_jobs_run_in_order_and_report_back(self):
+        from jarvis import jobs
+        first = jobs.add(self.conn, "Product hunt", "phone")
+        jobs.add(self.conn, "Pull a competitor's ads", "schedule")
+        self.assertEqual(jobs.waiting(self.conn), 2)
+        job = jobs.wait(self.conn, timeout=2, poll=0.1)
+        self.assertEqual((job["id"], job["status"]), (first, "running"))
+        self.assertTrue(jobs.runner_alive())  # waiting beats the heartbeat
+        done = jobs.finish(self.conn, f"J{first}", "Two candidates sent.")
+        self.assertEqual(done["status"], "done")
+        with self.assertRaises(jobs.JobError):
+            jobs.finish(self.conn, first, "again")
+        self.assertEqual(jobs.claim(self.conn)["text"], "Pull a competitor's ads")
+        self.assertIsNone(jobs.claim(self.conn))
+
+    def test_wait_gives_up_and_runner_counts_as_off_when_silent(self):
+        from jarvis import jobs
+        self.assertFalse(jobs.runner_alive())
+        self.assertIsNone(jobs.wait(self.conn, timeout=0.2, poll=0.05))

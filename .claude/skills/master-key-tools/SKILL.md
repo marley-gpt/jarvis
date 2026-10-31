@@ -27,6 +27,27 @@ Also on the dashboard, not part of our method: ChatGPT Plus, Claude MAX, Gemini 
 
 Free tools Blake also uses alongside: **Google Trends**, the **Meta Ad Library** (public, headless procedure M-261021-ece5), Google Lens, ssstik.io, extract.pics.
 
+## Desktop jobs: how screen work gets done
+
+Computer use needs a grant the owner gives at the PC, and only a live desktop session can hold it. Scheduled runs and the phone session can't ask for it (M-261030-a942). So **one long-running desktop session, the job runner, holds the grant**, and everything else sends it jobs (D21):
+
+- **From the phone or any other session:** `bin/jarvis job add '<what to do>'`. The phone also has a 🔎 Product hunt button and /jobs. Never tell the owner they must come to the PC for screen work if the runner is on (`bin/jarvis job list` shows it).
+- **The runner's loop:**
+  1. Once, at the start: computer use `request_access` for `["DICloak", "ginsbrowser.exe"]` (the owner clicks Allow).
+  2. Run `bin/jarvis job wait` **in the background** (Bash `run_in_background`). It uses no tokens while it waits, and you're woken when it exits. "No job yet" means run it again.
+  3. Do the job from its description. Take the screen with `bin/jarvis dicloak lock runner`, unlock after.
+  4. `bin/jarvis job done J<n> --summary '<3-6 short spoken-style sentences>'` sends the result to the owner's phone. `job fail` if it couldn't be done, saying why.
+  5. Go back to step 2. Never stop looping unless the owner says so.
+- **It needs:** the PC on, unlocked, no sleep, the Claude desktop app open, and the DICloak Master Key profile open. If the runner session restarts, the owner must click Allow once again.
+- **Other computer-use jobs** go the same way. The runner asks for any other app it needs; if the owner isn't there to allow it, it fails the job and says what's needed.
+
+### Product hunt job
+1. Load `blake-product-research`. Read the rules: `bin/jarvis mem search "rule" -c product-research`. Read past candidates so you don't repeat them: `bin/jarvis mem search "Product candidate" -c product-research`.
+2. Owner rules: **every product needs 2-3 clear pain points, found in real customer words** (M-261031-a9d9; the fleece mask was dropped for having none, D17). No tech (M-261029-a481). Clothing only if it wins the full checklist against everything else (M-261030-6368). Testimonial-style ads should suit it (M-261031-edab).
+3. Find with Blake's exact settings: PiPiAds and Kalodata (see the tips below; try both the new launches and the slow-burn pages), TrendTrack if it's back. Skip brands and anything we can't source.
+4. Judge the best two or three: ShopHunter competition, ad count against days, Google Trends, USP "new or weird", TAM, cost, bundles, unisex, and the pain points (quick check of Amazon/Reddit reviews for real complaints).
+5. Save evidence in `brain/files/research/<date>/`, a report at `bin/jarvis task path T<n>`, and a `Product candidate:` memory entry for each one judged. Be honest: "nothing strong today" is a valid result.
+
 ## How to drive it (computer use)
 
 Computer use works in the desktop app: the main JARVIS session, desktop scheduled tasks, and the research agents it starts there (product-research, market-research, creative-research have the tools). The phone/dashboard (headless) session doesn't, so queue that work for the desktop. Any agent without it asks JARVIS for the searches it needs.

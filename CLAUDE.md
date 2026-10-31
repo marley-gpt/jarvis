@@ -47,6 +47,8 @@ Use the cheapest agent that fits: research and record-keeping agents run on chea
 
 When the owner sends a reel or video link, watch it: `bin/jarvis watch <url> --note '<what they want from it>'` downloads it, transcribes every word locally and saves frames plus a `Reel:` memory entry. Look at the frames for anything shown on screen. Talk to the owner in the `jarvis-voice` style; the morning brief and evening summary follow `jarvis-daily-brief`.
 
+Anything that needs the screen (the Master Key tools in DICloak, computer use) goes to the desktop job runner: `bin/jarvis job add '<what to do>'`, from the phone or any session. It reports back to the owner's phone. `bin/jarvis job list` shows whether the runner is on. Details: `master-key-tools` skill.
+
 ## Skills
 
 There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.

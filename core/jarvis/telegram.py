@@ -40,7 +40,7 @@ from pathlib import Path
 
 from urllib.parse import urlencode
 
-from . import db, media, paths, records
+from . import db, jobs, media, paths, records
 
 API = "https://api.telegram.org"
 CALLMEBOT = "https://api.callmebot.com/start.php"
@@ -55,11 +55,14 @@ ACTIONS = {
     "store": "Check the store like a customer with the store-qa agent and tell me what's broken, most serious first.",
     "product": "Start the ads for this product (jarvis-product-pipeline): ",
 }
-BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the store": "/store", "➕ New product": "/product"}
-KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}]],
+HUNT_JOB = ("Product hunt: follow the desktop-jobs procedure in the master-key-tools skill, with Blake's method and the "
+            "owner's product rules, then send the best one or two.")
+BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the store": "/store", "➕ New product": "/product",
+           "🔎 Product hunt": "/hunt"}
+KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}], [{"text": "🔎 Product hunt"}]],
             "resize_keyboard": True, "is_persistent": True}
 COMMANDS = [("today", "Today at a glance"), ("brief", "Brief me now"), ("store", "Check the store"),
-            ("product", "Start a new product"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
+            ("product", "Start a new product"), ("hunt", "Product hunt on the PC"), ("jobs", "Jobs on the PC"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
 
 
 class TelegramError(Exception):
@@ -435,6 +438,24 @@ class Bridge:
                 return self._reply(chat, "I'm mid-task, sir. Send /stop first.")
             self.runner.reset()
             return self._reply(chat, "Fresh conversation. Memory is kept.")
+        if text == "/hunt":
+            conn = db.connect()
+            try:
+                jid = jobs.add(conn, HUNT_JOB, "phone")
+            finally:
+                conn.close()
+            return self._reply(chat, f"Queued as J{jid}, sir. I'll text you the results." if jobs.runner_alive() else
+                               f"Queued as J{jid}, sir, but the runner on the PC isn't running, so it won't start until "
+                               "it's opened again.", KEYBOARD)
+        if text == "/jobs":
+            conn = db.connect()
+            try:
+                rows = jobs.listing(conn, 6)
+            finally:
+                conn.close()
+            lines = [f"The PC runner is {'on' if jobs.runner_alive() else 'off'}."]
+            lines += [f"J{r['id']} {r['status']}: {r['text'][:70]}" for r in rows]
+            return self._reply(chat, "\n".join(lines))
         if text == "/product":
             self.next_prefix = ACTIONS["product"]
             return self._reply(chat, "Send me the product: a link or a photo, with a line about it.")

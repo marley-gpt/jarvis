@@ -283,3 +283,19 @@ class PhoneQueueTest(BridgeCase):
         lines = [json.loads(l) for f in archived for l in f.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(lines[0]["text"], "use the TikTok angle")
         self.assertIn("while I was offline", self.server.runner.live["request"])
+
+
+class PhoneJobsTest(BridgeCase):
+    def test_hunt_button_queues_a_desktop_job_without_claude(self):
+        from jarvis import db, jobs
+        telegram.save(chat_id=222)
+        self.msg(222, "🔎 Product hunt")
+        conn = db.connect()
+        try:
+            self.assertEqual(jobs.waiting(conn), 1)
+        finally:
+            conn.close()
+        self.assertIn("isn't running", self.texts(222)[-1])  # no runner yet, so the owner is told
+        self.assertFalse(self.server.runner.busy)
+        self.msg(222, "/jobs")
+        self.assertIn("PC runner is off", self.texts(222)[-1])
