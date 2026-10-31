@@ -472,7 +472,8 @@ class Runner:
             finally:
                 conn.close()
         parent = ev.get("parent_tool_use_id")
-        content = (ev.get("message") or {}).get("content")
+        message = ev.get("message")  # some system events carry plain text here, which once killed the reply
+        content = message.get("content") if isinstance(message, dict) else None
         if kind == "assistant" and isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):

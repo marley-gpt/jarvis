@@ -318,3 +318,11 @@ class LocalEarsTest(BrainTest):
             server.runner.close()
             server.shutdown()
             server.server_close()
+
+
+class StreamEventTest(BrainTest):
+    def test_a_plain_text_message_field_does_not_kill_the_reply(self):
+        self.init()
+        hub = dashboard.Hub()
+        runner = dashboard.Runner(hub)
+        runner._handle({"type": "system", "subtype": "notice", "message": "Some plain text"}, {})
