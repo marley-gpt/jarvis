@@ -25,6 +25,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -304,6 +305,7 @@ class Runner:
         self.streamed = False  # this text block was already spoken in chunks
         self.last_output: float | None = None  # when Claude Code last said anything, while a reply is running
         self.hung = False      # the watchdog ended a frozen reply
+        self.failed = ""       # Claude Code ended the turn with an error and no answer
 
     @property
     def busy(self) -> bool:
@@ -385,12 +387,15 @@ class Runner:
                 sid = self.session()
                 if not (self.proc and self.proc.poll() is None):
                     self._spawn(claude, sid)
-                self.hung = False
+                self.hung, self.failed = False, ""
                 answered, err = self._exchange(text, images)
                 if answered:
                     break
                 if attempt == 1 and self.hung:
                     continue  # it froze: resume the conversation and send the message again
+                if attempt == 1 and sid and self.failed:
+                    self.reset(announce=False)  # memory lives in the brain, so a new conversation loses nothing
+                    continue
                 if self.hung:
                     err = "I got stuck on that one, sir. Would you mind sending it again?"
                 if attempt == 1 and sid and MISSING_SESSION.search(err):
@@ -437,7 +442,7 @@ class Runner:
                     continue
                 if self._handle(ev, dispatched):
                     self.last_output = None
-                    return True, ""
+                    return (False, self.failed) if self.failed else (True, "")
         except (OSError, ValueError):  # the process went away mid-message
             pass
         try:
@@ -489,6 +494,12 @@ class Runner:
                 self.hub.publish({"type": "reply", "text": LOGIN_HELP, "is_error": True, "login": True})
                 return True
             self._login_needed(False)
+            if ev.get("is_error") and not text:
+                # Failed before answering, with nothing to show the owner (a lost conversation does this):
+                # the turn starts afresh instead of going silent. Don't save this run's session id.
+                self.failed = "; ".join(str(e) for e in ev.get("errors") or []) or ev.get("subtype") or "no reason given"
+                sys.stderr.write(f"jarvis: reply failed: {self.failed}\n")
+                return True
         if ev.get("session_id") and kind in ("system", "result"):
             conn = db.connect()
             try:

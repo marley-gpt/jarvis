@@ -352,3 +352,31 @@ class FrozenReplyTest(BrainTest):
             runner.close()
         self.assertFalse(runner.busy)
         self.assertTrue(any("are you there?" in str(e.get("text")) for e in events), events)
+
+
+class LostConversationTest(BrainTest):
+    def test_a_lost_conversation_starts_afresh_instead_of_going_silent(self):
+        self.init()
+        (self.home / "config.json").write_text(json.dumps({"claude_command": [*FAKE, "--fake-lost-session"]}),
+                                               encoding="utf-8")
+        conn = db.connect()
+        db.set_meta(conn, "dashboard_session", "gone-111")
+        conn.close()
+        hub = dashboard.Hub()
+        q = hub.subscribe()
+        runner = dashboard.Runner(hub)
+        try:
+            runner.start("are you there?")
+            deadline, events = time.time() + 20, []
+            while time.time() < deadline:
+                ev = q.get(timeout=20)
+                events.append(ev)
+                if ev == {"type": "status", "status": "idle"}:
+                    break
+        finally:
+            runner.close()
+        self.assertTrue(any("are you there?" in str(e.get("text")) for e in events), events)
+        self.assertFalse(any(e.get("type") == "reply" and e.get("is_error") for e in events), events)
+        conn = db.connect()
+        self.assertEqual(db.get_meta(conn, "dashboard_session"), "sess-123")
+        conn.close()

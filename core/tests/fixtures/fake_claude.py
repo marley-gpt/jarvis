@@ -4,7 +4,8 @@ Reads one JSON user message per stdin line and answers each with the event shape
 dashboard parses, staying alive between messages like the real CLI. Flags:
 --fake-logged-out (answers with the sign-in error, then exits), --fake-missing-session
 (exits at once when resuming), --fake-stream (streams the first reply as partial chunks),
---fake-freeze (the first process goes silent on the first message, as the real CLI once did).
+--fake-freeze (the first process goes silent on the first message, as the real CLI once did),
+--fake-lost-session (resuming ends the turn with an error and no text, as the real CLI does).
 """
 import json
 import sys
@@ -30,6 +31,10 @@ for line in sys.stdin:
     turn += 1
     if "--fake-freeze" in sys.argv and not resumed:
         time.sleep(60)
+    if "--fake-lost-session" in sys.argv and resumed:
+        emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": "lost-999",
+              "errors": [f"No conversation found with session ID: {sid}"]})
+        continue
     emit({"type": "system", "subtype": "init", "session_id": sid})
     if "--fake-logged-out" in sys.argv:
         emit({"type": "assistant", "parent_tool_use_id": None,
