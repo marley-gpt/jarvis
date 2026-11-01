@@ -272,6 +272,20 @@ def speak(kokoro, text: str) -> bytes | None:
 MAX_DOWNLOAD = 20 * 1024 * 1024  # the Bot API's getFile limit
 
 
+def pending_path() -> Path:
+    """Messages waiting for JARVIS, kept on disk so a restart never loses them."""
+    folder = paths.home() / "telegram"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / "pending.json"
+
+
+def load_pending() -> list[dict]:
+    try:
+        return json.loads(pending_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
 def archive(msg: dict) -> None:
     """Every message the owner sends is kept, before anything else happens to it: brain/telegram/<day>.jsonl."""
     folder = paths.home() / "telegram"
@@ -354,9 +368,27 @@ class Bridge:
         threading.Thread(target=self._poll, daemon=True).start()
         threading.Thread(target=self._listen, daemon=True).start()
         threading.Thread(target=self._watch_store, daemon=True).start()
+        threading.Thread(target=self._typing, daemon=True).start()
+        self.pending = load_pending()
+        if self.pending and not self.runner.busy:  # messages that were waiting when JARVIS last stopped
+            self._ask_pending(settings().get("chat_id"))
 
     def stop(self) -> None:
         self.running = False
+
+    def _save_pending(self) -> None:
+        pending_path().write_text(json.dumps(self.pending), encoding="utf-8")
+
+    def _typing(self) -> None:
+        """Telegram's "typing..." while JARVIS works, so the owner can see he's on it. Lasts 5 s per call."""
+        while self.running:
+            owner = settings().get("chat_id")
+            if owner and (self.waiting or self.pending or self.queued):
+                try:
+                    call("sendChatAction", {"chat_id": owner, "action": "typing"}, timeout=10)
+                except TelegramError as exc:
+                    self.error = str(exc)
+            time.sleep(4)
 
     def _poll(self) -> None:
         offset = None
@@ -517,10 +549,9 @@ class Bridge:
         """Pass a request to JARVIS; the answer comes back to this chat. Never dropped: if JARVIS is busy
         (or a burst arrives after the PC was off), it waits its turn and is answered in order."""
         if self.runner.busy:
+            # Silently: the owner sees "typing" and then a normal reply, never a status notice (M-261102-cdcf).
             self.pending.append({"text": text, "images": images or [], "voice": voice, "shown": shown or text})
-            n = len(self.pending)
-            return self._reply(chat, "Noted, sir. I'm finishing something first; this is next."
-                               if n == 1 else f"Noted, sir. {n} messages waiting; I'll take them in order.")
+            return self._save_pending()
         self.waiting, self.voice_reply, self.said = True, voice, []
         self.hub.publish({"type": "owner", "text": shown or text, "via": "telegram"})
         try:
@@ -531,12 +562,13 @@ class Bridge:
 
     def _ask_pending(self, chat) -> None:
         batch, self.pending = self.pending, []
+        self._save_pending()
         if len(batch) == 1:
             b = batch[0]
             return self._ask(chat, b["text"], b["images"], b["voice"], b["shown"])
-        lines = [f"{i}. {b['text']}" for i, b in enumerate(batch, 1)]
-        text = (f"While I was busy you sent these {len(batch)} messages. Go through them in order, answer each one "
-                "by its number, and save anything worth remembering to memory:\n\n" + "\n\n".join(lines))
+        text = ("I sent you all of this while you were busy. Deal with all of it (watch any reels, save what matters to "
+                "memory), then reply like a person catching up: one natural message about what matters, no numbering, "
+                "and don't mention a queue:\n\n" + "\n\n".join(b["text"] for b in batch))
         images = [img for b in batch for img in b["images"]][:4]
         self._ask(chat, text, images, any(b["voice"] for b in batch), shown=f"{len(batch)} messages")
 
@@ -577,8 +609,6 @@ class Bridge:
                 f"cleared for {records.GRANT_MINUTES} minutes. Carry it out now, log it, and tell me when it's done.")
         if self.runner.busy:
             self.queued = text
-            if via == "phone":
-                self._reply(settings().get("chat_id"), "I'll do it as soon as I finish the current job, sir.")
         elif via == "phone":
             self._ask(settings().get("chat_id"), text, shown=f"Approved A{row['id']}")
         else:
@@ -631,10 +661,8 @@ class Bridge:
                         self.said.append(ev["text"])
                     elif kind == "reply" and ev.get("text") and (ev.get("is_error") or not self.said):
                         self.said.append(ev["text"])
-                    elif kind == "dispatch":  # long jobs: say who's on it now, the answer comes at the end
-                        self._reply(owner, f"On it: the {ev.get('agent')} agent is working on {ev.get('description') or 'it'}.")
                     elif kind == "error":
-                        self.said.append("Problem: " + ev.get("text", "something went wrong."))
+                        self.said.append(ev.get("text", "Something went wrong, sir."))
                     elif idle:
                         self.waiting = False
                         if self.said:  # one message with the whole answer

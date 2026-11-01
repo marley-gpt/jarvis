@@ -122,11 +122,11 @@ class MoneyTest(BrainTest):
         self.slug = records.product_add(self.conn, "Posture Corrector")
 
     def test_report_totals_against_the_weekly_target(self):
-        records.money_add(self.conn, "income", "sales", 300, day="2026-11-02")
-        records.money_add(self.conn, "expense", "ads", 160, day="2026-11-02", ref="meta:2026-11-02")
-        records.money_add(self.conn, "expense", "subscriptions", 20, currency="USD", day="2026-11-03", note="Higgsfield")
+        records.money_add(self.conn, "income", "sales", 300, day="2025-03-02")
+        records.money_add(self.conn, "expense", "ads", 160, day="2025-03-02", ref="meta:2025-03-02")
+        records.money_add(self.conn, "expense", "subscriptions", 20, currency="USD", day="2025-03-03", note="Higgsfield")
         records.cost_log(self.conn, "claude-api", 5)  # AI usage logged today, outside the period
-        rep = records.money_report(self.conn, "2026-11-02", "2026-11-08")
+        rep = records.money_report(self.conn, "2025-03-02", "2025-03-08")
         self.assertEqual(rep["total_income"], 300)
         self.assertEqual(rep["expenses"]["subscriptions"], round(20 * 1.52, 2))  # USD converted
         self.assertEqual(rep["profit"], round(300 - 160 - 30.4, 2))
@@ -134,9 +134,9 @@ class MoneyTest(BrainTest):
         self.assertNotIn("ai_api", rep["expenses"])
 
     def test_same_ref_updates_instead_of_double_counting(self):
-        records.money_add(self.conn, "expense", "ads", 40, day="2026-11-02", ref="meta:2026-11-02")
-        records.money_add(self.conn, "expense", "ads", 95, day="2026-11-02", ref="meta:2026-11-02")  # day finished
-        rep = records.money_report(self.conn, "2026-11-02", "2026-11-02")
+        records.money_add(self.conn, "expense", "ads", 40, day="2025-03-02", ref="meta:2025-03-02")
+        records.money_add(self.conn, "expense", "ads", 95, day="2025-03-02", ref="meta:2025-03-02")  # day finished
+        rep = records.money_report(self.conn, "2025-03-02", "2025-03-02")
         self.assertEqual(rep["expenses"], {"ads": 95})
 
     def test_unknown_category_and_currency_are_refused(self):
@@ -147,7 +147,7 @@ class MoneyTest(BrainTest):
 
     def test_product_test_profit_and_loss(self):
         tid = records.test_add(self.conn, self.slug, "Neck pain angle beats posture angle")
-        records.test_metric(self.conn, tid, "2026-11-02", spend=75, clicks=60, purchases=3, revenue=150)
+        records.test_metric(self.conn, tid, "2025-03-02", spend=75, clicks=60, purchases=3, revenue=150)
         records.money_add(self.conn, "expense", "cogs", 24, test=f"X{tid}", product=self.slug)
         records.money_add(self.conn, "expense", "ads", 75, test=f"X{tid}")  # already in the metrics, not counted twice
         p = records.test_pnl(self.conn, f"X{tid}")

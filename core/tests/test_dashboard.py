@@ -326,3 +326,29 @@ class StreamEventTest(BrainTest):
         hub = dashboard.Hub()
         runner = dashboard.Runner(hub)
         runner._handle({"type": "system", "subtype": "notice", "message": "Some plain text"}, {})
+
+
+class FrozenReplyTest(BrainTest):
+    def test_a_frozen_claude_is_ended_and_the_message_retried(self):
+        self.init()
+        (self.home / "config.json").write_text(json.dumps({
+            "claude_command": [*FAKE, "--fake-freeze"], "reply_timeout_seconds": 1}), encoding="utf-8")
+        hub = dashboard.Hub()
+        q = hub.subscribe()
+        runner = dashboard.Runner(hub)
+        conn = db.connect()
+        db.set_meta(conn, "dashboard_session", "sess-123")  # so the retry resumes, and doesn't freeze again
+        conn.close()
+        runner.proc = None
+        try:
+            runner.start("are you there?")
+            deadline, events = time.time() + 20, []
+            while time.time() < deadline:
+                ev = q.get(timeout=20)
+                events.append(ev)
+                if ev == {"type": "status", "status": "idle"}:
+                    break
+        finally:
+            runner.close()
+        self.assertFalse(runner.busy)
+        self.assertTrue(any("are you there?" in str(e.get("text")) for e in events), events)

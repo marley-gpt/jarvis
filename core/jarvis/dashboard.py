@@ -69,6 +69,8 @@ VOICE_PROMPT = (
     "prefaced with I am afraid or Unfortunately, then say what it means and what you suggest; "
     "push back politely when something is unwise, and if the owner insists, comply with at most one dry aside; "
     "look after the owner, mentioning rest if they have been at it very late. "
+    "Talk like a person, not a system: never mention message numbers, queues or that you will be with them shortly, "
+    "and never apologise for being a machine. If several messages arrive together, just answer them naturally in one reply. "
     "Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
     "no lists, no markdown. Lead with the answer, then the one thing that matters next. "
     "When you hand work to specialists, say plainly who is doing what. Put detail in deliverable files, "
@@ -300,6 +302,8 @@ class Runner:
         self.live: dict = {"status": "idle", "agents": {}, "activity": {}}
         self.buf = ""          # streamed text not yet spoken
         self.streamed = False  # this text block was already spoken in chunks
+        self.last_output: float | None = None  # when Claude Code last said anything, while a reply is running
+        self.hung = False      # the watchdog ended a frozen reply
 
     @property
     def busy(self) -> bool:
@@ -381,9 +385,14 @@ class Runner:
                 sid = self.session()
                 if not (self.proc and self.proc.poll() is None):
                     self._spawn(claude, sid)
+                self.hung = False
                 answered, err = self._exchange(text, images)
                 if answered:
                     break
+                if attempt == 1 and self.hung:
+                    continue  # it froze: resume the conversation and send the message again
+                if self.hung:
+                    err = "I got stuck on that one, sir. Would you mind sending it again?"
                 if attempt == 1 and sid and MISSING_SESSION.search(err):
                     # The saved conversation is gone (e.g. cleared by Claude Code): start a fresh one.
                     self.reset(announce=False)
@@ -398,6 +407,17 @@ class Runner:
             self.live = {"status": "idle", "agents": {}, "activity": self.live.get("activity", {})}
             self.hub.publish({"type": "status", "status": "idle"})
 
+    def _watchdog(self, proc: subprocess.Popen) -> None:
+        """Claude Code can freeze without an error (it once sat silent for 7 hours, with every phone message
+        queued behind it). No output for too long means it's stuck: end it, and the turn retries."""
+        limit = paths.config().get("reply_timeout_seconds", 900)
+        while self.last_output and self.proc is proc and proc.poll() is None:
+            if time.time() - self.last_output > limit:
+                self.hung = True
+                proc.kill()
+                return
+            time.sleep(min(5, limit / 10))
+
     def _exchange(self, text: str, images: list[dict]) -> tuple[bool, str]:
         """Send one message to the running process and read events until its result."""
         proc = self.proc
@@ -407,12 +427,16 @@ class Runner:
         try:
             proc.stdin.write(json.dumps(msg) + "\n")
             proc.stdin.flush()
+            self.last_output = time.time()
+            threading.Thread(target=self._watchdog, args=(proc,), daemon=True).start()
             for line in proc.stdout:
+                self.last_output = time.time()
                 try:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 if self._handle(ev, dispatched):
+                    self.last_output = None
                     return True, ""
         except (OSError, ValueError):  # the process went away mid-message
             pass

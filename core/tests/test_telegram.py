@@ -68,7 +68,7 @@ class TelegramBridgeTest(BridgeCase):
         answer = next(t for t in self.texts(222) if "On it." in t)
         self.assertIn(telegram.PREFIX.strip(), answer)  # JARVIS knew it came from the phone
         self.assertIn("how are the ads going?", answer)
-        self.assertTrue(any("product-research agent is working" in t for t in self.texts(222)))
+        self.assertFalse(any("agent is working" in t for t in self.texts(222)))  # no robot status messages
 
     def test_bot_token_is_redacted_from_the_journal(self):
         from jarvis import journal
@@ -265,15 +265,18 @@ class PhoneQueueTest(BridgeCase):
         self.msg(222, "second thing")
         self.msg(222, "third thing")
         self.assertEqual([p["text"] for p in self.bridge.pending], ["second thing", "third thing"])
-        self.assertIn("2 messages waiting", self.texts(222)[-1])
+        self.assertEqual(self.texts(222), [])  # no status notices: he just replies when he can
+        self.assertEqual(len(telegram.load_pending()), 2)  # and a restart wouldn't lose them
         self.server.runner.live["status"] = "idle"
         self.server.hub.publish({"type": "status", "status": "idle"})
         deadline = time.time() + 15
         while time.time() < deadline and not asked:
             time.sleep(0.1)
         request = asked[0]
-        self.assertIn("1. second thing", request)
-        self.assertIn("2. third thing", request)
+        self.assertIn("second thing", request)
+        self.assertIn("third thing", request)
+        self.assertIn("no numbering", request)
+        self.assertEqual(telegram.load_pending(), [])
         self.assertEqual(self.bridge.pending, [])
 
     def test_every_message_is_archived_and_late_ones_are_marked(self):
