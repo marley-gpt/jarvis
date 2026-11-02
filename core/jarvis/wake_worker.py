@@ -73,8 +73,11 @@ def main() -> int:
 
     def record(stream, wait: float) -> "np.ndarray | None":
         """Record until the owner stops talking. None if they never started within `wait` seconds."""
-        noise = sorted(floor)[len(floor) // 2] if floor else 150.0
-        start_at, stop_at = max(noise * 3.0, 350.0), max(noise * 2.0, 250.0)
+        # Relative to this room and this mic: the owner's USB mic sits around 10 at rest and well under 500
+        # when talking, so a fixed level never saw them start.
+        noise = sorted(floor)[len(floor) // 2] if floor else 30.0
+        start_at, stop_at = max(noise * 4.0, 60.0), max(noise * 2.5, 35.0)
+        loudest = 0.0
         print("LISTENING", flush=True)
         state["cancel"] = False
         chunks, started, quiet, t0 = [], False, 0.0, time.time()
@@ -83,10 +86,12 @@ def main() -> int:
             audio = audio[:, 0] if audio.ndim > 1 else audio
             chunks.append(audio.copy())
             loud = level(audio)
+            loudest = max(loudest, loud)
             if not started:
                 if loud >= start_at:
                     started, quiet = True, 0.0
                 elif time.time() - t0 > wait:
+                    print(f"DEBUG nothing heard: noise {noise:.0f}, start at {start_at:.0f}, loudest {loudest:.0f}", flush=True)
                     return None
                 else:
                     chunks = chunks[-5:]  # keep 0.4 s before speech so the first word isn't clipped
@@ -96,13 +101,17 @@ def main() -> int:
                 break
         if state["cancel"] or not started:
             return None
-        return np.concatenate(chunks).astype(np.float32) / 32768.0
+        seconds = len(chunks) * BLOCK / RATE
+        print(f"DEBUG recorded {seconds:.1f}s: noise {noise:.0f}, start at {start_at:.0f}, loudest {loudest:.0f}", flush=True)
+        clip = np.concatenate(chunks).astype(np.float32) / 32768.0
+        return clip * min(0.9 / max(float(np.abs(clip).max()), 1e-4), 20.0)  # a quiet mic is lifted for Whisper
 
     def transcribe(audio) -> str:
         print("THINKING", flush=True)
         segments, _ = whisper.transcribe(audio, language="en", beam_size=1, vad_filter=True,
                                          condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments).strip()
+        print(f"DEBUG transcribed: {text[:120]!r}", flush=True)
         return WAKE_AFTER.sub("", text).strip()
 
     def hear(stream, wait: float) -> None:

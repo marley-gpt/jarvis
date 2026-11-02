@@ -78,6 +78,9 @@ class WakeWord:
                     self.on_state("heard")
                 if self.on_heard:
                     self.on_heard(json.loads(line[6:]).get("text", ""))
+            elif line.startswith("DEBUG "):
+                with open(paths.home() / "scratch" / "ears.log", "a", encoding="utf-8") as log:
+                    log.write(f"{paths.now()} {line[6:]}\n")
             elif line.startswith("ERROR"):
                 self.error = line[6:]
         self.ready = False

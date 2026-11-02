@@ -34,13 +34,17 @@
   window.J = J;
 
   // ---------------------------------------------------------- server
+  // The page's key can go out of date: pick up the current one, so the request can be resent.
+  async function refreshToken() {
+    const m = (await (await fetch(location.pathname)).text()).match(/JARVIS_TOKEN = "([^"]+)"/);
+    if (!m || m[1] === window.JARVIS_TOKEN) return false;
+    window.JARVIS_TOKEN = m[1];
+    return true;
+  }
   async function post(path, body, retried) {
     const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": window.JARVIS_TOKEN },
       body: JSON.stringify(body || {}) });
-    if (r.status === 403 && !retried) {  // the page's key is out of date: pick up the current one and resend
-      const m = (await (await fetch(location.pathname)).text()).match(/JARVIS_TOKEN = "([^"]+)"/);
-      if (m && m[1] !== window.JARVIS_TOKEN) { window.JARVIS_TOKEN = m[1]; return post(path, body, true); }
-    }
+    if (r.status === 403 && !retried && await refreshToken()) return post(path, body, true);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
@@ -58,7 +62,7 @@
   J.stop = () => { cancelSpeech(); if (J.listening) rec?.stop(); post("/api/stop").catch(() => {}); };
   J.newConversation = () => post("/api/new").catch((e) => J.emit("error", { text: e.message }));
 
-  let saidThisTurn = false, failedTurn = false, voiceTurn = false;
+  let saidThisTurn = false, failedTurn = false, voiceTurn = false, listeningFor = "request";
   // images: [{ media_type: "image/png", data: "<base64>" , url?: "<object URL for showing it>" }]
   J.send = async (text, images) => {
     text = (text || "").trim();
@@ -127,6 +131,8 @@
         J.ears = e.state;
         J.listening = e.state === "listening";
         if (e.state === "listening") chime();
+        if (e.state === "nospeech" && listeningFor === "request") { voiceTurn = false; say("Sorry sir, I didn't catch that."); }
+        if (e.state !== "listening" && e.state !== "thinking") listeningFor = "request";
         setStatus(J.status);
         J.emit("ears", e);
         return;
@@ -181,7 +187,7 @@
     if (localEars()) {
       if (J.listening) return post("/api/listen", { cancel: true }).catch(() => {});
       cancelSpeech();
-      failedTurn = false;
+      failedTurn = false; listeningFor = followup ? "followup" : "request";
       try { return await post("/api/listen", { followup: !!followup }); } catch (e) { /* fall back to the browser */ }
     }
     if (!rec) return J.emit("error", { text: "Voice input needs Chrome or Edge. You can still type." });
@@ -209,7 +215,7 @@
   const kokoroOn = () => !!J.state?.tts?.available;
   J.voiceOptions = () => [
     ...(kokoroOn() ? J.state.tts.voices.map((v) => ({ id: "kokoro:" + v.id, label: `JARVIS (Kokoro) · ${v.name}` })) : []),
-    ...J.voices().map((v) => ({ id: v.name, label: v.name })),
+    ...(kokoroOn() ? [] : J.voices().map((v) => ({ id: v.name, label: v.name }))),  // only without the JARVIS voice
   ];
   // George was the default before the JARVIS-tuned voice existed: move people who never chose otherwise.
   if (J.pref("speechVoice") === "kokoro:bm_george" && J.pref("voiceUpgrade") !== "1") J.pref("speechVoice", "kokoro:jarvis");
@@ -246,13 +252,16 @@
     const all = J.spoken(text);
     if (!J.settings.speak || !all) { J.emit("caption", { text: all, done: true }); return; }
     const voice = J.currentVoice(), my = gen;
-    const kokoro = voice.startsWith("kokoro:") && kokoroOn();
+    // The JARVIS voice always, unless it isn't installed. A failed sentence stays silent (the text is on
+    // screen) rather than dropping to the browser's robotic voice mid-reply.
+    const kokoro = !J.state || kokoroOn();
+    const voiceId = voice.startsWith("kokoro:") ? voice.slice(7) : "";
     chunks(all).forEach((c) => {
       speakQueue++; setSpeaking(true);
-      const wav = kokoro ? fetchWav(c, voice.slice(7)) : null;  // fetched ahead while earlier sentences play
+      const wav = kokoro ? fetchWav(c, voiceId) : null;  // fetched ahead while earlier sentences play
       wav?.catch(() => {});
       chain = chain
-        .then(() => (my !== gen ? null : wav ? playWav(c, wav, my).catch(() => my === gen && playBrowser(c)) : playBrowser(c)))
+        .then(() => (my !== gen ? null : wav ? playWav(c, wav, my) : playBrowser(c)))
         .catch(() => {})
         .then(() => {
           if (my !== gen) return;
@@ -262,9 +271,10 @@
         });
     });
   }
-  async function fetchWav(text, voice) {
+  async function fetchWav(text, voice, retried) {
     const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": window.JARVIS_TOKEN },
       body: JSON.stringify({ text, voice }) });
+    if (r.status === 403 && !retried && await refreshToken()) return fetchWav(text, voice, true);
     if (!r.ok) throw new Error("tts " + r.status);
     return URL.createObjectURL(await r.blob());
   }
