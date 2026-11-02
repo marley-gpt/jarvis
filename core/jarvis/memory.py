@@ -191,9 +191,13 @@ def _index(conn, entry: Entry, key: str, st) -> None:
 
 # ---------------------------------------------------------------- queries
 
+MAX_SEARCH_WORDS = 32  # each word slows the search: 224 took over a minute, past the prompt hook's 15 seconds
+
+
 def _fts_query(text: str, mode: str) -> str:
     words = re.findall(r"[\w$%-]+", text.lower())
     words = [w.strip("-") for w in words if len(w.strip("-")) > 1]
+    words = list(dict.fromkeys(words))[:MAX_SEARCH_WORDS]
     if not words:
         return ""
     return f" {mode} ".join(f'"{w}"' for w in words)

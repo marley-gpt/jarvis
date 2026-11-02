@@ -328,16 +328,26 @@ class StreamEventTest(BrainTest):
         runner._handle({"type": "system", "subtype": "notice", "message": "Some plain text"}, {})
 
 
+class EmptyResultTest(BrainTest):
+    def test_a_reply_with_nothing_to_say_tells_the_owner(self):
+        self.init()
+        hub = dashboard.Hub()
+        q = hub.subscribe()
+        dashboard.Runner(hub)._handle({"type": "result", "subtype": "success", "result": "", "session_id": "s"}, {})
+        self.assertEqual(q.get(timeout=1)["type"], "error")
+
+
 class FrozenReplyTest(BrainTest):
     def test_a_frozen_claude_is_ended_and_the_message_retried(self):
         self.init()
         (self.home / "config.json").write_text(json.dumps({
-            "claude_command": [*FAKE, "--fake-freeze"], "reply_timeout_seconds": 1}), encoding="utf-8")
+            "claude_command": [*FAKE, "--fake-freeze", "--fake-marker", str(self.home / "froze")],
+            "reply_timeout_seconds": 1}), encoding="utf-8")
         hub = dashboard.Hub()
         q = hub.subscribe()
         runner = dashboard.Runner(hub)
         conn = db.connect()
-        db.set_meta(conn, "dashboard_session", "sess-123")  # so the retry resumes, and doesn't freeze again
+        db.set_meta(conn, "dashboard_session", "sess-123")
         conn.close()
         runner.proc = None
         try:
@@ -352,6 +362,48 @@ class FrozenReplyTest(BrainTest):
             runner.close()
         self.assertFalse(runner.busy)
         self.assertTrue(any("are you there?" in str(e.get("text")) for e in events), events)
+
+
+class LongMessageTest(BrainTest):
+    PHOTO = {"media_type": "image/png", "data": base64.b64encode(b"x" * 1_000_000).decode()}  # more than the pipe holds
+
+    def runner(self, flag):
+        self.init()
+        (self.home / "config.json").write_text(json.dumps({
+            "claude_command": [*FAKE, flag, "--fake-marker", str(self.home / "first")],
+            "reply_timeout_seconds": 1}), encoding="utf-8")
+        conn = db.connect()
+        db.set_meta(conn, "dashboard_session", "sess-123")
+        conn.close()
+        hub = dashboard.Hub()
+        return dashboard.Runner(hub), hub.subscribe()
+
+    def turn(self, runner, q, *args):
+        runner.start(*args)
+        deadline, events = time.time() + 20, []
+        while time.time() < deadline:
+            ev = q.get(timeout=20)
+            events.append(ev)
+            if ev == {"type": "status", "status": "idle"}:
+                break
+        return events
+
+    def test_a_photo_claude_never_reads_is_still_caught_by_the_watchdog(self):
+        runner, q = self.runner("--fake-deaf")
+        try:
+            events = self.turn(runner, q, "look at this", [self.PHOTO])
+        finally:
+            runner.close()
+        self.assertTrue(any("Images=1" in str(e.get("text")) for e in events), events)
+
+    def test_a_photo_sent_while_claude_waits_for_its_output_to_be_read(self):
+        runner, q = self.runner("--fake-chatty")
+        try:
+            self.turn(runner, q, "first")
+            events = self.turn(runner, q, "look at this", [self.PHOTO])
+        finally:
+            runner.close()
+        self.assertTrue(any("Images=1" in str(e.get("text")) for e in events), events)
 
 
 class LostConversationTest(BrainTest):

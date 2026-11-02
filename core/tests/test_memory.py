@@ -21,6 +21,10 @@ class MemoryTest(BrainTest):
         hits = memory.search(self.conn, "private label packaging")
         self.assertEqual(hits[0]["id"], "M-SEED-0002")
 
+    def test_a_long_message_searches_a_limited_number_of_distinct_words(self):
+        query = memory._fts_query(" ".join(f"word{n}" for n in range(200)) + " word0 word1", "OR")
+        self.assertEqual(len(query.split(" OR ")), memory.MAX_SEARCH_WORDS)
+
     def test_add_and_search_with_citation(self):
         entry, _ = self.add("How to find winning Meta ads",
                             "Filter the Ad Library by active ads, sort by longest running, check 5+ variations.",

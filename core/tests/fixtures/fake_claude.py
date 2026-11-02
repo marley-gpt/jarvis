@@ -4,10 +4,14 @@ Reads one JSON user message per stdin line and answers each with the event shape
 dashboard parses, staying alive between messages like the real CLI. Flags:
 --fake-logged-out (answers with the sign-in error, then exits), --fake-missing-session
 (exits at once when resuming), --fake-stream (streams the first reply as partial chunks),
---fake-freeze (the first process goes silent on the first message, as the real CLI once did),
---fake-lost-session (resuming ends the turn with an error and no text, as the real CLI does).
+--fake-freeze (the first process goes silent on the first message, as the real CLI once did;
+the --fake-marker file is how a retry knows it isn't the first),
+--fake-lost-session (resuming ends the turn with an error and no text, as the real CLI does),
+--fake-deaf (the first process never reads stdin; --fake-marker as above), --fake-chatty (after a reply it writes more than
+the pipe holds, and reads nothing more until that output has been read).
 """
 import json
+import os
 import sys
 import time
 
@@ -19,9 +23,20 @@ def emit(obj):
     print(json.dumps(obj), flush=True)
 
 
+def first_process():
+    marker = sys.argv[sys.argv.index("--fake-marker") + 1]
+    if os.path.exists(marker):
+        return False
+    open(marker, "w").close()
+    return True
+
+
 if "--fake-missing-session" in sys.argv and resumed:
     print(f"No conversation found with session ID: {sid}", file=sys.stderr)
     sys.exit(1)
+
+if "--fake-deaf" in sys.argv and first_process():
+    time.sleep(60)
 
 turn = 0
 for line in sys.stdin:
@@ -29,7 +44,7 @@ for line in sys.stdin:
     texts = [b["text"] for b in msg["content"] if b["type"] == "text"]
     images = sum(1 for b in msg["content"] if b["type"] == "image")
     turn += 1
-    if "--fake-freeze" in sys.argv and not resumed:
+    if "--fake-freeze" in sys.argv and first_process():
         time.sleep(60)
     if "--fake-lost-session" in sys.argv and resumed:
         emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": "lost-999",
@@ -56,3 +71,5 @@ for line in sys.stdin:
         {"type": "tool_use", "id": "tu2", "name": "WebSearch", "input": {"query": "posture corrector reviews"}}]}})
     emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": "done"}]}})
     emit({"type": "result", "subtype": "success", "result": "Research is done.", "session_id": sid, "total_cost_usd": 0})
+    if "--fake-chatty" in sys.argv:
+        emit({"type": "system", "subtype": "notice", "text": "x" * 1_000_000})

@@ -353,11 +353,11 @@ class Runner:
     def close(self) -> None:
         proc, self.proc = self.proc, None
         if proc and proc.poll() is None:
+            proc.terminate()  # first: closing stdin waits for a message that's still being written
             try:
                 proc.stdin.close()
             except OSError:
                 pass
-            proc.terminate()
 
     def _spawn(self, claude: list[str], sid: str | None) -> None:
         cfg = paths.config()
@@ -423,17 +423,26 @@ class Runner:
                 return
             time.sleep(min(5, limit / 10))
 
+    @staticmethod
+    def _send(proc: subprocess.Popen, line: str) -> None:
+        try:
+            proc.stdin.write(line)
+            proc.stdin.flush()
+        except (OSError, ValueError):  # the process went away mid-message
+            pass
+
     def _exchange(self, text: str, images: list[dict]) -> tuple[bool, str]:
         """Send one message to the running process and read events until its result."""
         proc = self.proc
         dispatched: dict[str, str] = {}
         self.buf, self.streamed = "", False
         msg = {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}, *images]}}
+        # A photo doesn't fit in the pipe. Writing it before reading left both sides waiting on each other
+        # if Claude Code was still waiting for its own output to be read, so send while reading, watchdog on.
+        self.last_output = time.time()
+        threading.Thread(target=self._watchdog, args=(proc,), daemon=True).start()
+        threading.Thread(target=self._send, args=(proc, json.dumps(msg) + "\n"), daemon=True).start()
         try:
-            proc.stdin.write(json.dumps(msg) + "\n")
-            proc.stdin.flush()
-            self.last_output = time.time()
-            threading.Thread(target=self._watchdog, args=(proc,), daemon=True).start()
             for line in proc.stdout:
                 self.last_output = time.time()
                 try:
@@ -500,6 +509,9 @@ class Runner:
                 self.failed = "; ".join(str(e) for e in ev.get("errors") or []) or ev.get("subtype") or "no reason given"
                 sys.stderr.write(f"jarvis: reply failed: {self.failed}\n")
                 return True
+            if not text:  # the owner would otherwise wait on an answer that isn't coming
+                sys.stderr.write(f"jarvis: reply ended with nothing to say: {ev.get('subtype')}\n")
+                self.hub.publish({"type": "error", "text": "I lost my thread on that one, sir. Would you mind sending it again?"})
         if ev.get("session_id") and kind in ("system", "result"):
             conn = db.connect()
             try:
