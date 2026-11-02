@@ -557,6 +557,20 @@ class Runner:
 
 # ---------------------------------------------------------------- HTTP
 
+def page_token() -> str:
+    """The key pages send with every POST. It's kept across restarts, so an open window keeps working."""
+    path = paths.home() / "secrets" / "dashboard_token"
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    if not token:
+        token = secrets.token_urlsafe(24)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(token, encoding="utf-8")
+    return token
+
+
 def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     hub = Hub()
     runner = Runner(hub)
@@ -575,7 +589,7 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}), heard,
                              lambda state: hub.publish({"type": "ears", "state": state}))
     phone = telegram.Bridge(hub, runner, kokoro)
-    token = secrets.token_urlsafe(24)
+    token = page_token()
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

@@ -380,3 +380,16 @@ class LostConversationTest(BrainTest):
         conn = db.connect()
         self.assertEqual(db.get_meta(conn, "dashboard_session"), "sess-123")
         conn.close()
+
+
+class PageTokenTest(BrainTest):
+    def test_the_page_key_survives_a_restart(self):
+        self.init()
+        first = dashboard.make_server(port=0)
+        second = dashboard.make_server(port=0)
+        try:
+            self.assertEqual(first.token, second.token)  # an open chat window keeps working after a restart
+            self.assertGreater(len(first.token), 20)
+        finally:
+            first.server_close()
+            second.server_close()

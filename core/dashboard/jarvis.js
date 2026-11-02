@@ -34,9 +34,13 @@
   window.J = J;
 
   // ---------------------------------------------------------- server
-  async function post(path, body) {
+  async function post(path, body, retried) {
     const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": window.JARVIS_TOKEN },
       body: JSON.stringify(body || {}) });
+    if (r.status === 403 && !retried) {  // the page's key is out of date: pick up the current one and resend
+      const m = (await (await fetch(location.pathname)).text()).match(/JARVIS_TOKEN = "([^"]+)"/);
+      if (m && m[1] !== window.JARVIS_TOKEN) { window.JARVIS_TOKEN = m[1]; return post(path, body, true); }
+    }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
