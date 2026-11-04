@@ -1387,6 +1387,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     if (composer) composer.render(); else renderer.render(scene3, camera);
 
     // Glass chips follow their buildings on screen.
+    const placed = [];   // chips already placed this frame, so later ones stack under them rather than overlap
     for (const el of tags.children) {
       const id = el.dataset.id;
       const P = pavilions.get(id);
@@ -1404,6 +1405,14 @@ function buildWorld(THREE, addons, renderer, opts) {
         y = (Math.abs(above - y) <= Math.abs(below - y) && above - hh > 0) || below > H ? above : below;
       }
       const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !(open && id === opts.selected());
+      if (visible) {
+        for (let guard = 0; guard < 6; guard++) {
+          const hit = placed.find((q) => x + hw > q.l && x - hw < q.r && y > q.t && y - hh < q.b);
+          if (!hit) break;
+          y = hit.b + hh + 3 <= H ? hit.b + hh + 3 : hit.t - 3;
+        }
+        placed.push({ l: x - hw, r: x + hw, t: y - hh, b: y });
+      }
       el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight)}px)`;
       el.style.opacity = visible ? "1" : "0";
       el.style.visibility = visible ? "visible" : "hidden";

@@ -298,9 +298,11 @@ def recent_actions(conn, limit: int = 12) -> list[dict]:
     from . import hooks
     admin = (paths.config().get("shopify_admin_url") or "").rstrip("/")
     out = []
-    for r in conn.execute("SELECT ts, tool, summary FROM actions ORDER BY id DESC LIMIT ?", (limit,)):
+    for r in conn.execute("SELECT ts, tool, summary FROM actions ORDER BY id DESC LIMIT ?", (limit * 4,)):
         tool, summary = r["tool"], r["summary"] or ""
         server = tool.split("__")[1] if tool.count("__") >= 2 else tool
+        if hooks.LOCAL_MCP_SERVERS.match(server) or len(out) >= limit:
+            continue   # the app's own tools (sessions, browser, terminal) are not store, ad or file changes
         what = ""
         try:
             data = json.loads(summary.rstrip("…")) if summary.startswith("{") else {}
