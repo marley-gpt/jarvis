@@ -161,14 +161,18 @@ class SkillLearningTest(BrainTest):
         with self.assertRaises(skills.SkillError):
             skills.decide(self.conn, f"P{rejected}", True, by="owner")
 
-    def test_due_rotates_agents_within_the_daily_cap(self):
-        first = skills.due(self.conn)
+    def test_due_follows_the_pacer_and_rotates_agents(self):
+        self.assertEqual(skills.due(self.conn, limit=0), [])
+        first = skills.due(self.conn, limit=6)
         self.assertEqual(len(first), 6)
         for a in first[:4]:
             skills.run_start(self.conn, a)
-        self.assertEqual(len(skills.due(self.conn)), 2)
-        tomorrow = skills.due(self.conn, datetime.now() + timedelta(days=1))
-        self.assertTrue(set(tomorrow).isdisjoint(first[:4]))  # never-run agents go first
+        again = skills.due(self.conn, limit=20)
+        self.assertTrue(set(again).isdisjoint(first[:4]))  # nobody learns twice within the gap
+        later = skills.due(self.conn, datetime.now() + timedelta(days=1), limit=20)
+        self.assertEqual(set(later), set(skills.agent_names()))
+        self.assertEqual(later[:2], again[:2])  # never-run agents still go first
+        self.assertGreater(len(skills.due(self.conn)), 0)  # no reading: the pacer's estimate allows some
 
     def test_run_writes_a_brief_with_the_safety_rules(self):
         rid, path = skills.run_start(self.conn, "market-research")
@@ -195,7 +199,7 @@ class SkillLearningTest(BrainTest):
         self.assertEqual(cd["recently_learned"][0]["title"], "A note")
         self.assertEqual(set(cd), {"name", "skills", "level", "recently_learned", "backlog", "changes", "last_run"})
         self.assertIn("progress", cd["skills"][0])
-        self.assertEqual(data["schedule"]["daily_cap"], 6)
+        self.assertIn("allowed_runs", data["schedule"]["pace"])
         one = json.loads(self.run_cli("skills", "board", "--agent", "shopify").stdout)
         self.assertEqual([a["name"] for a in one["agents"]], ["shopify"])
         bad = self.run_cli("skills", "board", "--agent", "nobody", check=False)

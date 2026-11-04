@@ -1,6 +1,6 @@
 """Skill learning and teaching: every specialist keeps finding, learning and sharing skills for its role.
 
-The loop, per agent, on a nightly rota (`skills due`, capped by `skill_learning_daily_cap`):
+The loop, per agent, whenever there is capacity (`skills due`, paced against the weekly plan limit by `pace`):
 1. `skills run start <agent>` writes a learning brief: the agent's role, assigned skills, recent work,
    feedback and mistakes, the gaps they point to, and installed skills it doesn't use yet that fit them.
 2. JARVIS searches the Claude skill and plugin catalogue for the gaps; the agent reads the best
@@ -29,7 +29,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import feedback, memory, paths
+from . import feedback, memory, pace, paths
 
 # Created on demand rather than through db.SCHEMA_VERSION, so other branches that bump the version
 # can't leave these tables missing.
@@ -691,19 +691,17 @@ def last_runs(conn) -> dict[str, str]:
         "SELECT agent, MAX(ts) AS ts FROM skill_runs WHERE kind = 'learn' GROUP BY agent")}
 
 
-def due(conn, now: datetime | None = None) -> list[str]:
-    """Agents whose learning run is due, oldest first, within today's cap. Each agent gets one slot a day at
-    most; with 12 agents and a cap of 6, every agent learns every other day."""
+def due(conn, now: datetime | None = None, limit: int | None = None) -> list[str]:
+    """Agents due a learning run now, the longest-waiting first. How many comes from the pacer (`pace.status`):
+    more when weekly usage is behind an even pace to the reset, none when ahead or into the owner's reserve."""
     ensure(conn)
-    now = now or datetime.now()
-    today = now.date().isoformat()
-    cap = paths.config()["skill_learning_daily_cap"]
-    done_today = conn.execute("SELECT COUNT(*) FROM skill_runs WHERE kind = 'learn' AND substr(ts, 1, 10) = ?",
-                              (today,)).fetchone()[0]
+    now = (now or datetime.now()).astimezone()
+    allowed = pace.status(conn, now)["allowed_runs"] if limit is None else limit
+    gap = timedelta(hours=paths.config()["skill_min_hours_between_runs"])
     last = last_runs(conn)
-    waiting = [a for a in agent_names() if (last.get(a) or "")[:10] != today]
+    waiting = [a for a in agent_names() if not last.get(a) or now - pace._dt(last[a]) >= gap]
     waiting.sort(key=lambda a: (last.get(a) or "", a))
-    return waiting[:max(0, cap - done_today)]
+    return waiting[:max(0, allowed)]
 
 
 def run_start(conn, agent: str) -> tuple[int, Path]:
@@ -825,7 +823,7 @@ def board(conn, agent: str | None = None) -> dict:
     q = review_queue(conn)
     return {"generated": paths.now(), "agents": out,
             "review": {"candidates": len(q["candidates"]), "changes": len(q["changes"])},
-            "schedule": {"daily_cap": paths.config()["skill_learning_daily_cap"], "due": due_now}}
+            "schedule": {"pace": pace.status(conn), "due": due_now}}
 
 
 def board_json(conn, agent: str | None = None) -> str:

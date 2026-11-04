@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, skills, telegram
+from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, pace, paths, records, skills, team, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -230,6 +230,10 @@ def cmd_approval_request(conn, args):
     aid = records.approval_request(conn, args.kind, args.summary, detail=args.detail, task=args.task,
                                    amount=args.amount, currency=args.currency)
     out(f"A{aid} pending — ask the user to approve or reject it.")
+    push_approval(conn, aid)
+
+
+def push_approval(conn, aid: int) -> None:
     if telegram.settings().get("chat_id"):
         try:
             telegram.push_approval(conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone())
@@ -641,7 +645,7 @@ def cmd_skills_due(conn, args):
     if args.json:
         out(json.dumps(agents))
         return
-    out("Due for a learning run today: " + (", ".join(agents) if agents else "nobody (today's cap is used up)"))
+    out("Due for a learning run now: " + (", ".join(agents) if agents else "nobody (" + pace.status(conn)["status"] + ")"))
 
 
 def cmd_skills_run_start(conn, args):
@@ -747,6 +751,91 @@ def cmd_skills_mine(conn, args):
         out("\nActive skill notes for you (`mem get <id>` to read; log what helped with `skills used`):")
         for n in rows:
             out(f"  N{n['id']} {n['memory_id']} {n['title']} (by {n['agent']})")
+
+
+def cmd_pace(conn, args):
+    if args.json:
+        out(json.dumps(pace.status(conn), indent=1))
+    else:
+        out(pace.summary(conn))
+
+
+def cmd_pace_record(conn, args):
+    pace.record(conn, args.weekly, args.resets, five_hour=args.five_hour, five_hour_resets=args.five_hour_resets,
+                plan=args.plan)
+    out("Recorded. " + pace.summary(conn))
+
+
+def cmd_team_delegate(conn, args):
+    sid = team.delegate(conn, args.parent, args.job, child=args.child, task=args.task)
+    out(f"S{sid} queued: {args.child or args.parent} will take it in a fresh run (JARVIS: `team next`).")
+
+
+def cmd_team_next(conn, args):
+    rows = team.queued(conn, args.limit)
+    if args.json:
+        out(json.dumps([{**dict(r), "id": f"S{r['id']}"} for r in rows], indent=1))
+        return
+    if not rows:
+        out("No sub-agent jobs waiting.")
+    for r in rows:
+        out(f"S{r['id']} {r['parent']} -> {r['child']}{' (' + r['task'] + ')' if r['task'] else ''}: {r['job']}")
+
+
+def cmd_team_sub(status):
+    def run(conn, args):
+        team.sub_update(conn, args.id, status, getattr(args, "result", None))
+        out(f"{args.id} {status}.")
+    return run
+
+
+def cmd_team_subs(conn, args):
+    team.ensure(conn)
+    sql = "SELECT * FROM sub_agents" + (" WHERE parent = ?" if args.parent else "") + " ORDER BY id DESC LIMIT ?"
+    for r in conn.execute(sql, ([args.parent] if args.parent else []) + [args.limit]):
+        out(f"S{r['id']} {r['ts'][:16]} {r['status']:7s} {r['parent']} -> {r['child']}: {r['job'][:80]}"
+            + (f"\n    result: {r['result']}" if r["result"] else ""))
+
+
+def cmd_team_propose(conn, args):
+    hid, tier, reasons = team.propose(conn, args.proposer, args.name, role=args.role, body=read_body(args),
+                                      tools=_agents_arg(args.tools), model=args.model,
+                                      skill_list=_agents_arg(args.skills), team=args.team, cost=args.cost,
+                                      why=args.why)
+    if tier == "owner":
+        aid = team.hire_get(conn, hid)["approval_id"]
+        out(f"H{hid} needs the owner first ({'; '.join(reasons)}): approval A{aid} requested.")
+        push_approval(conn, aid)
+    else:
+        out(f"H{hid} drafted: within the team's role and tools, free. JARVIS reviews it with `team approve H{hid}`.")
+
+
+def cmd_team_review(conn, args):
+    team.ensure(conn)
+    rows = conn.execute("SELECT * FROM hires WHERE status = 'proposed' ORDER BY id").fetchall()
+    if not rows:
+        out("No agent proposals waiting.")
+    for r in rows:
+        who = "JARVIS can approve" if r["tier"] == "jarvis" else f"owner first (A{r['approval_id']}): {r['tier_reasons']}"
+        out(f"H{r['id']} {r['name']} [{r['team']}, {r['model']}] by {r['proposer']}: {r['role']}")
+        out(f"    tools: {r['tools']}; skills: {r['skills']}; cost: {r['cost']}; {who}")
+        out(f"    draft: {r['draft']}; why: {r['why'] or '-'}")
+
+
+def cmd_team_approve(conn, args):
+    out(team.approve(conn, args.id, by=args.by, note=args.note or ""))
+
+
+def cmd_team_reject(conn, args):
+    out(team.reject(conn, args.id, by=args.by, note=args.note or ""))
+
+
+def cmd_team_remove(conn, args):
+    out(team.remove(conn, args.name, by=args.by, why=args.why))
+
+
+def cmd_team_board(conn, args):
+    out(json.dumps(team.board(conn), default=str, indent=1))
 
 
 def cmd_backup(conn, args):
@@ -1184,6 +1273,71 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-n", "--limit", type=int, default=10)
     s.set_defaults(fn=cmd_skills_mine)
 
+    tm = sub.add_parser("team", help="sub-agents for hard jobs, and hiring new permanent agents (D36)").add_subparsers(
+        dest="sub", required=True)
+    s = tm.add_parser("delegate", help="hand part of a hard job to a fresh agent run (no permission needed)")
+    s.add_argument("parent", help="the lead agent asking for help")
+    s.add_argument("job")
+    s.add_argument("--child", help="agent type for the sub-agent (default: same as the parent)")
+    s.add_argument("--task", help="T<n> it belongs to")
+    s.set_defaults(fn=cmd_team_delegate)
+    s = tm.add_parser("next", help="queued sub-agent jobs for JARVIS or the scheduler to run")
+    s.add_argument("-n", "--limit", type=int)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_team_next)
+    s = tm.add_parser("start")
+    s.add_argument("id", help="S<n>")
+    s.set_defaults(fn=cmd_team_sub("running"))
+    for name in ("done", "fail"):
+        s = tm.add_parser(name)
+        s.add_argument("id", help="S<n>")
+        s.add_argument("--result", required=True)
+        s.set_defaults(fn=cmd_team_sub("done" if name == "done" else "failed"))
+    s = tm.add_parser("subs", help="sub-agent log: parent, child, job, result")
+    s.add_argument("--parent")
+    s.add_argument("-n", "--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_team_subs)
+    s = tm.add_parser("propose", help="draft a new permanent agent for a recurring job in your role")
+    s.add_argument("proposer")
+    s.add_argument("name", help="lower-case-with-dashes")
+    s.add_argument("--role", required=True, help="one-line description: what it does and when to use it")
+    s.add_argument("--tools", required=True, help="comma separated, e.g. Bash,Read,Write,Grep")
+    s.add_argument("--body", help="its instructions (or - for stdin)")
+    s.add_argument("--body-file")
+    s.add_argument("--model", default="sonnet", choices=team.MODELS)
+    s.add_argument("--skills", help="comma separated skill names")
+    s.add_argument("--team", choices=tuple(team.TEAMS), help="default: the proposer's team")
+    s.add_argument("--cost", default="free")
+    s.add_argument("--why", help="the recurring job it takes on")
+    s.set_defaults(fn=cmd_team_propose)
+    s = tm.add_parser("review", help="agent proposals waiting")
+    s.set_defaults(fn=cmd_team_review)
+    for name, fn in (("approve", cmd_team_approve), ("reject", cmd_team_reject)):
+        s = tm.add_parser(name)
+        s.add_argument("id", help="H<n>")
+        s.add_argument("--by", required=True, choices=skills.REVIEWERS)
+        s.add_argument("--note")
+        s.set_defaults(fn=fn)
+    s = tm.add_parser("remove", help="undo a hire: archive the agent file into the brain")
+    s.add_argument("name")
+    s.add_argument("--by", required=True, choices=skills.REVIEWERS)
+    s.add_argument("--why", required=True)
+    s.set_defaults(fn=cmd_team_remove)
+    s = tm.add_parser("board", help="JSON for the dashboard: teams, sub-agents, hires, pace")
+    s.set_defaults(fn=cmd_team_board)
+
+    s = sub.add_parser("pace", help="pace background agent work against the weekly Claude plan limit")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_pace)
+    pc = s.add_subparsers(dest="sub")
+    r = pc.add_parser("record", help="save a usage reading (from get_usage in a Claude session)")
+    r.add_argument("--weekly", type=float, required=True, help="weekly all-models percent used")
+    r.add_argument("--resets", required=True, help="when the weekly window resets (ISO time)")
+    r.add_argument("--five-hour", type=float, help="5-hour window percent used")
+    r.add_argument("--five-hour-resets", help="when the 5-hour window resets (ISO time)")
+    r.add_argument("--plan", help="plan name as shown (Pro, Max)")
+    r.set_defaults(fn=cmd_pace_record)
+
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")
     s.set_defaults(fn=cmd_backup)
@@ -1204,7 +1358,7 @@ def main(argv=None) -> int:
     try:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
-            telegram.TelegramError, dicloak.DICloakError, jobs.JobError, skills.SkillError) as exc:
+            telegram.TelegramError, dicloak.DICloakError, jobs.JobError, skills.SkillError, team.TeamError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

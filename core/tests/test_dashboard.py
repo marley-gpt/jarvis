@@ -109,6 +109,8 @@ class DashboardTest(BrainTest):
         one = json.loads(self.request("GET", "/api/skills?agent=shopify", token=False)[1])
         self.assertEqual([a["name"] for a in one["agents"]], ["shopify"])
         self.assertEqual(self.request("GET", "/api/skills?agent=nobody", token=False)[0], 404)
+        crew = json.loads(self.request("GET", "/api/team", token=False)[1])
+        self.assertEqual(set(crew), {"generated", "teams", "sub_agents", "hires", "pace"})
 
     def test_approval_from_dashboard(self):
         aid = records.approval_request(self.conn, "spend", "Test budget A$100")
