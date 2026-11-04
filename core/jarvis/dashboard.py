@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
+from . import activity, brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -657,6 +657,8 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 data["wake"] = {**wake.info(), "enabled": wake.enabled()}
                 data["telegram"] = phone.info()
                 return self._json(200, data)
+            if route == "/api/activity":
+                return self._activity(parse_qs(query))
             if self.path == "/api/events":
                 return self._events()
             self._json(404, {"error": "not found"})
@@ -673,6 +675,21 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             keep = ("id", "title", "category", "product", "provenance", "status", "confidence", "source",
                     "source_ref", "updated", "snippet")
             return self._json(200, [{k: r[k] for k in keep if k in r.keys()} for r in rows])
+
+        def _activity(self, q: dict):
+            # Recent agent events (newest first) and each agent's current state, for the HQ visuals.
+            try:
+                limit = max(1, min(int((q.get("n") or ["50"])[0]), 500))
+                since = int((q.get("since") or ["0"])[0])
+            except ValueError:
+                return self._json(400, {"error": "n and since must be numbers"})
+            conn = db.connect()
+            try:
+                data = {"events": activity.recent(conn, limit, agent=(q.get("agent") or [None])[0], since_id=since),
+                        "agents": activity.current(conn)}
+            finally:
+                conn.close()
+            return self._json(200, data)
 
         def _events(self):
             self.send_response(200)
