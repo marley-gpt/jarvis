@@ -42,3 +42,4 @@ All pages share `jarvis.js` (`window.J`): the live connection (`/api/events`), `
 - Real data only. If something isn't known or isn't built, say so on the page. Demo content must be labelled as demo where it shows. No control that does nothing.
 - Keep the task board one tap away and readable on a phone. The 3D view must never hide the status.
 - Run `python -m unittest discover -s core/tests` (tests in `core/tests/test_hq.py` and `test_dashboard.py`), then check the page in a browser at desktop and phone width with no console errors.
+- Before a merge, run `python core/tests/e2e_hq.py`: the whole app against a copy of the brain with the real Claude Code and connectors (chat, task assign/start, approve/reject, models, metrics, activity log, skills, every connector, voice, job runner, Telegram status, the earlier pages unchanged). It never touches the live brain; `--skip-chat` skips the steps that spend Claude usage.
