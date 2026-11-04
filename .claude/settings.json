@@ -54,7 +54,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Glob|Grep|WebFetch|WebSearch|Skill|mcp__.*",
+        "matcher": "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Glob|Grep|WebFetch|WebSearch|Skill|mcp__.*",
         "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" post_tool", "timeout": 10 }]
       }
     ],

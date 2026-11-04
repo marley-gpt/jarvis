@@ -518,7 +518,8 @@ def cmd_job_finish(ok):
 
 def cmd_event_add(conn, args):
     eid = activity.add(conn, args.agent, args.action, status=args.status, task=args.task, product=args.product,
-                       tool=args.tool, file=args.file, summary=args.summary)
+                       tool=args.tool, file=args.file, summary=args.summary,
+                       with_agent=args.with_agent)
     out(f"E{eid} logged")
 
 
@@ -528,7 +529,8 @@ def cmd_event_list(conn, args):
         out("No activity yet.")
     for r in reversed(rows):
         where = " ".join(x for x in (f"T{r['task_id']}" if r["task_id"] else "", r["product"] or "",
-                                     r["tool"] or "", r["file"] or "") if x)
+                                     r["tool"] or "", r["file"] or "",
+                                     f"with {r['with_agent']}" if r["with_agent"] else "") if x)
         out(f"E{r['id']} {r['ts']} {r['agent']} [{r['status']}] {r['action']}" + (f" ({where})" if where else "")
             + (f" - {r['summary']}" if r["summary"] else ""))
 
@@ -947,6 +949,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-p", "--product")
     s.add_argument("--tool")
     s.add_argument("--file")
+    s.add_argument("--with", dest="with_agent", help="the other agent, for collaborating")
     s.add_argument("--summary")
     s.set_defaults(fn=cmd_event_add)
     s = ev.add_parser("list")

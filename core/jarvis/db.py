@@ -171,13 +171,16 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE TABLE IF NOT EXISTS agent_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'agent',
     agent TEXT NOT NULL,
+    department TEXT,
     task_id INTEGER,
     product TEXT,
     action TEXT NOT NULL,
     tool TEXT,
     file TEXT,
     status TEXT NOT NULL,
+    with_agent TEXT,
     summary TEXT,
     session_id TEXT
 );

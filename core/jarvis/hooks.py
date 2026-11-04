@@ -195,8 +195,17 @@ def record_activity(conn, kind: str, event: dict) -> None:
                          session_id=session, summary=event.get("agent_id"))
         else:
             tool = event.get("tool_name") or "?"
-            file, note = activity.tool_target(event.get("tool_input"))
-            activity.add(conn, agent, f"used {tool}", tool=tool, file=file, summary=note, session_id=session)
+            data = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+            response = event.get("tool_response")
+            failed = isinstance(response, dict) and bool(response.get("is_error") or response.get("error"))
+            if tool in ("Agent", "Task") and data.get("subagent_type"):  # handing work to another agent
+                activity.add(conn, agent, f"working with {data['subagent_type']}", status="collaborating",
+                             tool=tool, with_agent=data["subagent_type"], summary=data.get("description"),
+                             session_id=session)
+                return
+            file, note = activity.tool_target(data)
+            activity.add(conn, agent, f"{tool} failed" if failed else f"used {tool}", tool=tool, file=file,
+                         summary=note, session_id=session, status="error" if failed else "working")
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"jarvis: activity log skipped: {exc}\n")
 

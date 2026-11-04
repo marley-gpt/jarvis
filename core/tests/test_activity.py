@@ -65,6 +65,26 @@ class ActivityTest(BrainTest):
                           ("jarvis", "working", "Read"), ("market-research", "done", None)])
         self.assertEqual(rows[1]["file"], "brain/work/x/T2.md")
 
+    def test_hooks_record_collaboration_and_errors(self):
+        self.run_hook("post_tool", {"tool_name": "Agent", "session_id": "s1",
+                                    "tool_input": {"subagent_type": "creative-director", "description": "briefs"}})
+        self.run_hook("post_tool", {"tool_name": "Bash", "agent_type": "shopify", "session_id": "s1",
+                                    "tool_input": {"command": "x"}, "tool_response": {"is_error": True}})
+        collab, err = list(reversed(activity.recent(self.conn)))
+        self.assertEqual((collab["agent"], collab["status"], collab["with_agent"], collab["department"]),
+                         ("jarvis", "collaborating", "creative-director", "executive"))
+        self.assertEqual((err["status"], err["department"]), ("error", "store"))
+
+    def test_task_records_feed_the_log(self):
+        from jarvis import records
+        tid = records.task_add(self.conn, "Write 15 statics", agent="creative-director")
+        records.task_update(self.conn, tid, status="in_progress")
+        records.task_update(self.conn, tid, status="done", summary="ok")
+        rows = list(reversed(activity.recent(self.conn)))
+        self.assertEqual([r["status"] for r in rows], ["assigned", "working", "done"])
+        self.assertTrue(all(r["task_id"] == tid and r["department"] == "creative" for r in rows))
+        self.assertEqual(activity.current(self.conn)["creative-director"]["state"], "idle")
+
     def test_hook_survives_bad_payload(self):
         proc = self.run_hook("post_tool", {"tool_name": "Bash", "tool_input": "not a dict", "agent_type": 5})
         self.assertEqual(proc.returncode, 0)
