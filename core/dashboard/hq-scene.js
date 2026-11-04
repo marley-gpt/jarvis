@@ -133,7 +133,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     ivory: std({ color: 0xeae5da, roughness: 0.55 }),
     stone: std({ color: 0xd8cebd, roughness: 0.85 }),
     gold: std({ color: 0xc6a46a, metalness: 1, roughness: 0.3, envMap: envTex, envMapIntensity: 1.1 }),
-    glass: std({ color: 0x9fbccc, metalness: 0.3, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 0.9 }),
+    glass: std({ color: 0x9fbccc, metalness: 0.35, roughness: 0.04, transparent: true, opacity: 0.34, depthWrite: false, side: THREE.DoubleSide, envMap: envTex, envMapIntensity: 1.3 }),
     tint: std({ color: 0x4f7186, metalness: 0.7, roughness: 0.1, envMap: envTex, envMapIntensity: 0.9 }),
     oak: std({ color: 0xc9a77c, roughness: 0.55 }),
     walnut: std({ color: 0x5b3a25, roughness: 0.42 }),
@@ -147,11 +147,12 @@ function buildWorld(THREE, addons, renderer, opts) {
     vcol: std({ vertexColors: true, roughness: 0.6 }),
     paint: std({ vertexColors: true, roughness: 0.25, metalness: 0.45, envMap: envTex, envMapIntensity: 1.2 }),
     warmLight: std({ color: 0xfff1d8, emissive: 0xffc98a, emissiveIntensity: 2.6 }),
+    screenGlow: std({ color: 0xe6eef8, emissive: 0xcfe1ff, emissiveIntensity: 0.9, roughness: 0.3 }),
     interior: std({ color: 0xf2e2c8, emissive: 0xe8b878, emissiveIntensity: 0.55, roughness: 0.8 }),
     lampGlass: std({ color: 0xfff6e6, emissive: 0xffd8a0, emissiveIntensity: 2 }),
   };
 
-  glowMats.push([M.warmLight, 1.1], [M.interior, 0.7], [M.lampGlass, 1.3]);
+  glowMats.push([M.warmLight, 1.1], [M.interior, 0.7], [M.lampGlass, 1.3], [M.screenGlow, 0.9]);
 
   // Merge simple parts into one geometry with vertex colours (cars, yachts, palms are drawn as one batch each).
   function merge(parts) {
@@ -169,6 +170,23 @@ function buildWorld(THREE, addons, renderer, opts) {
     out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     return out;
   }
+  // Like merge(), but keeps each part's UVs (textured facades).
+  function mergeUV(parts) {
+    const pos = [], nor = [], col = [], uvs = [];
+    for (const { geo, color, m } of parts) {
+      const g = geo.index ? geo.toNonIndexed() : geo.clone();
+      if (m) g.applyMatrix4(m);
+      g.computeVertexNormals();
+      const c = C(color), pp = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
+      for (let i = 0; i < pp.count; i++) { pos.push(pp.getX(i), pp.getY(i), pp.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); col.push(c.r, c.g, c.b); uvs.push(uv.getX(i), uv.getY(i)); }
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    out.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    return out;
+  }
   const at = (x, y, z, ry = 0, sx = 1, sy = 1, sz = 1) => new THREE.Matrix4().compose(new V3(x, y, z),
     new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), new V3(sx, sy, sz));
   const box = (w, h, d, mat, x = 0, y = 0, z = 0, parent = scene3, shadow = true) => {
@@ -176,6 +194,57 @@ function buildWorld(THREE, addons, renderer, opts) {
     if (shadow && !simple) { m.castShadow = true; m.receiveShadow = true; }
     parent.add(m); return m;
   };
+
+  // Scenery props (furniture, planting, visitors) placed in a pavilion's frame or the estate's, drawn as one
+  // instanced mesh per kind once everything is built. None of them is an agent or an agent's desk.
+  const PROPS = {};
+  const propKind = (kind, geo, mat) => { PROPS[kind] = { geo, mat, list: [] }; };
+  const prop = (kind, parent, x, y, z, ry = 0, sc = 1, color = null) => PROPS[kind].list.push([parent, x, y, z, ry, sc, color]);
+  function buildProps() {
+    const m = new THREE.Matrix4();
+    for (const k of Object.values(PROPS)) {
+      if (!k.list.length || k.mesh) continue;
+      const im = new THREE.InstancedMesh(k.geo, k.mat, k.list.length);
+      k.list.forEach(([parent, x, y, z, ry, sc, color], i) => {
+        parent.updateWorldMatrix(true, false);
+        m.copy(at(x, y, z, ry, sc, sc, sc)).premultiply(parent.matrixWorld); im.setMatrixAt(i, m);
+        if (color != null) im.setColorAt(i, C(color));
+      });
+      im.castShadow = !simple && k.shadow !== false; k.mesh = im; scene3.add(im);
+    }
+  }
+  propKind("workstation", merge([
+    { geo: new THREE.BoxGeometry(2.2, 0.08, 1.0), color: 0x5b3a25, m: at(0, 0.76, 0) },
+    { geo: new THREE.BoxGeometry(0.06, 0.72, 0.9), color: 0xc6a46a, m: at(-1.0, 0.38, 0) },
+    { geo: new THREE.BoxGeometry(0.06, 0.72, 0.9), color: 0xc6a46a, m: at(1.0, 0.38, 0) },
+    { geo: new THREE.BoxGeometry(1.3, 0.8, 0.05), color: 0x1b2533, m: at(0, 1.3, -0.3) },
+    { geo: new THREE.BoxGeometry(0.7, 0.12, 0.65), color: 0xf1ede6, m: at(0, 0.5, 0.85) },
+    { geo: new THREE.BoxGeometry(0.7, 0.75, 0.1), color: 0xf1ede6, m: at(0, 0.95, 1.2) },
+    { geo: new THREE.CylinderGeometry(0.04, 0.25, 0.45, 10), color: 0xc6a46a, m: at(0, 0.22, 0.85) },
+  ]), M.vcol);
+  propKind("screen", new THREE.PlaneGeometry(1.22, 0.72).translate(0, 1.3, -0.27), M.screenGlow);
+  PROPS.screen.shadow = false;
+  propKind("flower", new THREE.IcosahedronGeometry(0.5, 0), std({ roughness: 0.9, flatShading: true }));
+  propKind("cypress", new THREE.ConeGeometry(0.9, 7.5, 7).translate(0, 3.75, 0), std({ color: 0x2f4d2a, roughness: 0.95, flatShading: true }));
+  propKind("oliveTrunk", new THREE.CylinderGeometry(0.16, 0.26, 2.6, 7).translate(0, 1.3, 0), std({ color: 0x6b5340, roughness: 0.9 }));
+  propKind("oliveCanopy", new THREE.IcosahedronGeometry(2.1, 1).translate(0, 3.6, 0), std({ color: 0x7c9a66, roughness: 0.9, flatShading: true }));
+  propKind("bench", merge([
+    { geo: new THREE.BoxGeometry(1.9, 0.08, 0.55), color: 0x5b3a25, m: at(0, 0.48, 0) },
+    { geo: new THREE.BoxGeometry(1.9, 0.4, 0.06), color: 0x5b3a25, m: at(0, 0.75, -0.26) },
+    { geo: new THREE.BoxGeometry(0.06, 0.48, 0.5), color: 0xc6a46a, m: at(-0.85, 0.24, 0) },
+    { geo: new THREE.BoxGeometry(0.06, 0.48, 0.5), color: 0xc6a46a, m: at(0.85, 0.24, 0) },
+  ]), M.vcol);
+  propKind("bollard", new THREE.CylinderGeometry(0.09, 0.11, 0.9, 8).translate(0, 0.45, 0), M.frame);
+  propKind("bollardLamp", new THREE.CylinderGeometry(0.11, 0.11, 0.16, 8).translate(0, 0.98, 0), M.lampGlass);
+  PROPS.bollardLamp.shadow = false;
+  propKind("visitorBody", new THREE.CapsuleGeometry(0.27, 0.85, 3, 8).translate(0, 0.95, 0), std({ roughness: 0.7 }));
+  propKind("visitorHead", new THREE.SphereGeometry(0.2, 10, 8).translate(0, 1.72, 0), std({ color: 0xd9a07a, roughness: 0.7 }));
+  const SHIRTS = [0xffffff, 0x1f2a44, 0xe9d8c0, 0xd4202f, 0x2f3338, 0xf1c40f, 0x3a7bd5, 0xf2f2f2];
+  const visitor = (parent, x, y, z, ry) => { prop("visitorBody", parent, x, y, z, ry, 1, SHIRTS[(rand() * SHIRTS.length) | 0]); prop("visitorHead", parent, x, y, z, ry); };
+  const FLOWERS = [0xe24b6a, 0xf7f7f7, 0xd94c9c, 0xf29e3b, 0x7b4fbf, 0xffffff, 0xff6b6b];
+  const flower = (parent, x, y, z) => prop("flower", parent, x, y, z, rand() * 6.3, 0.55 + rand() * 0.55, FLOWERS[(rand() * FLOWERS.length) | 0]);
+  const workstation = (parent, x, y, z, ry, sc = 1) => { prop("workstation", parent, x, y, z, ry, sc); prop("screen", parent, x, y, z, ry, sc); };
+  const olive = (parent, x, y, z, sc = 1) => { prop("oliveTrunk", parent, x, y, z, 0, sc); prop("oliveCanopy", parent, x, y, z, rand() * 6.3, sc); };
 
   // ---------------------------------------------------------------- light and sky, by the time of day
   const hemi = new THREE.HemisphereLight(0xcfe2f4, 0xcdb08a, 1.25);
@@ -288,16 +357,38 @@ function buildWorld(THREE, addons, renderer, opts) {
       const w = 8 + rand() * 12, d = 8 + rand() * 12, h = 8 + rand() * (10 + 50 * shore * shore);
       blocks.push([x, y, z, w, h, d, tones[(rand() * tones.length) | 0], rand() * 0.6]);
     }
-    const cube = new THREE.BoxGeometry(1, 1, 1);
-    const city = new THREE.InstancedMesh(cube, std({ roughness: 0.75 }), blocks.length);
-    const glazingMat = std({ color: 0x8fb1c7, roughness: 0.15, metalness: 0.5, emissive: 0xffcf8a, emissiveIntensity: 0 });
-    glowMats.push([glazingMat, 0.3]);   // city windows light up in the evening
-    const glazing = new THREE.InstancedMesh(cube, glazingMat, blocks.length);
-    blocks.forEach(([x, y, z, w, h, d, c, ry], i) => {
-      city.setMatrixAt(i, at(x, y + h / 2 - 1, z, ry, w, h, d)); city.setColorAt(i, C(c));
-      glazing.setMatrixAt(i, at(x, y + h / 2, z, ry, w * 1.01, h * 0.8, d * 0.6));  // window bands
+    // Facades: a window grid (8 windows per tile) with a random share lit, repeated across each building by its size.
+    const facadeTex = canvasTex(512, 512, (g, w, h) => {
+      g.fillStyle = "#ece6da"; g.fillRect(0, 0, w, h);
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+        const x = c * 64 + 10, y = r * 64 + 8;
+        const gr = g.createLinearGradient(0, y, 0, y + 46); gr.addColorStop(0, "#9db6c9"); gr.addColorStop(1, "#5e7a92");
+        g.fillStyle = gr; g.fillRect(x, y, 44, 46);
+        g.fillStyle = "rgba(255,255,255,.18)"; g.fillRect(x, y, 44, 6);
+      }
+      g.fillStyle = "#ece6da"; g.fillRect(0, h - 10, 10, 10);   // a plain texel for roofs
+    }, 1);
+    seed = 77;
+    const litTex = canvasTex(512, 512, (g, w, h) => {
+      g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (rand() < 0.42) { g.fillStyle = rand() < 0.5 ? "#ffd58e" : "#ffe9c0"; g.fillRect(c * 64 + 10, r * 64 + 8, 44, 46); }
+    }, 1);
+    const facadeMat = std({ map: facadeTex, vertexColors: true, roughness: 0.55, metalness: 0.15, emissive: 0xffffff, emissiveMap: litTex, emissiveIntensity: 0 });
+    glowMats.push([facadeMat, 0.9]);
+    const cityParts = [], roofParts = [];
+    blocks.forEach(([x, y, z, w, h, d, c, ry]) => {
+      const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, cell = 3.2, ox = rand() * 4, oy = rand() * 4;
+      for (let i = 0; i < uv.count; i++) {
+        const face = Math.floor(i / 4);   // px nx py ny pz nz
+        if (face === 2 || face === 3) uv.setXY(i, 0.008, 0.008);
+        else { const across = face < 2 ? d : w; uv.setXY(i, uv.getX(i) * across / cell + ox, uv.getY(i) * h / cell + oy); }
+      }
+      cityParts.push({ geo: g, color: c, m: at(x, y + h / 2 - 1, z, ry) });
+      // Roofs: a parapet and plant room, or a terracotta hip on the smaller villas.
+      if (h < 16) roofParts.push({ geo: new THREE.ConeGeometry(Math.max(w, d) * 0.72, 3, 4).rotateY(Math.PI / 4), color: 0xb8613f, m: at(x, y + h + 0.4, z, ry, 1, 1, d / Math.max(w, d)) });
+      else { roofParts.push({ geo: new THREE.BoxGeometry(w + 0.4, 0.8, d + 0.4), color: 0xf3f0ea, m: at(x, y + h - 0.6, z, ry) }); roofParts.push({ geo: new THREE.BoxGeometry(w * 0.35, 2, d * 0.35), color: 0xe4ded2, m: at(x, y + h, z, ry) }); }
     });
-    scene3.add(city, glazing);
+    scene3.add(new THREE.Mesh(mergeUV(cityParts), facadeMat), new THREE.Mesh(merge(roofParts), M.vcol));
 
     // The waterfront circuit: a closed street loop on the shelf, kerbs, grandstand and banner.
     const ctrl = [[-12, -160], [-80, -157], [-150, -162], [-200, -180], [-196, -208], [-150, -224], [-80, -222], [-30, -212], [-8, -188]];
@@ -332,6 +423,15 @@ function buildWorld(THREE, addons, renderer, opts) {
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(60, 7.5), std({ map: banner, roughness: 0.6 }));
     sign.position.set(0, 19, 4); stand.add(sign);
     scene3.add(stand);
+    // Armco barriers both sides of the track, and bunting along the fence.
+    const armco = [], flags = [], flagCols = [0xd4202f, 0xffffff, 0x1d3557, 0xf1c40f];
+    for (let i = 0; i < N; i += 6) {
+      const p = pts[i], t2 = pts[(i + 3) % N].clone().sub(p).normalize(), ang = Math.atan2(-t2.z, t2.x);
+      for (const off of [-7, 7]) armco.push({ geo: new THREE.BoxGeometry(5.5, 0.9, 0.25), color: 0xbfc4ca, m: at(p.x - t2.z * off, SEA + 1.4, p.z + t2.x * off, ang) });
+      flags.push({ geo: new THREE.BoxGeometry(1.2, 0.8, 0.04), color: flagCols[(i / 6) % 4], m: at(p.x + t2.z * 7.6, SEA + 3.2, p.z - t2.x * 7.6, ang) });
+      flags.push({ geo: new THREE.BoxGeometry(0.06, 2.6, 0.06), color: 0xdddddd, m: at(p.x + t2.z * 7.6, SEA + 2.2, p.z - t2.x * 7.6, ang) });
+    }
+    scene3.add(new THREE.Mesh(merge(armco), std({ vertexColors: true, roughness: 0.4, metalness: 0.6 })), new THREE.Mesh(merge(flags), std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })));
     // Spectators along the circuit fence and the marina promenade (scenery, not agents).
     if (!simple) {
       const people = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.32, 0.9, 3, 6), std({ roughness: 0.7 }), 420);
@@ -388,17 +488,19 @@ function buildWorld(THREE, addons, renderer, opts) {
     void band; void deck2;
     const yachts = [];
     seed = 23;
-    const jetties = [];
-    for (const x of [30, 62, 94, 126]) {
-      jetties.push({ geo: new THREE.BoxGeometry(3, 1, 70), color: 0xefe9de, m: at(x, SEA + 0.2, -110) });
-      for (let z = -82; z > -142; z -= 6) for (const side of [-1, 1]) if (rand() > 0.15) {
-        const L = 11 + rand() * 9; yachts.push([x + side * (L / 2 + 2.2), z, side > 0 ? 0 : Math.PI, L, 0xffffff]);
+    const jetties = [{ geo: new THREE.BoxGeometry(300, 1.4, 7), color: 0xefe9de, m: at(40, SEA + 0.4, -72) }];   // the promenade
+    for (const x of [8, 36, 64, 92, 120, 148]) {
+      jetties.push({ geo: new THREE.BoxGeometry(3, 1, 84), color: 0xefe9de, m: at(x, SEA + 0.2, -118) });
+      for (let z = -82; z > -156; z -= 6) for (const side of [-1, 1]) if (rand() > 0.12) {
+        const L = 10 + rand() * 9; yachts.push([x + side * (L / 2 + 2.2), z, side > 0 ? 0 : Math.PI, L, [0xffffff, 0xffffff, 0xf4f4f4, 0x1f2c44][(rand() * 4) | 0]]);
       }
+      for (let z = -84; z > -156; z -= 24) { prop("bollard", scene3, x, SEA + 0.7, z, 0, 1.6); prop("bollardLamp", scene3, x, SEA + 0.7, z, 0, 1.6); }
     }
     scene3.add(new THREE.Mesh(merge(jetties), M.vcol));
-    [[-40, -110, 0.3, 46, 0x1f2c44], [170, -96, 1.9, 52, 0xffffff], [230, -150, 0.8, 64, 0xffffff], [-120, -268, 2.4, 44, 0xffffff],
-      [90, -200, 0.1, 70, 0xffffff], [300, -230, 1.2, 48, 0x8c96a3], [10, -250, 2.9, 40, 0xffffff], [200, -270, 0.5, 58, 0x1b2a55]]
-      .forEach((y) => yachts.push(y));
+    // Superyachts at anchor across the bay.
+    [[70, -205, 0.3, 46, 0x1f2c44], [200, -186, 1.9, 54, 0xffffff], [260, -240, 0.8, 66, 0xffffff], [-150, -290, 2.4, 44, 0xffffff],
+      [120, -262, 0.1, 74, 0xffffff], [330, -310, 1.2, 50, 0x8c96a3], [20, -312, 2.9, 42, 0xffffff], [220, -330, 0.5, 60, 0x1b2a55],
+      [-240, -272, 1.0, 40, 0xffffff], [410, -230, 2.2, 48, 0xffffff], [-40, -360, 0.6, 80, 0xffffff], [340, -150, 2.7, 44, 0xffffff]].forEach((y) => yachts.push(y));
     const fleet = new THREE.InstancedMesh(yachtGeo, M.paint, yachts.length);
     yachts.forEach(([x, z, ry, L, c], i) => { fleet.setMatrixAt(i, at(x, SEA - 0.1, z, ry, L, L * 0.9, L)); fleet.setColorAt(i, C(c)); });
     scene3.add(fleet);
@@ -412,7 +514,13 @@ function buildWorld(THREE, addons, renderer, opts) {
   for (const x of [-100, 100]) { box(0.5, 0.25, 150, M.gold, x, 1.3, 10); box(0.3, 1.2, 150, M.glass, x, 0.6, 10, scene3, false); }
 
   const lawn = (x, z, w, d) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), M.lawn); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.04, z); m.receiveShadow = !simple; scene3.add(m); return m; };
-  [[-72, 72, 44, 20], [76, 70, 40, 20], [-74, -48, 40, 24], [74, -48, 40, 24], [0, 72, 40, 16], [-84, 14, 22, 40], [84, 14, 22, 40]].forEach((l) => lawn(...l));
+  [[0, -59, 196, 10], [-92, 10, 12, 108], [92, 10, 12, 108], [0, 80, 196, 8], [-72, -48, 36, 8], [72, -48, 36, 8]].forEach((l) => {
+    lawn(...l);
+    const [x, z, w, d] = l;
+    const n = Math.max(2, Math.round((w * d) / 420));
+    for (let k = 0; k < n; k++) olive(scene3, x + (rand() - 0.5) * (w - 6), 0, z + (rand() - 0.5) * (d - 6), 0.9 + rand() * 0.4);
+    for (let k = 0; k < n * 4; k++) flower(scene3, x + (rand() - 0.5) * (w - 3), 0.3, z + (rand() - 0.5) * (d - 3));
+  });
 
   // Fountain plaza with the holographic globe: the shared brain every team reads from and writes to.
   const PLAZA = new V3(0, 0, 8);
@@ -424,6 +532,18 @@ function buildWorld(THREE, addons, renderer, opts) {
     const water = new THREE.Mesh(new THREE.CircleGeometry(9, 64), std({ color: 0x3fb7cf, roughness: 0.08, metalness: 0.2, normalMap: poolRipple, normalScale: new THREE.Vector2(0.4, 0.4), envMap: envTex, envMapIntensity: 0.8 }));
     water.rotation.x = -Math.PI / 2; water.position.set(PLAZA.x, 0.9, PLAZA.z); scene3.add(water);
     const ped = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.4, 3.2, 32), M.marble); ped.position.set(PLAZA.x, 2, PLAZA.z); ped.castShadow = !simple; scene3.add(ped);
+    // Fountain jets leaning in towards the globe, with spray.
+    const jetMat = new THREE.MeshBasicMaterial({ color: 0xe8fbff, transparent: true, opacity: 0.5, depthWrite: false });
+    world.jets = [];
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.2, 5.5, 8, 1, true).translate(0, 2.75, 0), jetMat);
+      jet.position.set(PLAZA.x + Math.cos(a) * 6.8, 0.9, PLAZA.z + Math.sin(a) * 6.8);
+      jet.quaternion.setFromAxisAngle(new V3(-Math.sin(a), 0, Math.cos(a)), 0.45);
+      scene3.add(jet); world.jets.push(jet);
+      const spray = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex("255,255,255"), transparent: true, opacity: 0.3, depthWrite: false }));
+      spray.scale.setScalar(3); spray.position.set(PLAZA.x + Math.cos(a) * 4.6, 5.4, PLAZA.z + Math.sin(a) * 4.6); scene3.add(spray);
+    }
     const pedRing = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.12, 8, 48), M.gold); pedRing.rotation.x = Math.PI / 2; pedRing.position.set(PLAZA.x, 3.6, PLAZA.z); scene3.add(pedRing);
   }
   const globe = new THREE.Group(); globe.position.set(PLAZA.x, 9, PLAZA.z); scene3.add(globe);
@@ -444,22 +564,34 @@ function buildWorld(THREE, addons, renderer, opts) {
   globe.add(new THREE.PointLight(0x7fd3ff, 60, 40, 2));
 
   // The JARVIS HQ building: podium with grand steps, a glass main block, two wings, the crown sign and the light beam.
-  const HQ = new THREE.Group(); HQ.position.set(0, 0, -38); scene3.add(HQ);
+  const HQ = new THREE.Group(); HQ.position.set(0, 0, -40); HQ.scale.setScalar(1.15); scene3.add(HQ);
   {
     box(64, 3, 30, M.marble, 0, 1.5, 0, HQ);
     for (let i = 0; i < 6; i++) box(26 - i * 0.6, 0.5, 1.2, M.marble, 0, 0.25 + i * 0.5, 15.6 + (5 - i) * 1.2, HQ);
-    // Main block: three floors of floor-to-ceiling glass between white slabs with gold edges, lit warm inside.
+    // Main block: three floors of floor-to-ceiling glass between white slabs with gold edges. The front 8 m of each
+    // floor is open office (desks, screens, plants) behind the glass, with a terrace and glass rail along the front.
     for (let f = 0; f < 4; f++) {
-      box(36, 0.9, 20, M.marble, 0, 3 + f * 5.2 + 0.45, 0, HQ);
-      box(36.2, 0.18, 0.18, M.gold, 0, 3 + f * 5.2 + 0.95, 10.05, HQ, false);
+      const sy = 3 + f * 5.2, top = sy + 0.9;
+      box(36, 0.9, 20, M.marble, 0, sy + 0.45, 0, HQ);
+      box(36.2, 0.18, 0.18, M.gold, 0, sy + 0.95, 10.05, HQ, false);
       if (f < 3) {
-        box(35, 4.3, 19, M.tint, 0, 3 + f * 5.2 + 3.05, -0.4, HQ);
-        box(34.6, 3.8, 0.2, M.warmLight, 0, 3 + f * 5.2 + 3.05, 9.0, HQ, false);
-        box(35.2, 4.3, 0.12, M.glass, 0, 3 + f * 5.2 + 3.05, 9.3, HQ, false);
-        for (let k = -4; k <= 4; k++) box(0.22, 4.3, 0.3, M.gold, k * 4.3, 3 + f * 5.2 + 3.05, 9.4, HQ, false);
+        box(35, 4.3, 11, M.tint, 0, sy + 3.05, -4.4, HQ);                       // the core
+        box(34.6, 4.1, 0.2, M.interior, 0, sy + 3.05, 1.2, HQ, false);          // lit back wall of the office
+        box(34.6, 0.08, 7.8, M.oak, 0, top + 0.04, 5.2, HQ, false);             // office floor
+        for (let k = -3; k <= 3; k++) workstation(HQ, k * 4.8, top + 0.08, 6.2, Math.PI, 1.15);
+        for (const px of [-16.4, 16.4]) { box(0.8, 0.8, 0.8, M.white, px, top + 0.48, 8, HQ, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, top + 1.5, 8); HQ.add(pl); }
+        box(35.2, 4.3, 0.12, M.glass, 0, sy + 3.05, 9.3, HQ, false);
+        for (let k = -4; k <= 4; k++) box(0.22, 4.3, 0.3, M.gold, k * 4.3, sy + 3.05, 9.4, HQ, false);
+        box(36.2, 0.3, 1.6, M.marble, 0, top - 0.15, 10.8, HQ);                 // terrace
+        box(36.2, 1.0, 0.06, M.glass, 0, top + 0.5, 11.55, HQ, false);           // glass rail
+        box(36.2, 0.08, 0.08, M.gold, 0, top + 1.0, 11.55, HQ, false);
       }
     }
-    // Wings: lower glass blocks; the east wing roof is the helipad.
+    // People on the grand steps and the podium (scenery, not agents).
+    for (let i = 0; i < 9; i++) visitor(HQ, -9 + i * 2.3 + (i % 2) * 0.7, 3, 13.5 + (i % 3) * 1.1, Math.PI + (rand() - 0.5));
+    // Roof garden round the penthouse.
+    for (const [ox, oz] of [[-13, 5], [13, 5], [-13, -6], [13, -6]]) olive(HQ, ox, 19.6, oz, 1.1);
+    for (let k = -3; k <= 3; k++) { flower(HQ, k * 3.5 + 1, 19.9, 8.2); flower(HQ, k * 3.5 - 1, 19.9, 7.6); }
     for (const s of [-1, 1]) {
       box(16, 10, 18, M.tint, s * 25, 8, 1, HQ);
       box(16.6, 0.8, 18.6, M.marble, s * 25, 13.4, 1, HQ);
@@ -631,6 +763,18 @@ function buildWorld(THREE, addons, renderer, opts) {
     const hm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), M.hedge, hedges.length);
     hedges.forEach(([x, z, w, h, d], i) => hm.setMatrixAt(i, at(x, h / 2, z, 0, w, h, d)));
     hm.castShadow = !simple; scene3.add(hm);
+    // Planting round the plaza ring: a bed of flowers outside the lamps, benches facing the globe, cypress pairs at the
+    // corners of the estate, and visitors about the place (scenery, not agents).
+    for (let i = 0; i < (simple ? 70 : 170); i++) { const a = rand() * Math.PI * 2, r = 20.2 + rand() * 1.8; flower(scene3, PLAZA.x + Math.cos(a) * r, 0.32, PLAZA.z + Math.sin(a) * r); }
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.13; prop("bench", scene3, PLAZA.x + Math.cos(a) * 15.2, 0.06, PLAZA.z + Math.sin(a) * 15.2, -a + Math.PI / 2); }
+    for (const [x, z] of [[-97, 84], [-92, 84], [97, 84], [92, 84], [-97, -62], [-92, -62], [97, -62], [92, -62], [-48, 84], [48, 84]]) prop("cypress", scene3, x, 0, z, 0, 0.9 + rand() * 0.3);
+    for (const x of [-80, -60, 60, 80]) olive(scene3, x, 0, 82, 1);
+    if (!simple) {
+      for (let i = 0; i < 26; i++) { const a = rand() * Math.PI * 2, r = 11 + rand() * 7; visitor(scene3, PLAZA.x + Math.cos(a) * r, 0, PLAZA.z + Math.sin(a) * r, rand() * 6.3); }
+      for (let i = 0; i < 8; i++) visitor(scene3, -74 + i * 3.6, 0.3, 44 + (i % 2) * 1.2, Math.PI);
+      for (let i = 0; i < 10; i++) visitor(scene3, -14 + i * 3, 0, 30 + (i % 3), rand() * 6.3);
+      for (let i = 0; i < 6; i++) visitor(scene3, 54 + i * 4.5, 0.1, 55.5, Math.PI);
+    }
   }
 
   // ---------------------------------------------------------------- the agents: people in one consistent low-poly style
@@ -769,9 +913,12 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
 
   // ---------------------------------------------------------------- pavilions: one per team, round the plaza
+  // One pavilion per agent, as the old office had one room per agent, placed so each team's agents sit together.
   const SITES = {
-    research: [-34, -14], ads: [34, -14], money: [-54, 12], creative: [54, 12],
-    operations: [-30, 28], store: [30, 28], learning: [-70, -30], testing: [70, -30],
+    "product-research": [-36, -14], "market-research": [-70, -30], "creative-research": [-70, -2], "mentor-learning": [-70, 26],
+    "operations": [-36, 28], "accountant": [-30, 64],
+    "meta-ads": [36, -14], "meta-ads-auditor": [70, -30], "shopify": [70, -2], "store-qa": [70, 26],
+    "creative-director": [36, 28], "product-testing": [30, 64],
   };
   const PW = 20, PD = 13, PH = 7;
   const pavilions = new Map();
@@ -888,8 +1035,9 @@ function buildWorld(THREE, addons, renderer, opts) {
     // Warm ceiling light, and the wall display with the team's real numbers.
     const light = new THREE.Mesh(new THREE.PlaneGeometry(PW - 3, 0.5), M.warmLight); light.rotation.x = Math.PI / 2; light.position.set(0, PH + 0.2, PD / 2 - 1.4); pav.add(light);
     const wall = screenTexture(768, 256);
-    const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(9, 3), new THREE.MeshBasicMaterial({ map: wall.t, toneMapped: false }));
-    wallMesh.position.set(0, 4.4, -PD / 2 + 0.2); pav.add(wallMesh);
+    const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(13, 4.3), new THREE.MeshBasicMaterial({ map: wall.t, toneMapped: false }));
+    wallMesh.position.set(0, 4.0, -PD / 2 + 0.2); pav.add(wallMesh);
+    box(13.3, 4.6, 0.1, M.frame, 0, 4.0, -PD / 2 + 0.12, pav, false);
     // The team colour on a slim band above the door, and plants on the roof.
     box(4, 0.35, 0.12, std({ color: t.color, roughness: 0.4 }), 0, PH + 0.1, PD / 2 + 0.12, pav, false);
     for (const px of [-PW / 2 + 1, PW / 2 - 1]) { const plant = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), M.leaf); plant.position.set(px, roofY + 1, PD / 2 - 0.2); pav.add(plant); }
@@ -897,6 +1045,19 @@ function buildWorld(THREE, addons, renderer, opts) {
     const n = t.agents.length;
     const offsets = { 1: [0], 2: [-3.4, 3.4], 3: [-6, 0, 6] }[n] || t.agents.map((_, i) => (i - (n - 1) / 2) * 5);
     const desks = t.agents.map((a, i) => desk(t, a.name, pav, offsets[i], -1.6));
+    if (n === 1) for (const wx of [-5.6, 5.6]) workstation(pav, wx, 0.62, -1.6, 0, 1.1);   // the rest of the back row
+    // The rest of the office (furniture, not agents' desks): workstations along the side walls, a meeting table, plants.
+    for (const [wx, wz, wr] of [[8.6, 2.2, -Math.PI / 2], [8.6, 5.0, -Math.PI / 2], [-8.6, 2.4, Math.PI / 2]]) workstation(pav, wx, 0.62, wz, wr, 1.1);
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.08, 24), M.walnut); table.position.set(-6.6, 1.4, 5.6); pav.add(table);
+    box(0.12, 0.75, 0.12, M.gold, -6.6, 1.0, 5.6, pav, false);
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * Math.PI * 2 + 0.4; box(0.55, 0.5, 0.55, M.leather, -6.6 + Math.cos(a) * 1.7, 0.88, 5.6 + Math.sin(a) * 1.7, pav, false); }
+    for (const [px, pz] of [[-9, -5.6], [9, -5.6], [9.2, 6.2], [-9.3, 2.0]]) { box(0.8, 0.8, 0.8, M.white, px, 1.0, pz, pav, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.9, pz); pav.add(pl); }
+    for (const ux of [-3.2, 3.2]) workstation(pav, ux, uy + 0.02, uz + 0.6, 0, 1.05);   // the upper floor
+    // Outside: a flower bed along the front, cypresses at the back corners, and a lit path to the plaza.
+    for (let bx = -PW / 2 - 0.5; bx <= PW / 2 + 0.5; bx += 1.1) if (Math.abs(bx) > 2.6) flower(pav, bx, 0.3, PD / 2 + 2.3);
+    for (const cx of [-(PW / 2) - 1.8, PW / 2 + 1.8]) prop("cypress", pav, cx, 0, -PD / 2 - 1.4, 0, 0.85);
+    box(4.4, 0.05, 10, M.ivory, 0, 0.03, PD / 2 + 7, pav, false);
+    for (const bz of [PD / 2 + 4, PD / 2 + 8, PD / 2 + 12]) for (const bx of [-2.7, 2.7]) { prop("bollard", pav, bx, 0, bz); prop("bollardLamp", pav, bx, 0, bz); }
     const door = local(pav, 0, PD / 2 + 2.5, 0);
     const P = { team: t, pav, desks, wall, door, anchor: pav.localToWorld(new V3(0, PH + 9.5, -1.8)), status: "idle", helpers: [], hires: [] };
     pav.traverse((o) => { if (!o.userData.pick) o.userData.pick = t.id; });
@@ -913,7 +1074,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   function goToDesk(A, P, delay = 0) {
     const d = A.desk; A.seat = d.seat; A.wait = delay; A.away = false;
     if (A.leisure) { A.leisure.taken = false; A.leisure = null; }
-    walk(A, [P.door, local(P.pav, d.x, 1.8), local(P.pav, d.x, 0.9)], sitDown);
+    walk(A, [P.door, local(P.pav, 0, 4.6), local(P.pav, d.x, 1.8), local(P.pav, d.x, 0.9)], sitDown);
   }
 
   // ---------------------------------------------------------------- idle life: leisure round the estate
@@ -931,7 +1092,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const spot = free[hash(A.name) % free.length];
     spot.taken = true; A.leisure = spot; A.away = true;
     const side = Math.sign(spot.pos.x - PLAZA.x) || 1;
-    walk(A, [local(P.pav, A.desk.x, 1.8), P.door, new V3(PLAZA.x + side * 23, 0, spot.pos.z > PLAZA.z ? PLAZA.z + 12 : PLAZA.z - 12), spot.pos], (x) => {
+    walk(A, [local(P.pav, A.desk.x, 1.8), local(P.pav, 0, 4.6), P.door, new V3(PLAZA.x + side * 23, 0, spot.pos.z > PLAZA.z ? PLAZA.z + 12 : PLAZA.z - 12), spot.pos], (x) => {
       x.face = spot.face; x.activity = spot.kind;
       if (spot.sit) { x.seat = { pos: spot.pos, face: spot.face }; x.sitting = true; }
     });
@@ -956,7 +1117,7 @@ function buildWorld(THREE, addons, renderer, opts) {
       const i = P.helpers.filter((h) => h.lead === d && !h.leaving).length;
       const A = actor(character(`${d.name}-sub-${i}-${demo}`, P.team.color, 0.92), P.door, P.pav.rotation.y + Math.PI);
       A.helper = true; A.lead = d; A.demo = demo; A.status = "working";
-      walk(A, [local(P.pav, d.x, 3.4), local(P.pav, d.x + [-1.4, 1.4, 0][i % 3], 2.6)], (x) => { x.face = P.pav.rotation.y + Math.PI; });
+      walk(A, [local(P.pav, 0, 4.6), local(P.pav, d.x, 3.4), local(P.pav, d.x + [-1.4, 1.4, 0][i % 3], 2.6)], (x) => { x.face = P.pav.rotation.y + Math.PI; });
       P.helpers.push(A); mine.push(A);
     }
     mine.slice(Math.max(0, want)).forEach((A) => leave(P, A));
@@ -983,14 +1144,14 @@ function buildWorld(THREE, addons, renderer, opts) {
   let demoTimers = [];
   function demo(on) {
     demoTimers.forEach(clearTimeout); demoTimers = [];
-    const cr = pavilions.get("creative"), rs = pavilions.get("research");
+    const cr = pavilions.get("creative-director"), rs = pavilions.get("market-research");
     if (!cr || !rs) return;
     if (on) {
       const later = (ms, fn) => demoTimers.push(setTimeout(fn, ms));
       dispatch("creative-director");
       later(700, () => helpers(cr, cr.desks[0], 2, true));
       later(2600, () => dispatch("market-research"));
-      later(3200, () => helpers(rs, rs.desks.find((d) => d.name === "market-research") || rs.desks[0], 1, true));
+      later(3200, () => helpers(rs, rs.desks[0], 1, true));
       later(6500, () => hire(cr, true));
       focus("creative");
     } else {
@@ -1010,8 +1171,9 @@ function buildWorld(THREE, addons, renderer, opts) {
   // ---------------------------------------------------------------- data in
   let built = false, coreKick = 0, jarvisBusy = 0;
   function update(m) {
-    if (!built) { m.teams.forEach(buildPavilion); built = true; }
-    for (const t of m.teams) {
+    const sites = m.departments || m.teams;
+    if (!built) { sites.forEach(buildPavilion); buildProps(); built = true; }
+    for (const t of sites) {
       const P = pavilions.get(t.id);
       if (!P) continue;
       P.team = t; P.status = t.status;
@@ -1198,7 +1360,8 @@ function buildWorld(THREE, addons, renderer, opts) {
       if (p.t > 1.15) { scene3.remove(p.sprite); pulses.splice(i, 1); }
     }
 
-    // Scenery: ripples, the turntable, and the cars on the circuit.
+    // Scenery: the fountain, ripples, the turntable, and the cars on the circuit.
+    if (!REDUCED) world.jets.forEach((j, i) => { j.scale.y = 1 + 0.08 * Math.sin(time * 5 + i); });
     if (!REDUCED) {
       rippleTex.offset.x += dt * 0.004; rippleTex.offset.y += dt * 0.0025;
       poolRipple.offset.x += dt * 0.02;
@@ -1227,12 +1390,15 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const el of tags.children) {
       const id = el.dataset.id;
       const P = pavilions.get(id);
-      const anchor = id === "jarvis" ? tmp.set(0, 33, -38) : P ? tmp.copy(P.anchor) : null;
+      const anchor = id === "jarvis" ? tmp.set(0, 37, -40) : P ? tmp.copy(P.anchor) : null;
       if (!anchor) { el.style.opacity = 0; continue; }
       const v = anchor.clone().project(camera);
       const dist = camera.position.distanceTo(anchor);
-      const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !(open && id === opts.selected());
       const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
+      // Chips hide behind the page's cards rather than sit on top of them.
+      const hw = el.offsetWidth / 2, hh = el.offsetHeight;
+      const covered = (opts.avoid?.() || []).some((r) => x + hw > r.left && x - hw < r.right && y > r.top && y - hh < r.bottom);
+      const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !covered && !(open && id === opts.selected());
       el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight)}px)`;
       el.style.opacity = visible ? "1" : "0";
       el.style.zIndex = String(2000 - Math.round(dist));
@@ -1242,6 +1408,6 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
-  stage.hq = { camera, controls, actors, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  stage.hq = { camera, controls, actors, frame, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
   return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward };
 }

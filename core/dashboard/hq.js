@@ -143,15 +143,18 @@ const Feed = {
     const done = { today: doneAll.filter((t) => (t.completed || "").slice(0, 10) === today), earlier: doneAll.filter((t) => (t.completed || "").slice(0, 10) !== today) };
     const todo = open.filter((t) => t.status === "todo");
     const openCount = open.length;
+    // One pavilion per agent in the estate (the old office had a room per agent), coloured by its team.
+    const departments = teams.flatMap((t) => t.agents.map((a) => ({ id: a.name, name: a.label, color: t.color, teamId: t.id, job: a.title,
+      agents: [a], status: a.status, lead: a, openCount: a.open.length })));
     return {
-      teams, agents: all, source: h.activity ? "activity" : "tasks", allTasks: [...open, ...doneAll], doneAll,
+      teams, departments, agents: all, source: h.activity ? "activity" : "tasks", allTasks: [...open, ...doneAll], doneAll,
       board: { now, ask, done, todo },
       counts: {
         now: now.length, ask: ask.approvals.length + ask.tasks.length, doneToday: done.today.length, todo: todo.length, open: openCount,
         agents: all.length, working: all.filter((a) => a.status === "working").length, idle: all.filter((a) => a.status === "idle").length,
         onTrack: openCount ? Math.round((open.filter((t) => t.status === "in_progress" || t.status === "todo").length / openCount) * 100) : 100,
       },
-      week: h.week, daily: h.daily || [], milestone: h.milestone, allowance: h.allowance, connectors: h.connectors,
+      week: h.week, daily: h.daily || [], milestone: h.milestone, allowance: h.allowance, connectors: h.connectors, actions: h.actions || [],
       tests: s.tests || [], activity: s.activity || [], journal: s.journal || [], jarvis: this.jarvis,
     };
   },
@@ -248,10 +251,12 @@ function renderActivity(m) {
   const live = [...Feed.runs.values()].map((r) => ({ who: labelOf(r.agent), color: Feed.teamOf(r.agent).color, what: r.description || "Working", ts: r.at, agent: r.agent }));
   const events = m.activity.slice(0, 8).map((e) => ({ who: e.agent ? labelOf(e.agent) : "JARVIS", color: Feed.teamOf(e.agent).color,
     what: `${kind[e.kind] || e.kind}: ${e.title}`, ts: e.ts, task: e.task_id }));
-  const rows = [...live, ...events].slice(0, 5);
+  // Real changes JARVIS made through the connectors (the hooks' action log): store edits, ads, files.
+  const did = m.actions.slice(0, 4).map((a) => ({ who: "JARVIS", color: JARVIS_TEAM.color, what: `${a.service}: ${a.tool}${a.what ? ` ${a.what}` : ""}`, ts: a.ts, link: a.link }));
+  const rows = [...live, ...did, ...events].sort((a, b) => Date.parse(b.ts || 0) - Date.parse(a.ts || 0)).slice(0, 5);
   $("activity").innerHTML = `<h2 class="card-title"><span class="lamp working"></span>Live activity<button class="more" data-nav="tasks">View all</button></h2>
-    ${rows.length ? `<ol>${rows.map((r) => `<li><button class="act" ${r.task ? `data-task="${r.task}"` : r.agent ? `data-agent="${esc(r.agent)}"` : ""}>${avatar(r.who, r.color)}
-      <span><b>${esc(r.who)}</b><span>${esc(r.what)}</span></span><time>${esc(ago(r.ts))}</time></button></li>`).join("")}</ol>` : `<p class="empty">Nothing has happened yet today.</p>`}`;
+    ${rows.length ? `<ol>${rows.map((r) => `<li>${r.link ? `<a class="act" href="${esc(r.link)}" target="_blank" rel="noopener">` : `<button class="act" ${r.task ? `data-task="${r.task}"` : r.agent ? `data-agent="${esc(r.agent)}"` : ""}>`}${avatar(r.who, r.color)}
+      <span><b>${esc(r.who)}</b><span>${esc(r.what)}</span></span><time>${esc(ago(r.ts))}</time>${r.link ? "</a>" : "</button>"}</li>`).join("")}</ol>` : `<p class="empty">Nothing has happened yet today.</p>`}`;
 }
 
 function renderPerf(m) {
@@ -487,6 +492,9 @@ function panelJarvis(m) {
       ${msgs.length ? `<div class="chat">${msgs.map((j) => `<div class="msg ${j.role === "owner" ? "owner" : "jarvis"}"><small>${j.role === "owner" ? "You" : "JARVIS"}, ${esc(ago(j.ts))}</small>${esc((j.text || "").slice(0, 600))}</div>`).join("")}</div>` : `<p class="empty">No conversation yet.</p>`}
       <h3>Boardroom: work shared across teams <span class="n">${shared.length || ""}</span></h3>
       ${shared.length ? `<ol>${shared.map((t) => { const parts = m.allTasks.filter((x) => x.parent_id === t.id); const teams = [...new Set(parts.map((x) => x.team.name))]; return `<li><button class="row" data-task="${t.id}"><div class="t">${esc(t.title)}</div><div class="m"><span>T${t.id}</span><span>${parts.length} sub-tasks</span><span>${esc(teams.join(", "))}</span></div></button></li>`; }).join("")}</ol>` : `<p class="empty">No shared work right now.</p>`}
+      <h3>Store, ads and file changes <span class="n">${m.actions.length || ""}</span></h3>
+      ${m.actions.length ? `<ol>${m.actions.map((a) => `<li>${a.link ? `<a class="row" href="${esc(a.link)}" target="_blank" rel="noopener" style="text-decoration:none">` : `<div class="row">`}<div class="t">${esc(a.service)}: ${esc(a.tool)}${a.what ? ` ${esc(a.what)}` : ""}</div><div class="m"><span>${esc(ago(a.ts))}</span>${a.link ? "<span>Open in Shopify</span>" : ""}</div>${a.link ? "</a>" : "</div>"}</li>`).join("")}</ol>`
+        : `<p class="empty">No changes made through the connectors yet. Every store, ad or file change JARVIS makes is logged here and, for Shopify, links to the object in the admin (set shopify_admin_url in brain/config.json).</p>`}
       <h3>Memory</h3><p class="desc">${Feed.state.memory?.total ?? "?"} entries, ${Feed.state.memory?.needs_review ?? 0} need review.</p>
     </div>` };
 }
@@ -580,14 +588,19 @@ function renderPanel(keepScroll) {
 function open(sel) {
   selected = sel;
   document.body.classList.toggle("panel-open", !!sel);
-  const team = sel?.startsWith("team:") ? sel.slice(5) : sel === "jarvis" ? "jarvis" : null;
-  document.querySelectorAll(".chip3d").forEach((el) => el.classList.toggle("on", el.dataset.id === team));
+  // The pavilion to fly to and light up: the agent's own, or its team's first agent's.
+  const pav = pavilionFor(sel);
+  document.querySelectorAll(".chip3d").forEach((el) => el.classList.toggle("on", el.dataset.id === pav));
   document.querySelectorAll("nav.pill [data-nav]").forEach((b) => b.setAttribute("aria-current", String((b.dataset.nav === "home" && !sel) || b.dataset.nav === sel)));
   if (sel) { renderPanel(false); $("panel").scrollTop = 0; $("close").focus({ preventScroll: true }); }
-  if (sel?.startsWith("agent:")) {
-    const t = Feed.model?.teams.find((x) => x.agents.some((a) => a.name === sel.slice(6)));
-    if (t) scene?.focus(t.id);
-  } else if (team || !sel) scene?.focus(team);
+  if (pav || !sel) scene?.focus(pav);
+}
+function pavilionFor(sel) {
+  if (!sel) return null;
+  if (sel === "jarvis") return "jarvis";
+  if (sel.startsWith("agent:")) return sel.slice(6);
+  if (sel.startsWith("team:")) return Feed.model?.teams.find((t) => t.id === sel.slice(5))?.agents[0]?.name || null;
+  return null;
 }
 $("close").addEventListener("click", () => open(null));
 addEventListener("keydown", (e) => { if (e.key === "Escape" && selected) open(null); });
@@ -623,8 +636,10 @@ document.addEventListener("click", async (e) => {
 function renderChips(m) {
   const layer = $("labels");
   const word = { idle: "Online", thinking: "Thinking", delegating: "Handing out work" }[m.jarvis.status] || "Online";
-  const items = [{ id: "jarvis", hq: true, name: "Jarvis HQ", sub: `<span class="lamp ${m.jarvis.status === "idle" ? "working" : "waiting"}"></span>Main brain, ${word}`, ic: "i-crown" },
-    ...m.teams.map((t) => ({ id: t.id, name: t.name, ic: TEAM_ICONS[t.id] || "i-cog",
+  const mem = Feed.state.memory || {};
+  const items = [{ id: "jarvis", hq: true, name: "Jarvis HQ", ic: "i-crown",
+    sub: `<span class="lamp ${m.jarvis.status === "idle" ? "working" : "waiting"}"></span>${word}, ${mem.total ?? "?"} notes in the shared brain, ${mem.needs_review ?? 0} to review` },
+    ...m.departments.map((t) => ({ id: t.id, name: t.name, ic: TEAM_ICONS[t.teamId] || "i-cog",
       sub: `${t.openCount} task${t.openCount === 1 ? "" : "s"}<span class="lamp ${t.status}"></span>${STATUS[t.status].word}` }))];
   for (const t of items) {
     let el = layer.querySelector(`[data-id="${t.id}"]`);
@@ -632,7 +647,7 @@ function renderChips(m) {
       el = document.createElement("button");
       el.className = "chip3d" + (t.hq ? " hq" : "");
       el.dataset.id = t.id;
-      el.addEventListener("click", () => { const sel = t.hq ? "jarvis" : `team:${t.id}`; open(selected === sel ? null : sel); });
+      el.addEventListener("click", () => { const sel = t.hq ? "jarvis" : `agent:${t.id}`; open(selected === sel ? null : sel); });
       layer.appendChild(el);
     }
     el.innerHTML = `<span class="ic">${icon(t.ic)}</span><b>${esc(t.name)}</b><small>${t.sub}</small>`;
@@ -645,7 +660,27 @@ function renderChips(m) {
 const input = $("say");
 const PLACEHOLDER = isPhone() ? "Talk to JARVIS or a team" : input.placeholder;
 input.placeholder = PLACEHOLDER;
+// Who the owner is talking to. Everything still goes through JARVIS's own Claude Code session (the one with the
+// connectors, memory and approval gates); addressing a team or agent tells JARVIS to hand the message to them.
+let addressee = null;
+function address(name) {
+  addressee = name || null;
+  $("to").hidden = !addressee;
+  $("to").querySelector("b").textContent = addressee || "";
+  input.placeholder = addressee ? `Message ${addressee}` : PLACEHOLDER;
+  input.focus();
+}
+$("to").querySelector("button").addEventListener("click", () => address(null));
+const rawSend = J.send;
+J.send = (text, images) => {   // typed or spoken: both come through here
+  const t = (text || "").trim();
+  return rawSend(addressee && t && !t.toLowerCase().startsWith(addressee.toLowerCase()) ? `${addressee}, ${t}` : t, images);
+};
 function askTo(prefix) {
+  // "Name, " addresses that team or agent; anything else is a prefilled request to JARVIS.
+  const m = /^([^,:]+), $/.exec(prefix);
+  if (m) { address(m[1]); return; }
+  address(null);
   input.value = prefix;
   input.focus();
   input.setSelectionRange(prefix.length, prefix.length);
@@ -677,7 +712,7 @@ J.on("status", ({ shown }) => {
   $("jstate").textContent = words[shown] ?? "";
   $("mic").classList.toggle("on", shown === "listening");
   $("stop").hidden = !["thinking", "delegating", "speaking"].includes(shown);
-  if (shown !== "listening") input.placeholder = PLACEHOLDER;
+  if (shown !== "listening") input.placeholder = addressee ? `Message ${addressee}` : PLACEHOLDER;
 });
 
 // ================================================================== putting it together
@@ -707,12 +742,24 @@ $("demo").addEventListener("click", () => {
   scene.demo(on);
 });
 
+// Where the page's cards sit over the estate, so building chips can hide behind them (refreshed once a second).
+let rectsAt = 0, rects = [];
+function cardRects() {
+  if (performance.now() - rectsAt > 1000) {
+    rectsAt = performance.now();
+    const base = $("stage").getBoundingClientRect();
+    rects = [...document.querySelectorAll(".card, .views, .top > *, .center-bottom")].filter((e) => e.offsetParent !== null)
+      .map((e) => { const r = e.getBoundingClientRect(); return { left: r.left - base.left - 6, right: r.right - base.left + 6, top: r.top - base.top - 6, bottom: r.bottom - base.top + 6 }; });
+  }
+  return rects;
+}
 // Simplified mode: the owner's choice in Settings, ?simple in the address, or automatically on phones and low-power devices.
 const simple = /[?&]simple\b/.test(location.search) || J.pref("hqSimple") === "1" || (J.pref("hqSimple") !== "0" && (isPhone() || (navigator.hardwareConcurrency || 8) <= 4));
 import("/hq-scene.js").then(({ startScene }) => startScene({
   stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), status: STATUS, simple,
-  selected: () => (selected === "jarvis" ? "jarvis" : selected?.startsWith("team:") ? selected.slice(5) : null),
-  onPick: (kind, id) => open(kind === "jarvis" ? "jarvis" : `${kind}:${id}`),
+  selected: () => pavilionFor(selected),
+  avoid: cardRects,
+  onPick: (kind, id) => open(kind === "jarvis" ? "jarvis" : kind === "team" ? `agent:${id}` : `${kind}:${id}`),   // a pavilion is an agent's
   onExplore: (on) => document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(on)),
   fail: (text) => { $("nogl").hidden = false; $("nogl").textContent = text; $("veil").classList.add("gone"); document.querySelector(".views").hidden = true; return null; },
 })).then((s) => {

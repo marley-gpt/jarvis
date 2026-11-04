@@ -10,6 +10,7 @@ so the page switches to it without changes.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -213,10 +214,41 @@ def connectors() -> dict:
     return {k: _mcp[k] for k in ("checked", "servers", "error", "running")}
 
 
+ACTION_FIELDS = ("title", "handle", "name", "id", "productId", "product_id", "query")
+
+
+def recent_actions(conn, limit: int = 12) -> list[dict]:
+    """Consequential connector calls JARVIS made (the hooks' action log: store edits, ads, files), newest first,
+    each with a short readable line and, for Shopify objects, a link into the admin when `shopify_admin_url` is set."""
+    from . import hooks
+    admin = (paths.config().get("shopify_admin_url") or "").rstrip("/")
+    out = []
+    for r in conn.execute("SELECT ts, tool, summary FROM actions ORDER BY id DESC LIMIT ?", (limit,)):
+        tool, summary = r["tool"], r["summary"] or ""
+        server = tool.split("__")[1] if tool.count("__") >= 2 else tool
+        what = ""
+        try:
+            data = json.loads(summary.rstrip("…")) if summary.startswith("{") else {}
+        except ValueError:
+            data = {}
+        for key in ACTION_FIELDS:
+            if isinstance(data.get(key), (str, int)):
+                what = str(data[key])[:90]
+                break
+        link = None
+        m = re.search(r"gid://shopify/(Product|Collection|Page)/(\d+)", summary)
+        if m and admin:
+            link = f"{admin}/{m.group(1).lower()}s/{m.group(2)}"
+        out.append({"ts": r["ts"], "tool": tool.split("__")[-1].replace("_", " ").replace("-", " "),
+                    "service": hooks.service_name(tool, server), "what": what, "link": link})
+    return out
+
+
 def data(conn) -> dict:
     cfg = paths.config()
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
+            "actions": recent_actions(conn),
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
             # Plan section 16 (parked): unlocks earned on real strong sales days. Nothing is unlocked until the rules are agreed.

@@ -141,6 +141,11 @@ nav.pill button[aria-current="true"] .n { border-color: rgba(27, 20, 8, .35); co
 #caption[hidden] { display: none; }
 #caption small { display: block; color: var(--gold-hi); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 2px; }
 .talkbar { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 999px; }
+.talkbar .to { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 11px; border-radius: 999px; font-size: 12.5px; white-space: nowrap;
+  color: #1b1408; background: linear-gradient(180deg, #e7cd96, #c6a46a); }
+.talkbar .to b { font-weight: 600; }
+.talkbar .to button { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #1b1408; background: rgba(0, 0, 0, .12); font-size: 14px; line-height: 1; }
+.talkbar .to[hidden] { display: none; }
 .talkbar input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 9px 6px; font-size: 14.5px; outline: none; color: var(--text); }
 .talkbar input::placeholder { color: var(--text-3); }
 .round { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; border: 1px solid var(--edge); color: var(--gold-hi); transition: background .25s, transform .2s var(--ease-out); }
@@ -346,6 +351,7 @@ table.num td.r, table.num th.r { text-align: right; }
   <p class="glass" id="caption" hidden aria-live="polite"></p>
   <form class="talkbar glass" id="talkform" autocomplete="off">
     <button type="button" class="round" id="mic" aria-label="Talk to JARVIS"><svg class="i"><use href="#i-mic"/></svg></button>
+    <span class="to" id="to" hidden>To <b></b><button type="button" aria-label="Talk to JARVIS instead">&times;</button></span>
     <input id="say" type="text" placeholder="Talk to JARVIS, or name a team: “Creative, show me ad 4”" aria-label="Message JARVIS">
     <span id="jstate"></span>
     <button type="button" class="round" id="stop" aria-label="Stop" hidden><svg class="i"><use href="#i-stop"/></svg></button>
