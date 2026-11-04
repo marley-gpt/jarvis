@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, telegram
+from . import activity, backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -533,6 +533,23 @@ def cmd_metrics(conn, args):
     out(f"Pulled {snap['pulled']} ({snap['period']}, {snap['source']})")
     for section in ("shopify", "meta"):
         out(f"  {section}: " + ", ".join(f"{k}={v}" for k, v in snap[section].items()))
+def cmd_event_add(conn, args):
+    eid = activity.add(conn, args.agent, args.action, status=args.status, task=args.task, product=args.product,
+                       tool=args.tool, file=args.file, summary=args.summary,
+                       with_agent=args.with_agent)
+    out(f"E{eid} logged")
+
+
+def cmd_event_list(conn, args):
+    rows = activity.recent(conn, args.n, agent=args.agent)
+    if not rows:
+        out("No activity yet.")
+    for r in reversed(rows):
+        where = " ".join(x for x in (f"T{r['task_id']}" if r["task_id"] else "", r["product"] or "",
+                                     r["tool"] or "", r["file"] or "",
+                                     f"with {r['with_agent']}" if r["with_agent"] else "") if x)
+        out(f"E{r['id']} {r['ts']} {r['agent']} [{r['status']}] {r['action']}" + (f" ({where})" if where else "")
+            + (f" - {r['summary']}" if r["summary"] else ""))
 
 
 def cmd_dicloak(conn, args):
@@ -945,6 +962,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--file", help="read the JSON from this file instead of stdin")
     s.set_defaults(fn=cmd_metrics)
     mt.add_parser("show").set_defaults(fn=cmd_metrics)
+    ev = sub.add_parser("event", help="the agent activity log the HQ dashboard reads").add_subparsers(
+        dest="sub", required=True)
+    s = ev.add_parser("add", help="log what an agent is doing")
+    s.add_argument("agent")
+    s.add_argument("action")
+    s.add_argument("--status", default="working", choices=activity.STATUSES)
+    s.add_argument("--task")
+    s.add_argument("-p", "--product")
+    s.add_argument("--tool")
+    s.add_argument("--file")
+    s.add_argument("--with", dest="with_agent", help="the other agent, for collaborating")
+    s.add_argument("--summary")
+    s.set_defaults(fn=cmd_event_add)
+    s = ev.add_parser("list")
+    s.add_argument("--agent")
+    s.add_argument("-n", type=int, default=20)
+    s.set_defaults(fn=cmd_event_list)
 
     dc = sub.add_parser("dicloak", help="the Master Key tools in the DICloak browser: status, show, lock, unlock")
     dc.add_argument("sub", choices=("status", "show", "lock", "unlock"))
@@ -991,7 +1025,7 @@ def main(argv=None) -> int:
     try:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
-            telegram.TelegramError, dicloak.DICloakError, jobs.JobError) as exc:
+            telegram.TelegramError, dicloak.DICloakError, jobs.JobError, activity.ActivityError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

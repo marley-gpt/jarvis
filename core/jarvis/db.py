@@ -6,7 +6,7 @@ import sqlite3
 
 from . import paths
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory (
@@ -166,6 +166,25 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     event TEXT,
     note TEXT
 );
+
+-- The activity log every HQ visual reads (activity.py): who did what, with which tool, on which file.
+CREATE TABLE IF NOT EXISTS agent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'agent',
+    agent TEXT NOT NULL,
+    department TEXT,
+    task_id INTEGER,
+    product TEXT,
+    action TEXT NOT NULL,
+    tool TEXT,
+    file TEXT,
+    status TEXT NOT NULL,
+    with_agent TEXT,
+    summary TEXT,
+    session_id TEXT
+);
+CREATE INDEX IF NOT EXISTS agent_events_agent ON agent_events(agent, id);
 
 CREATE TABLE IF NOT EXISTS actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
