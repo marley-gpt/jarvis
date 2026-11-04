@@ -544,6 +544,7 @@ function panelSettings(m) {
       <label class="switch">JARVIS's voice<select data-set="voice">${voices.map((o) => `<option value="${esc(o.id)}" ${o.id === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("") || "<option>Default voice</option>"}</select></label>
       <h3>Display</h3>
       <label class="switch">Simplified 3D (for phones and slower computers)<input type="checkbox" data-set="simple" ${simple ? "checked" : ""}></label>
+      <label class="switch">Time of day<select data-set="time">${[["live", "Live (follows the clock)"], ["day", "Day"], ["sunset", "Sunset"], ["evening", "Evening"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqTime") || "live") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <h3>Connections</h3>
       <p class="desc">The connectors Claude Code has on this PC, the same ones the desktop app and JARVIS use.</p>
       ${c.servers ? `<div class="chips" style="margin-top:8px">${c.servers.map((s) => `<span class="tag ${s.ok ? "ok" : "bad"}" title="${esc(s.status)}">${esc(connectorName(s.name))}${s.ok ? "" : `: ${esc(s.status)}`}</span>`).join("")}</div>` : ""}
@@ -607,6 +608,7 @@ document.addEventListener("change", (e) => {
   if (!k) return;
   if (k === "simple") { J.pref("hqSimple", e.target.checked ? "1" : "0"); location.reload(); return; }
   if (k === "voice") { J.settings.voice = e.target.value; J.preview(); return; }
+  if (k === "time") { J.pref("hqTime", e.target.value); scene?.setTime(e.target.value); return; }
   J.settings[k] = e.target.checked;
 });
 document.addEventListener("click", async (e) => {
@@ -684,7 +686,7 @@ function renderAll(m, quick) {
   if (!m) return;
   renderTop(m); renderOverview(m); renderActivity(m); renderPerf(m); renderToast(m); renderMobileBoard(m); renderChips(m);
   if (selected) renderPanel(true);
-  if (!quick) scene?.update(m);
+  if (!quick) { scene?.update(m); (Feed.hq?.rewards || []).forEach((r) => scene?.reward?.(r)); }
 }
 Feed.on((kind, data) => {
   if (kind === "model") renderAll(data);
@@ -715,5 +717,6 @@ import("/hq-scene.js").then(({ startScene }) => startScene({
   fail: (text) => { $("nogl").hidden = false; $("nogl").textContent = text; $("veil").classList.add("gone"); document.querySelector(".views").hidden = true; return null; },
 })).then((s) => {
   scene = s;
+  scene?.setTime(J.pref("hqTime") || "live");
   if (scene && Feed.model) scene.update(Feed.model);
 }).catch((e) => console.error(e));

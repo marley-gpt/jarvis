@@ -125,6 +125,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   const glowTex = (rgb) => canvasTex(128, 128, (g, w) => { const gr = g.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2); gr.addColorStop(0, `rgba(${rgb},.95)`); gr.addColorStop(0.35, `rgba(${rgb},.35)`); gr.addColorStop(1, `rgba(${rgb},0)`); g.fillStyle = gr; g.fillRect(0, 0, w, w); });
 
   const std = (o) => new THREE.MeshStandardMaterial(o);
+  const world = {};       // scenery the frame loop moves
+  const glowMats = [];    // [material, base emissive intensity]: everything that lights up in the evening
   const M = {
     paving: std({ map: pavingTex, roughness: 0.35, envMapIntensity: 0.6 }),
     marble: std({ map: marbleTex, roughness: 0.25, envMapIntensity: 0.8 }),
@@ -146,7 +148,10 @@ function buildWorld(THREE, addons, renderer, opts) {
     paint: std({ vertexColors: true, roughness: 0.25, metalness: 0.45, envMap: envTex, envMapIntensity: 1.2 }),
     warmLight: std({ color: 0xfff1d8, emissive: 0xffc98a, emissiveIntensity: 2.6 }),
     interior: std({ color: 0xf2e2c8, emissive: 0xe8b878, emissiveIntensity: 0.55, roughness: 0.8 }),
+    lampGlass: std({ color: 0xfff6e6, emissive: 0xffd8a0, emissiveIntensity: 2 }),
   };
+
+  glowMats.push([M.warmLight, 1.1], [M.interior, 0.7], [M.lampGlass, 1.3]);
 
   // Merge simple parts into one geometry with vertex colours (cars, yachts, palms are drawn as one batch each).
   function merge(parts) {
@@ -172,10 +177,11 @@ function buildWorld(THREE, addons, renderer, opts) {
     parent.add(m); return m;
   };
 
-  // ---------------------------------------------------------------- golden-hour light and sky
-  scene3.add(new THREE.HemisphereLight(0xcfe2f4, 0xcdb08a, 1.25));
+  // ---------------------------------------------------------------- light and sky, by the time of day
+  const hemi = new THREE.HemisphereLight(0xcfe2f4, 0xcdb08a, 1.25);
+  scene3.add(hemi);
   const sun = new THREE.DirectionalLight(0xffd29a, 3.4);
-  sun.position.set(-150, 95, -40);           // low in the west over the sea: long warm shadows towards the viewer
+  sun.position.set(-150, 95, -40);           // in the west over the sea: long warm shadows towards the viewer
   sun.castShadow = !simple;
   sun.shadow.mapSize.set(4096, 4096);
   Object.assign(sun.shadow.camera, { left: -120, right: 120, top: 110, bottom: -110, near: 20, far: 420 });
@@ -183,11 +189,50 @@ function buildWorld(THREE, addons, renderer, opts) {
   scene3.add(sun, sun.target);
   const sky = new THREE.Mesh(new THREE.SphereGeometry(3200, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: C(0x6fa8dc) }, mid: { value: C(0xbcd8ee) }, low: { value: C(0xf6dcc0) }, sunDir: { value: sun.position.clone().normalize() } },
+    uniforms: { top: { value: C(0x6fa8dc) }, mid: { value: C(0xbcd8ee) }, low: { value: C(0xf6dcc0) }, sunDir: { value: sun.position.clone().normalize() }, sunGlow: { value: 0.35 } },
     vertexShader: "varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-    fragmentShader: "uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sunDir; varying vec3 vp; void main(){ float h = vp.y; vec3 c = mix(low, mid, smoothstep(0.0, 0.16, h)); c = mix(c, top, smoothstep(0.16, 0.65, h)); float s = max(dot(vp, sunDir), 0.0); c += vec3(1.0, 0.78, 0.5) * pow(s, 40.0) * 0.35; gl_FragColor = vec4(c, 1.0); }",
+    fragmentShader: "uniform vec3 top; uniform vec3 mid; uniform vec3 low; uniform vec3 sunDir; uniform float sunGlow; varying vec3 vp; void main(){ float h = vp.y; vec3 c = mix(low, mid, smoothstep(0.0, 0.16, h)); c = mix(c, top, smoothstep(0.16, 0.65, h)); float s = max(dot(vp, sunDir), 0.0); c += vec3(1.0, 0.72, 0.42) * (pow(s, 40.0) + pow(s, 6.0) * 0.25) * sunGlow; gl_FragColor = vec4(c, 1.0); }",
   }));
   scene3.add(sky);
+  // Day, sunset and evening. "live" follows this computer's clock: day until late afternoon, golden hour, then the
+  // estate lights up for the evening. Everything that glows (windows, lamps, the beam) is scaled by `glow`.
+  const TIMES = {
+    day: { sun: [0xfff2df, 3.3, -150, 150, -40], hemi: [0xd3e6f6, 0xcdb48e, 1.3], sky: [0x5c9ede, 0xaed2ef, 0xe4eef2, 0.25],
+      fog: [0xe2ebef, 460, 1800], exposure: 0.9, glow: 0.4, bloom: 0.3 },
+    sunset: { sun: [0xffc27a, 3.0, -160, 70, -30], hemi: [0xd8d3e4, 0xcfa57a, 1.05], sky: [0x6c9ad2, 0xf1caa6, 0xffb27a, 0.6],
+      fog: [0xf0d2b4, 420, 1700], exposure: 0.9, glow: 1, bloom: 0.45 },
+    evening: { sun: [0xff8f5a, 0.9, -160, 22, -10], hemi: [0x40507e, 0x5c4330, 0.7], sky: [0x18234d, 0x6c5b8c, 0xf2996a, 1.0],
+      fog: [0x6e5f7c, 300, 1500], exposure: 1.0, glow: 1.5, bloom: 0.55 },
+  };
+  let timeMode = "live";
+  function timeBlend() {
+    if (timeMode !== "live") return [TIMES[timeMode], TIMES[timeMode], 0];
+    const d = new Date(), h = d.getHours() + d.getMinutes() / 60;
+    const seg = (a, b, from, to) => [TIMES[a], TIMES[b], Math.min(1, Math.max(0, (h - from) / (to - from)))];
+    if (h >= 6.5 && h < 16.5) return [TIMES.day, TIMES.day, 0];
+    if (h >= 16.5 && h < 18.5) return seg("day", "sunset", 16.5, 18.5);
+    if (h >= 18.5 && h < 19.75) return seg("sunset", "evening", 18.5, 19.75);
+    if (h >= 5.25 && h < 6) return seg("evening", "sunset", 5.25, 6);
+    if (h >= 6 && h < 6.5) return seg("sunset", "day", 6, 6.5);
+    return [TIMES.evening, TIMES.evening, 0];
+  }
+  const mixC = (a, b, t) => C(a).lerp(C(b), t);
+  let bloomPass = null;
+  function applyTime() {
+    const [a, b, t] = timeBlend(), L = (x, y) => x + (y - x) * t;
+    sun.color.copy(mixC(a.sun[0], b.sun[0], t)); sun.intensity = L(a.sun[1], b.sun[1]);
+    sun.position.set(L(a.sun[2], b.sun[2]), L(a.sun[3], b.sun[3]), L(a.sun[4], b.sun[4]));
+    hemi.color.copy(mixC(a.hemi[0], b.hemi[0], t)); hemi.groundColor.copy(mixC(a.hemi[1], b.hemi[1], t)); hemi.intensity = L(a.hemi[2], b.hemi[2]);
+    const u = sky.material.uniforms;
+    u.top.value.copy(mixC(a.sky[0], b.sky[0], t)); u.mid.value.copy(mixC(a.sky[1], b.sky[1], t)); u.low.value.copy(mixC(a.sky[2], b.sky[2], t));
+    u.sunGlow.value = L(a.sky[3], b.sky[3]); u.sunDir.value.copy(sun.position).normalize();
+    scene3.fog.color.copy(mixC(a.fog[0], b.fog[0], t)); scene3.fog.near = L(a.fog[1], b.fog[1]); scene3.fog.far = L(a.fog[2], b.fog[2]);
+    renderer.toneMappingExposure = L(a.exposure, b.exposure);
+    const glow = L(a.glow, b.glow);
+    glowMats.forEach(([m, base]) => { m.emissiveIntensity = base * glow; });
+    if (bloomPass) bloomPass.strength = L(a.bloom, b.bloom);
+    world.glow = glow;
+  }
 
   // ---------------------------------------------------------------- the harbour, the waterfront circuit and the city
   const SEA = -26;
@@ -245,7 +290,9 @@ function buildWorld(THREE, addons, renderer, opts) {
     }
     const cube = new THREE.BoxGeometry(1, 1, 1);
     const city = new THREE.InstancedMesh(cube, std({ roughness: 0.75 }), blocks.length);
-    const glazing = new THREE.InstancedMesh(cube, std({ color: 0x8fb1c7, roughness: 0.15, metalness: 0.5 }), blocks.length);
+    const glazingMat = std({ color: 0x8fb1c7, roughness: 0.15, metalness: 0.5, emissive: 0xffcf8a, emissiveIntensity: 0 });
+    glowMats.push([glazingMat, 0.3]);   // city windows light up in the evening
+    const glazing = new THREE.InstancedMesh(cube, glazingMat, blocks.length);
     blocks.forEach(([x, y, z, w, h, d, c, ry], i) => {
       city.setMatrixAt(i, at(x, y + h / 2 - 1, z, ry, w, h, d)); city.setColorAt(i, C(c));
       glazing.setMatrixAt(i, at(x, y + h / 2, z, ry, w * 1.01, h * 0.8, d * 0.6));  // window bands
@@ -285,6 +332,15 @@ function buildWorld(THREE, addons, renderer, opts) {
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(60, 7.5), std({ map: banner, roughness: 0.6 }));
     sign.position.set(0, 19, 4); stand.add(sign);
     scene3.add(stand);
+    // Spectators along the circuit fence and the marina promenade (scenery, not agents).
+    if (!simple) {
+      const people = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.32, 0.9, 3, 6), std({ roughness: 0.7 }), 420);
+      const shirts = [0xffffff, 0xd4202f, 0x1d3557, 0xf1c40f, 0x2a2a2a, 0xe9d8c0, 0x3a7bd5];
+      let n = 0;
+      for (let i = 0; i < 260; i++) { const p = pts[(i * 2) % N], t2 = pts[(i * 2 + 1) % N].clone().sub(p).normalize(); const off = 8.5 + rand() * 2; people.setMatrixAt(n, at(p.x - t2.z * off, SEA + 1.6, p.z + t2.x * off)); people.setColorAt(n++, C(shirts[i % shirts.length])); }
+      for (let i = 0; i < 160; i++) { people.setMatrixAt(n, at(20 + rand() * 120, SEA + 1.4, -74 + rand() * 4)); people.setColorAt(n++, C(shirts[(i * 3) % shirts.length])); }
+      scene3.add(people);
+    }
 
     // Grand Prix cars racing round the circuit: braking for corners, queueing behind slower cars.
     const wheel = new THREE.CylinderGeometry(0.34, 0.34, 0.38, 14); wheel.rotateX(Math.PI / 2);
@@ -318,7 +374,18 @@ function buildWorld(THREE, addons, renderer, opts) {
     deck1.rotateX(-Math.PI / 2); deck1.translate(0, 0.1, 0);
     const band = new THREE.BoxGeometry(0.5, 0.03, 0.27); band.translate(-0.12, 0.135, 0);
     const deck2 = new THREE.BoxGeometry(0.34, 0.05, 0.2); deck2.translate(-0.16, 0.175, 0);
-    const yachtGeo = merge([{ geo: hull, color: 0xffffff }, { geo: deck1, color: 0xf7f7f7 }, { geo: band, color: 0x1c2a3d }, { geo: deck2, color: 0xffffff }]);
+    const deckShape = (len, wid, bow) => new THREE.Shape([[-len / 2, -wid], [len / 2 - bow, -wid], [len / 2, 0], [len / 2 - bow, wid], [-len / 2, wid]].map(([x, y]) => new THREE.Vector2(x, y)));
+    const tier = (len, wid, bow, h, y, x) => { const g = new THREE.ExtrudeGeometry(deckShape(len, wid, bow), { depth: h, bevelEnabled: false }); g.rotateX(-Math.PI / 2); g.translate(x, y, 0); return g; };
+    const yachtGeo = merge([
+      { geo: hull, color: 0xffffff }, { geo: deck1, color: 0xf7f7f7 },
+      { geo: tier(0.52, 0.135, 0.12, 0.028, 0.115, -0.1), color: 0x1c2a3d },     // window band, main deck
+      { geo: tier(0.4, 0.11, 0.1, 0.05, 0.16, -0.13), color: 0xffffff },
+      { geo: tier(0.41, 0.112, 0.1, 0.022, 0.175, -0.13), color: 0x1c2a3d },     // window band, upper deck
+      { geo: tier(0.24, 0.085, 0.07, 0.04, 0.21, -0.17), color: 0xffffff },      // sun deck
+      { geo: new THREE.BoxGeometry(0.03, 0.06, 0.15), color: 0xd8d8d8, m: at(-0.16, 0.27, 0) },   // radar arch
+      { geo: new THREE.BoxGeometry(0.5, 0.012, 0.3), color: 0x8a6a4a, m: at(-0.05, 0.106, 0) },   // teak deck
+    ]);
+    void band; void deck2;
     const yachts = [];
     seed = 23;
     const jetties = [];
@@ -404,6 +471,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     }
     // Colonnade along the podium front.
     for (let k = -7; k <= 7; k++) if (Math.abs(k) > 2) { box(0.9, 5.6, 0.9, M.white, k * 4, 5.8, 12.6, HQ); box(1.2, 0.3, 1.2, M.gold, k * 4, 8.7, 12.6, HQ, false); }
+    // Lanterns along the podium and the grand stairs: they come on in the evening.
+    for (let k = -7; k <= 7; k += 2) { const lan = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.6, 0.45), M.lampGlass); lan.position.set(k * 4, 3.4, 14.2); HQ.add(lan); }
     box(62, 0.6, 3.4, M.marble, 0, 9, 12.6, HQ);
     // Crown: a setback penthouse with the JARVIS sign.
     box(18, 5, 12, M.tint, 0, 23.6, -1, HQ);
@@ -415,8 +484,29 @@ function buildWorld(THREE, addons, renderer, opts) {
       g.beginPath(); g.moveTo(w / 2 - 110, 215); g.lineTo(w / 2 - 130, 80); g.lineTo(w / 2 - 55, 150); g.lineTo(w / 2, 60); g.lineTo(w / 2 + 55, 150); g.lineTo(w / 2 + 130, 80); g.lineTo(w / 2 + 110, 215); g.closePath(); g.fill();
       g.font = "500 150px 'Bodoni Moda', Georgia, serif"; g.textAlign = "center"; g.fillText("JARVIS", w / 2, 410);
     });
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(13, 6.5), std({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.45, roughness: 0.4 }));
+    const signMat = std({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.45, roughness: 0.4 });
+    glowMats.push([signMat, 0.4]);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(13, 6.5), signMat);
     sign.position.set(0, 23.6, 5.1); HQ.add(sign);
+    // A champagne-gold crown on the penthouse roof, where the beam starts.
+    const crown = new THREE.Group(); crown.position.set(0, 26.8, -1);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.4, 1.1, 40, 1, true), M.gold); band.position.y = 0.55;
+    crown.add(band);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2, tip = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.8, 6), M.gold);
+      tip.position.set(Math.cos(a) * 2.45, 1.9, Math.sin(a) * 2.45); crown.add(tip);
+      const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), M.lampGlass); jewel.position.set(Math.cos(a) * 2.5, 0.6, Math.sin(a) * 2.5); crown.add(jewel);
+    }
+    HQ.add(crown);
+    // Roof terrace on the west wing: planters, loungers and parasols.
+    for (let i = 0; i < 3; i++) {
+      const px = -31 + i * 6;
+      const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 0), M.leaf); pl.position.set(px, 14.8, -6); HQ.add(pl);
+      const um = new THREE.Mesh(new THREE.ConeGeometry(1.8, 0.6, 12), M.white); um.position.set(px + 1.5, 16.6, 4); HQ.add(um);
+      box(0.08, 2.2, 0.08, M.gold, px + 1.5, 15.2, 4, HQ, false);
+      box(1, 0.3, 2.2, M.white, px, 14.0, 4, HQ, false);
+    }
+    box(17, 1, 0.08, M.glass, -25, 14.3, 10.2, HQ, false);
     // Helipad and a parked helicopter on the east wing.
     const padTex = canvasTex(256, 256, (g, w) => { g.fillStyle = "#2a2f36"; g.fillRect(0, 0, w, w); g.strokeStyle = "#e8d39b"; g.lineWidth = 10; g.beginPath(); g.arc(w / 2, w / 2, 110, 0, Math.PI * 2); g.stroke(); g.fillStyle = "#fff"; g.font = "bold 130px sans-serif"; g.textAlign = "center"; g.fillText("H", w / 2, w / 2 + 46); });
     const pad = new THREE.Mesh(new THREE.CircleGeometry(6.4, 48), std({ map: padTex, roughness: 0.7 }));
@@ -435,9 +525,9 @@ function buildWorld(THREE, addons, renderer, opts) {
   // The light beam rising from the crown.
   const beamMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { t: { value: 0 } },
+    uniforms: { t: { value: 0 }, glow: { value: 1 } },
     vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-    fragmentShader: "varying vec2 vUv; uniform float t; void main(){ float fade = pow(1.0 - vUv.y, 1.3); gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * fade * (2.2 + 0.4 * sin(t * 2.0)), fade); }",
+    fragmentShader: "varying vec2 vUv; uniform float t; uniform float glow; void main(){ float fade = pow(1.0 - vUv.y, 1.3); gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * fade * (2.2 + 0.4 * sin(t * 2.0)) * glow, fade * glow); }",
   });
   {
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.8, 420, 24, 1, true), beamMat);
@@ -470,33 +560,71 @@ function buildWorld(THREE, addons, renderer, opts) {
     turn = new THREE.Group(); turn.position.set(0, 0, 46); scene3.add(turn);
     const tt = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, 0.4, 72), std({ color: 0x2b2f35, roughness: 0.25, metalness: 0.4 })); tt.position.y = 0.2; tt.receiveShadow = !simple; turn.add(tt);
     const ttRing = new THREE.Mesh(new THREE.TorusGeometry(11, 0.18, 8, 96), M.gold); ttRing.rotation.x = Math.PI / 2; ttRing.position.y = 0.42; turn.add(ttRing);
+    // Side profile of a mid-engined supercar, extruded across its width, with a smoked canopy, intakes and wheels.
+    const profile = (pts, depth) => { const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y))), { depth, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.06, bevelSegments: 2 }); g.translate(0, 0, -depth / 2); return g; };
+    const bodyGeo = profile([[-2.35, 0.32], [2.25, 0.32], [2.42, 0.48], [2.1, 0.66], [1.0, 0.78], [0.35, 1.14], [-0.9, 1.2], [-1.75, 0.98], [-2.35, 0.86]], 1.9);
+    const canopy = profile([[0.85, 0.82], [0.32, 1.17], [-0.85, 1.22], [-1.35, 0.98]], 1.5);
+    const wheelG = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 18).rotateX(Math.PI / 2);
+    const rimG = new THREE.CylinderGeometry(0.26, 0.26, 0.34, 10).rotateX(Math.PI / 2);
     const superGeo = merge([
-      { geo: new THREE.BoxGeometry(4.6, 0.7, 2.0), color: 0xffffff, m: at(0, 0.55, 0) },
-      { geo: new THREE.BoxGeometry(2.2, 0.5, 1.7), color: 0x14181e, m: at(-0.3, 1.1, 0) },
-      { geo: new THREE.BoxGeometry(0.5, 0.12, 2.0), color: 0x14181e, m: at(-2.2, 1.15, 0) },
-      ...[[1.5, 1.0], [1.5, -1.0], [-1.5, 1.0], [-1.5, -1.0]].map(([x, z]) => ({ geo: new THREE.CylinderGeometry(0.42, 0.42, 0.3, 14).rotateX(Math.PI / 2), color: 0x111111, m: at(x, 0.42, z) })),
+      { geo: bodyGeo, color: 0xffffff },
+      { geo: canopy, color: 0x12161c, m: at(0, 0.02, 0) },
+      { geo: new THREE.BoxGeometry(0.9, 0.2, 2.0), color: 0x12161c, m: at(-1.2, 0.62, 0) },     // side intakes
+      { geo: new THREE.BoxGeometry(0.12, 0.1, 1.9), color: 0x12161c, m: at(-2.3, 1.0, 0) },     // rear wing
+      ...[[1.45, 0.92], [1.45, -0.92], [-1.45, 0.92], [-1.45, -0.92]].flatMap(([x, z]) => [
+        { geo: wheelG, color: 0x111111, m: at(x, 0.42, z) }, { geo: rimG, color: 0xb9bcc2, m: at(x, 0.42, z) }]),
     ]);
     const supers = new THREE.InstancedMesh(superGeo, M.paint, 3);
-    [[0x111214, -6, 0.2], [0xf2c200, 0, 0], [0xc8102e, 6, -0.2]].forEach(([c, x, ry], i) => { supers.setMatrixAt(i, at(x, 0.4, 0, ry + Math.PI / 2, 1.4, 1.4, 1.4)); supers.setColorAt(i, C(c)); });
+    [[0x111214, -6, 0.2], [0xf2c200, 0, 0], [0xc8102e, 6, -0.2]].forEach(([c, x, ry], i) => { supers.setMatrixAt(i, at(x, 0.4, 0, ry + Math.PI / 2, 1.35, 1.35, 1.35)); supers.setColorAt(i, C(c)); });
+    // Spotlights on the turntable for the evening.
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; const sp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), M.lampGlass); sp.position.set(Math.cos(a) * 10.4, 0.5, Math.sin(a) * 10.4); turn.add(sp); }
     supers.castShadow = !simple; turn.add(supers);
   }
 
   // Palms, hedges and lamp posts around the estate.
   {
-    const palmParts = [{ geo: new THREE.CylinderGeometry(0.28, 0.45, 10, 6), color: 0x8a6d4e, m: at(0, 5, 0) }];
-    for (let k = 0; k < 7; k++) { const leaf = new THREE.ConeGeometry(1.0, 6.5, 4); leaf.rotateZ(Math.PI / 2.35); leaf.translate(2.8, 9.6, 0); palmParts.push({ geo: leaf, color: 0x4f7d3a, m: at(0, 0, 0, (k / 7) * Math.PI * 2) }); }
+    // Trunk: tapered and gently leaning, ringed. Fronds: arched strips with a feathered leaf texture.
+    const trunk = new THREE.CylinderGeometry(0.22, 0.42, 10, 7, 10);
+    { const tp = trunk.attributes.position; for (let i = 0; i < tp.count; i++) { const y = tp.getY(i) + 5; tp.setX(i, tp.getX(i) + 0.012 * y * y); tp.setY(i, y); const ring = 1 + 0.06 * Math.sin(y * 6); tp.setX(i, tp.getX(i) * ring); tp.setZ(i, tp.getZ(i) * ring); } trunk.computeVertexNormals(); }
+    const leafTex = canvasTex(128, 512, (g, w, h) => {
+      g.clearRect(0, 0, w, h); g.strokeStyle = "#5d7f3a"; g.lineWidth = 4; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.stroke();
+      for (let y = 8; y < h; y += 7) { const reach = (w / 2 - 4) * Math.sin(Math.PI * (y / h)) ** 0.7; g.strokeStyle = `rgb(${70 + rand() * 30},${115 + rand() * 30},${45 + rand() * 20})`; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(w / 2, y); g.lineTo(w / 2 - reach, y + 26); g.moveTo(w / 2, y); g.lineTo(w / 2 + reach, y + 26); g.stroke(); }
+    });
+    const frond = (() => {
+      const pos = [], uv = [], idx = [], N = 10, L = 6.2;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, x = t * L, y = 0.9 * x - 0.13 * x * x, w = 1.15;
+        pos.push(x, y, -w, x, y, w); uv.push(0, 1 - t, 1, 1 - t);
+        if (i < N) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+      }
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+    })();
+    const leafMat = std({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, color: 0xd8f0c0 });
     const spots = [];
     for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8; spots.push([PLAZA.x + Math.cos(a) * 24, PLAZA.z + Math.sin(a) * 24]); }
     for (let x = -94; x <= 94; x += 13) spots.push([x, 81]);
     for (let z = -50; z <= 74; z += 14) spots.push([-96, z], [96, z]);
     [[-82, 46], [-42, 46], [47, 58], [85, 58], [-18, 46], [18, 46], [-18, -12], [18, -12]].forEach((s) => spots.push(s));
-    const palms = new THREE.InstancedMesh(merge(palmParts), M.vcol, spots.length);
-    spots.forEach(([x, z], i) => palms.setMatrixAt(i, at(x, 0, z, i * 1.7, 1, 0.85 + (i % 5) * 0.08, 1)));
-    palms.castShadow = !simple; scene3.add(palms);
+    const FRONDS = simple ? 7 : 10;
+    const trunks = new THREE.InstancedMesh(trunk, std({ color: 0x8a6d4e, roughness: 0.9, flatShading: true }), spots.length);
+    const fronds = new THREE.InstancedMesh(frond, leafMat, spots.length * FRONDS);
+    const pm = new THREE.Matrix4(), fm = new THREE.Matrix4(), q = new THREE.Quaternion();
+    spots.forEach(([x, z], i) => {
+      const s = 0.85 + (i % 5) * 0.08, ry = i * 1.7;
+      pm.copy(at(x, 0, z, ry, 1, s, 1)); trunks.setMatrixAt(i, pm);
+      const top = new V3(0.012 * 100, 10, 0).applyMatrix4(pm);
+      for (let k = 0; k < FRONDS; k++) {
+        q.setFromEuler(new THREE.Euler(0, ry + (k / FRONDS) * Math.PI * 2 + (k % 2) * 0.2, (k % 3 - 1) * 0.12));
+        fm.compose(top, q, new V3(1, 1, 1)); fronds.setMatrixAt(i * FRONDS + k, fm);
+      }
+    });
+    trunks.castShadow = fronds.castShadow = !simple;
+    scene3.add(trunks, fronds);
     const lampPos = [];
     for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2 + 0.1; lampPos.push([PLAZA.x + Math.cos(a) * 17, PLAZA.z + Math.sin(a) * 17]); }
     const lamps = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.16, 4, 8), M.frame, lampPos.length);
-    const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 12, 8), M.warmLight, lampPos.length);
+    const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 12, 8), M.lampGlass, lampPos.length);
     lampPos.forEach(([x, z], i) => { lamps.setMatrixAt(i, at(x, 2, z)); bulbs.setMatrixAt(i, at(x, 4.1, z)); });
     scene3.add(lamps, bulbs);
     const hedges = [[-30, 64, 26, 1.4, 1.6], [30, 64, 26, 1.4, 1.6], [-46, 36, 1.6, 1.4, 12], [46, 36, 1.6, 1.4, 12]];
@@ -738,6 +866,16 @@ function buildWorld(THREE, addons, renderer, opts) {
     const parasol = new THREE.Mesh(new THREE.ConeGeometry(1.6, 0.6, 12), M.white); parasol.position.set(PW / 2 - 4, roofY + 2.6, 0); parasol.castShadow = !simple; pav.add(parasol);
     box(0.08, 2.2, 0.08, M.gold, PW / 2 - 4, roofY + 1.5, 0, pav, false);
     box(PW, 0.12, 0.16, M.gold, 0, PH * 0.72 + 0.6, PD / 2 + 0.06, pav, false);   // transom band across the glass front
+    // Upper storey: a smaller glass pavilion set back on the terrace, with its own slab and fascia.
+    const UW = PW - 8, UD = PD - 6, UH = 4.4, uy = roofY + 0.4, uz = -1.8;
+    box(UW - 0.3, UH - 0.3, 0.1, M.interior, 0, uy + UH / 2, uz - UD / 2 - 0.06, pav, false);
+    box(UW, UH, 0.1, M.glass, 0, uy + UH / 2, uz + UD / 2, pav, false);
+    box(0.1, UH, UD, M.glass, -UW / 2, uy + UH / 2, uz, pav, false); box(0.1, UH, UD, M.glass, UW / 2, uy + UH / 2, uz, pav, false);
+    for (const [cx, cz] of [[-UW / 2, uz - UD / 2], [UW / 2, uz - UD / 2], [-UW / 2, uz + UD / 2], [UW / 2, uz + UD / 2]]) box(0.5, UH, 0.5, M.white, cx, uy + UH / 2, cz, pav);
+    box(UW + 1.6, 0.6, UD + 1.6, M.marble, 0, uy + UH + 0.3, uz, pav);
+    box(UW + 1.7, 0.18, 0.1, M.gold, 0, uy + UH + 0.3, uz + UD / 2 + 0.82, pav, false);
+    // Lit soffit under the front overhang, for the evening.
+    box(PW + 1.8, 0.06, 0.5, M.lampGlass, 0, roofY - 0.43, PD / 2 + 0.75, pav, false);
     // Corner columns and glass walls; the front has a door in the middle.
     for (const [cx, cz] of [[-PW / 2, -PD / 2], [PW / 2, -PD / 2], [-PW / 2, PD / 2], [PW / 2, PD / 2]]) box(0.7, PH, 0.7, M.white, cx, PH / 2 + 0.6, cz, pav);
     box(PW - 0.4, PH - 0.4, 0.1, M.interior, 0, PH / 2 + 0.6, -PD / 2 - 0.08, pav, false);   // warm-lit back wall
@@ -760,7 +898,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const offsets = { 1: [0], 2: [-3.4, 3.4], 3: [-6, 0, 6] }[n] || t.agents.map((_, i) => (i - (n - 1) / 2) * 5);
     const desks = t.agents.map((a, i) => desk(t, a.name, pav, offsets[i], -1.6));
     const door = local(pav, 0, PD / 2 + 2.5, 0);
-    const P = { team: t, pav, desks, wall, door, anchor: pav.localToWorld(new V3(0, PH + 4.5, 0)), status: "idle", helpers: [], hires: [] };
+    const P = { team: t, pav, desks, wall, door, anchor: pav.localToWorld(new V3(0, PH + 9.5, -1.8)), status: "idle", helpers: [], hires: [] };
     pav.traverse((o) => { if (!o.userData.pick) o.userData.pick = t.id; });
     hitTargets.push(pav);
     // Each agent comes out of its pavilion door and takes its seat.
@@ -863,6 +1001,12 @@ function buildWorld(THREE, addons, renderer, opts) {
     }
   }
 
+  // ---------------------------------------------------------------- rewards (plan section 16, parked)
+  // reward(kind) is the hook for unlocks earned on real strong sales days (for example a car for the garage). The
+  // page calls it with each unlocked reward from /api/hq; nothing is unlocked until the rules are agreed, so it is a no-op.
+  const rewards = new Set();
+  function reward(kind) { if (!kind || rewards.has(kind)) return; rewards.add(kind); }
+
   // ---------------------------------------------------------------- data in
   let built = false, coreKick = 0, jarvisBusy = 0;
   function update(m) {
@@ -933,7 +1077,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   if (!simple && addons.EffectComposer) {
     composer = new addons.EffectComposer(renderer);
     composer.addPass(new addons.RenderPass(scene3, camera));
-    composer.addPass(new addons.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.5, 1.15));  // only real light sources glow
+    bloomPass = new addons.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.5, 1.15);  // only real light sources glow
+    composer.addPass(bloomPass);
     composer.addPass(new addons.OutputPass());
   }
   const viewShift = { x: 0 };
@@ -971,7 +1116,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   const damp = (a, b, lambda, dt) => a + (b - a) * (1 - Math.exp(-lambda * dt));
   const clock = new THREE.Clock();
   const tmp = new V3(), up = new V3(0, 1, 0), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
-  let first = true, ringSpin = 0.2;
+  let first = true, ringSpin = 0.2, frameCount = 0;
+  applyTime();
   place({ ...HOME(), az: -0.5, r: HOME().r * 1.35, pol: 1.0 });
   flyTo(HOME(), 3.2);
 
@@ -1010,6 +1156,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     globeCore.material.emissiveIntensity = 1.2 + beat * 0.5 + coreKick * 1.5;
     globe.position.y = 9 + (REDUCED ? 0 : Math.sin(time * 0.7) * 0.25);
     beamMat.uniforms.t.value = time;
+    beamMat.uniforms.glow.value = 0.55 + 0.45 * Math.min(1, world.glow || 1);
+    if ((frameCount++ & 31) === 0) applyTime();   // the light follows the clock; checking twice a second is plenty
 
     for (const P of pavilions.values()) {
       for (const d of P.desks) {
@@ -1095,8 +1243,5 @@ function buildWorld(THREE, addons, renderer, opts) {
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
   stage.hq = { camera, controls, actors, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
-  return { update, dispatch, focus, demo, view, whereabouts, simple };
+  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward };
 }
-
-// The scenery objects the frame loop moves; filled in while the world is built.
-const world = {};

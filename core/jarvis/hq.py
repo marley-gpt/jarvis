@@ -218,7 +218,14 @@ def data(conn) -> dict:
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
-            "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance")}
+            "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
+            # Plan section 16 (parked): unlocks earned on real strong sales days. Nothing is unlocked until the rules are agreed.
+            "rewards": rewards(conn)}
+
+
+def rewards(conn) -> list[str]:
+    """Hook for plan section 16: reward ids unlocked by real sales. Empty until the owner agrees the rules."""
+    return []
 
 
 def resolve(ref: str) -> Path | None:
