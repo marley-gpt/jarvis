@@ -1394,11 +1394,16 @@ function buildWorld(THREE, addons, renderer, opts) {
       if (!anchor) { el.style.opacity = 0; continue; }
       const v = anchor.clone().project(camera);
       const dist = camera.position.distanceTo(anchor);
-      const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
-      // Chips hide behind the page's cards rather than sit on top of them.
+      const x = (v.x * 0.5 + 0.5) * W;
+      let y = (-v.y * 0.5 + 0.5) * H;
+      // A chip that would sit under one of the page's cards slides just above or below it, whichever is nearer.
       const hw = el.offsetWidth / 2, hh = el.offsetHeight;
-      const covered = (opts.avoid?.() || []).some((r) => x + hw > r.left && x - hw < r.right && y > r.top && y - hh < r.bottom);
-      const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !covered && !(open && id === opts.selected());
+      for (const r of opts.avoid?.() || []) {
+        if (!(x + hw > r.left && x - hw < r.right && y > r.top && y - hh < r.bottom)) continue;
+        const above = r.top - 2, below = r.bottom + hh + 2;
+        y = (Math.abs(above - y) <= Math.abs(below - y) && above - hh > 0) || below > H ? above : below;
+      }
+      const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !(open && id === opts.selected());
       el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight)}px)`;
       el.style.opacity = visible ? "1" : "0";
       el.style.visibility = visible ? "visible" : "hidden";

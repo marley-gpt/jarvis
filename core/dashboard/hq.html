@@ -231,6 +231,14 @@ table.num td.r, table.num th.r { text-align: right; }
 .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); font-size: 13.5px; }
 .switch input { width: 18px; height: 18px; accent-color: var(--gold); }
 .switch select { background: rgba(255, 255, 255, .06); border: 1px solid var(--edge-soft); border-radius: 8px; padding: 6px 8px; max-width: 200px; }
+select.pick, .assign select, .assign input { background: rgba(255, 255, 255, .06); color: var(--text); border: 1px solid var(--edge-soft); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+select.pick option, .assign select option { color: #14243b; }
+select.pick.saved { border-color: var(--working); }
+.assign { display: grid; gap: 8px; }
+.assign input { width: 100%; padding: 9px 10px; }
+.assign-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.assign-row select { max-width: 160px; }
+.assign .btn { min-height: 34px; padding: 6px 12px; }
 
 /* ---------------------------------------------------------------- tablets and phones: the estate on top, cards below */
 @media (max-width: 1180px) {

@@ -784,6 +784,21 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
+            if self.path in ("/api/hq/task", "/api/hq/agent-model", "/api/hq/task-model"):
+                # Control from HQ: assign a task, pick an agent's model, pick a model for one task.
+                conn = db.connect()
+                try:
+                    if self.path == "/api/hq/task":
+                        tid = hq.add_task(conn, body.get("title"), agent=body.get("agent"), product=body.get("product"),
+                                          description=body.get("description"), model=body.get("model"))
+                        return self._json(201, {"ok": True, "id": tid})
+                    if self.path == "/api/hq/agent-model":
+                        return self._json(200, {"ok": True, "model": hq.set_agent_model(body.get("agent"), body.get("model"))})
+                    return self._json(200, {"ok": True, "task_models": hq.set_task_model(body.get("task"), body.get("model"))})
+                except (ValueError, records.RecordError) as exc:
+                    return self._json(400, {"error": str(exc)})
+                finally:
+                    conn.close()
             if self.path == "/api/stop":
                 runner.stop()
                 return self._json(200, {"ok": True})

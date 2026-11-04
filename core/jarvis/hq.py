@@ -54,6 +54,81 @@ CONNECTORS = {
 BUILTIN = {"WebSearch": "Web search", "WebFetch": "Web pages", "Bash": "JARVIS command line",
            "Read": "Files", "Write": "Files", "Edit": "Files", "Glob": "Files", "Grep": "Files"}
 
+# Model choice (plan: every agent on the Claude model best suited to its task). An agent's default lives in its
+# file's `model:` line, which Claude Code reads when JARVIS delegates; a task can override it, and the override is
+# shown in JARVIS's session brief so it is passed to the Agent tool for that task.
+MODELS = ("inherit", "opus", "sonnet", "haiku", "fable")
+MODEL_IDS = {"fable": "claude-fable-5-1"}   # Claude Code knows opus/sonnet/haiku by name; Fable goes in by id
+MODEL_LINE = re.compile(r"^model:[^\n]*$", re.M)
+
+
+def model_alias(value: str | None) -> str:
+    """The short name for what an agent file says: 'claude-fable-5-1' -> 'fable', missing -> 'inherit'."""
+    v = (value or "inherit").strip().lower()
+    for alias, full in MODEL_IDS.items():
+        if v == full or v.startswith(alias):
+            return alias
+    for alias in MODELS:
+        if alias in v:
+            return alias
+    return "inherit"
+
+
+def set_agent_model(name: str, model: str) -> str:
+    """Change the `model:` line in .claude/agents/<name>.md. Returns the value written."""
+    if model not in MODELS:
+        raise ValueError(f"Model must be one of: {', '.join(MODELS)}")
+    if not re.fullmatch(r"[a-z0-9-]+", name or ""):
+        raise ValueError("Bad agent name.")
+    path = AGENTS_DIR / f"{name}.md"
+    if not path.is_file():
+        raise ValueError(f"No agent file for '{name}'.")
+    text = path.read_text(encoding="utf-8", newline="")   # keep the file's own line endings
+    if not text.startswith("---"):
+        raise ValueError(f"{path.name} has no frontmatter.")
+    value = MODEL_IDS.get(model, model)
+    head, sep, body = text[3:].partition("\n---")
+    if MODEL_LINE.search(head):
+        head = MODEL_LINE.sub(f"model: {value}", head, count=1)
+    else:
+        head = head.rstrip("\n") + f"\nmodel: {value}\n"
+    path.write_text("---" + head + sep + body, encoding="utf-8", newline="")
+    return value
+
+
+def task_models() -> dict:
+    tm = paths.config().get("task_models") or {}
+    return tm if isinstance(tm, dict) else {}
+
+
+def set_task_model(task_id, model: str | None) -> dict:
+    """A model for one task (T12: opus), kept in brain/config.json; '' or inherit clears it."""
+    key = f"T{records.parse_task_id(task_id)}"
+    model = (model or "inherit").strip().lower()
+    if model not in MODELS:
+        raise ValueError(f"Model must be one of: {', '.join(MODELS)}")
+    tm = task_models()
+    if model == "inherit":
+        tm.pop(key, None)
+    else:
+        tm[key] = model
+    paths.set_config("task_models", tm)
+    return tm
+
+
+def add_task(conn, title: str, *, agent=None, product=None, description=None, model=None) -> int:
+    """A new task from HQ: goes on the backlog JARVIS works from, assigned to an agent if one was picked."""
+    title = " ".join((title or "").split())
+    if not title:
+        raise ValueError("A task needs a title.")
+    if agent and agent not in agents():
+        raise ValueError(f"No agent called '{agent}'.")
+    tid = records.task_add(conn, title[:300], agent=agent or None, product=product or None, description=description or None)
+    if model and model != "inherit":
+        set_task_model(tid, model)
+    return tid
+
+
 PREVIEW_TEXT = {".md", ".txt", ".csv", ".json"}
 PREVIEW_IMAGE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                  ".gif": "image/gif"}
@@ -99,7 +174,7 @@ def agents() -> dict[str, dict]:
         name = meta.get("name") or path.stem
         tools = _list(meta.get("tools"))
         out[name] = {"tools": tools, "connections": connections(tools), "skills": skills_for(meta, body),
-                     "model": meta.get("model", "inherit")}
+                     "model": model_alias(meta.get("model"))}
     return out
 
 
@@ -289,7 +364,8 @@ def data(conn) -> dict:
     cfg = paths.config()
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
-            "actions": recent_actions(conn), "metrics": metrics(),
+            "actions": recent_actions(conn), "metrics": metrics(), "models": MODELS, "task_models": task_models(),
+            "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
             # Plan section 16 (parked): unlocks earned on real strong sales days. Nothing is unlocked until the rules are agreed.

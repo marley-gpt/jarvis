@@ -4,7 +4,7 @@ import threading
 
 from helpers import BrainTest
 
-from jarvis import dashboard, hq, records
+from jarvis import brief, dashboard, hq, records
 
 
 class HQDataTest(BrainTest):
@@ -66,6 +66,31 @@ class HQDataTest(BrainTest):
         out = self.run_cli("metrics", "show")
         self.assertIn("orders=3", out.stdout)
 
+    def test_control_from_hq_models_and_tasks(self):
+        agents_dir = self.home / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "shopify.md").write_text("---\nname: shopify\ndescription: Store.\nmodel: sonnet\n---\nBody\n", encoding="utf-8")
+        old = hq.AGENTS_DIR
+        hq.AGENTS_DIR = agents_dir
+        try:
+            self.assertEqual(hq.set_agent_model("shopify", "opus"), "opus")
+            self.assertIn("model: opus", (agents_dir / "shopify.md").read_text(encoding="utf-8"))
+            self.assertEqual(hq.set_agent_model("shopify", "fable"), "claude-fable-5-1")
+            self.assertEqual(hq.agents()["shopify"]["model"], "fable")
+            with self.assertRaises(ValueError):
+                hq.set_agent_model("shopify", "gpt")
+            with self.assertRaises(ValueError):
+                hq.set_agent_model("../CLAUDE", "opus")
+            tid = hq.add_task(self.conn, "  Draft the brush PDP  ", agent="shopify", model="haiku")
+        finally:
+            hq.AGENTS_DIR = old
+        self.assertEqual(hq.task_models(), {f"T{tid}": "haiku"})
+        self.assertIn("(model: haiku", brief.task_line(records.task_list(self.conn, open_only=True)[0]))
+        hq.set_task_model(tid, "inherit")
+        self.assertEqual(hq.task_models(), {})
+        with self.assertRaises(ValueError):
+            hq.add_task(self.conn, "   ")
+
     def test_preview_reads_brain_files_only(self):
         work = self.home / "work" / "x"
         work.mkdir(parents=True)
@@ -122,6 +147,21 @@ class HQRoutesTest(BrainTest):
         self.assertEqual(len(json.loads(raw)["teams"]), 8)
         for path in ("/office", "/console", "/chat"):  # the earlier pages stay available
             self.assertEqual(self.get(path)[0], 200, path)
+
+    def test_control_routes(self):
+        import http.client as hc
+        def post(path, body):
+            conn = hc.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            conn.request("POST", path, json.dumps(body), {"Host": f"127.0.0.1:{self.port}", "Content-Type": "application/json",
+                                                           "X-Jarvis-Token": self.server.token})
+            resp = conn.getresponse(); data = json.loads(resp.read()); conn.close()
+            return resp.status, data
+        status, data = post("/api/hq/task", {"title": "Check the cart drawer", "agent": "store-qa", "model": "sonnet"})
+        self.assertEqual(status, 201)
+        self.assertEqual(post("/api/hq/task-model", {"task": data["id"], "model": "opus"}), (200, {"ok": True, "task_models": {f"T{data['id']}": "opus"}}))
+        self.assertEqual(post("/api/hq/task", {"title": ""})[0], 400)
+        self.assertEqual(post("/api/hq/agent-model", {"agent": "nope", "model": "opus"})[0], 400)
+        self.assertEqual(json.loads(self.get("/api/hq")[1])["task_models"], {f"T{data['id']}": "opus"})
 
     def test_file_preview_route(self):
         (self.home / "work").mkdir(exist_ok=True)

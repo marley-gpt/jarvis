@@ -50,7 +50,9 @@ function toolName(line) {
   const server = { "claude-in-chrome": "Chrome", "computer-use": "Computer use", Shopify: "Shopify", claude_ai_Shopify: "Shopify" }[parts[1]] || parts[1];
   return `${server}: ${(parts[2] || "").replace(/_/g, " ")}`;
 }
-const modelName = (m) => (!m || m === "inherit" ? "JARVIS's model" : m[0].toUpperCase() + m.slice(1));
+const MODEL_WORDS = { inherit: "JARVIS's model", opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
+const modelName = (m) => MODEL_WORDS[m] || (!m ? "JARVIS's model" : m[0].toUpperCase() + m.slice(1));
+const modelSelect = (attr, id, current) => `<select class="pick" ${attr}="${esc(id)}">${["inherit", "opus", "sonnet", "haiku", "fable"].map((v) => `<option value="${v}" ${v === (current || "inherit") ? "selected" : ""}>${MODEL_WORDS[v]}</option>`).join("")}</select>`;
 // "claude.ai Shopify" -> "Shopify", "plugin:github:github" -> "GitHub"
 const connectorName = (n) => { const x = n.replace(/^claude\.ai /i, "").replace(/^plugin:[^:]+:/i, ""); return x === "github" ? "GitHub" : x; };
 const initials = (label) => String(label || "?").split(/[\s&-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
@@ -155,6 +157,7 @@ const Feed = {
         onTrack: openCount ? Math.round((open.filter((t) => t.status === "in_progress" || t.status === "todo").length / openCount) * 100) : 100,
       },
       week: h.week, daily: h.daily || [], milestone: h.milestone, allowance: h.allowance, connectors: h.connectors, actions: h.actions || [], metrics: h.metrics,
+      taskModels: h.task_models || {}, products: h.products || [],
       tests: s.tests || [], activity: s.activity || [], journal: s.journal || [], jarvis: this.jarvis,
     };
   },
@@ -417,7 +420,7 @@ function agentFacts(a) {
     ["Now", a.now ? esc(a.now) : a.next ? `Nothing running. Next up: ${esc(a.next)}` : "Nothing running"],
     a.status === "working" && ["Tool", a.tool ? esc(a.tool) : "Not reported yet"],
     a.since && ["Since", esc(ago(a.since))],
-    ["Model", esc(modelName(a.model))],
+    ["Model", `${modelSelect("data-agent-model", a.name, a.model)} <span class="quiet">default for every task; saved to its agent file</span>`],
     ["Open tasks", String(a.open.length)],
     a.via && ["Seen in", esc(a.via)],
   ]);
@@ -434,7 +437,8 @@ function panelTeam(m, t) {
   const ref = (t.agents.find((a) => a.preview && a.status !== "idle") || t.agents.find((a) => a.preview) || {}).preview || null;
   return { ref, html: head(`${esc(t.name)} pavilion`, esc(t.name), esc(t.job), `<div class="state-line"><span class="lamp ${t.status}"></span>${esc(counts)}</div>`) + `
     <div class="p-body">
-      <div class="btns"><button class="btn gold" data-ask="${esc(t.name)}, ">Talk to ${esc(t.name)}</button><button class="btn" data-ask="${esc(t.name)}, take on this task: ">Assign a task</button></div>
+      <div class="btns"><button class="btn gold" data-ask="${esc(t.name)}, ">Talk to ${esc(t.name)}</button></div>
+      ${assignForm(m, t.agents[0]?.name, t.agents)}
       <h3>What it's building</h3><div class="preview" id="p-preview"></div>
       <h3>Agents <span class="n">${t.agents.length}</span></h3><ol>${t.agents.map((a) => agentRow(a, t.color)).join("")}</ol>
       ${connectionsHTML(conns, m)}
@@ -451,8 +455,9 @@ function panelAgent(m, a) {
   const subs = a.runs.length ? `<h3>Sub-agents working now <span class="n">${a.runs.length}</span></h3><ol>${a.runs.map((r) => `<li class="row live"><div class="t">${esc(r.description || "Working")}</div><div class="m"><span>started ${esc(ago(r.at))}</span></div></li>`).join("")}</ol>` : "";
   return { ref: a.preview, html: head(`${esc(team.name)} team`, esc(a.label), esc(a.title), `<div class="state-line"><span class="lamp ${a.status}"></span>${STATUS[a.status].word}</div>`) + `
     <div class="p-body">
-      <div class="btns"><button class="btn gold" data-ask="${esc(a.label)}, ">Talk to ${esc(a.label)}</button><button class="btn" data-ask="${esc(a.label)}, take on this task: ">Assign a task</button><button class="btn" data-team="${team.id}">Open ${esc(team.name)}</button></div>
+      <div class="btns"><button class="btn gold" data-ask="${esc(a.label)}, ">Talk to ${esc(a.label)}</button><button class="btn" data-team="${team.id}">Open ${esc(team.name)}</button></div>
       ${agentFacts(a)}
+      ${assignForm(m, a.name)}
       ${subs}
       <h3>Workstation: what it's building</h3><div class="preview" id="p-preview"></div>
       <h3>Responsibilities</h3><p class="desc">${esc(a.role || a.title)}</p>
@@ -460,7 +465,7 @@ function panelAgent(m, a) {
       <h3>Skills and playbooks</h3><div class="chips">${a.skills.map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div>
       <h3>Open tasks</h3>${taskList(tasks.filter((x) => x.status !== "done"), "No open tasks.")}
       <h3>History, last two weeks</h3>${taskList(tasks.filter((x) => x.status === "done"), "Nothing finished in the last two weeks.")}
-      <p class="note">Default model is set in .claude/agents/${esc(a.name)}.md. Pausing or resuming an agent, and choosing a model for one task, aren't supported by the backend yet.</p>
+      <p class="note">Pausing or resuming an agent isn't supported by the backend yet.</p>
     </div>` };
 }
 function panelTask(m, t) {
@@ -476,7 +481,8 @@ function panelTask(m, t) {
         parent && ["Part of", `<button data-task="${parent.id}" style="text-decoration:underline;text-align:left">T${parent.id} ${esc(parent.title)}</button>`],
         ["Updated", esc(ago(t.completed || t.updated))],
       ])}
-      <div class="btns"><button class="btn gold" data-ask="About T${t.id}: ">Ask JARVIS about this</button></div>
+      <div class="btns"><button class="btn gold" data-ask="About T${t.id}: ">Ask JARVIS about this</button>${t.status === "todo" ? `<button class="btn" data-ask="${esc(t.who)}, start on T${t.id} now.">Start it now</button>` : ""}</div>
+      ${t.status !== "done" ? `<h3>Model for this task</h3><div class="state-line">${modelSelect("data-task-model", t.id, m.taskModels[`T${t.id}`])}<span class="quiet">overrides the agent's default when JARVIS delegates it</span></div>` : ""}
       ${t.description ? `<h3>Brief</h3><p class="desc">${esc(t.description)}</p>` : ""}
       ${t.summary ? `<h3>Result</h3><p class="desc">${esc(t.summary)}</p>` : ""}
       <h3>Deliverable</h3><div class="preview" id="p-preview"></div>
@@ -506,7 +512,7 @@ function panelAgents(m) {
     <div class="p-body">${m.teams.map((t) => `<h3><button data-team="${t.id}" class="team-tag" style="--team:${t.color}">${esc(t.name)}</button></h3><ol>${t.agents.map((a) => agentRow(a, t.color)).join("")}</ol>`).join("")}</div>` };
 }
 function panelTasks(m) {
-  return { ref: null, html: head("Task board", "Tasks", `${m.counts.open} open. ${m.source === "activity" ? "Live from the agent activity log." : "Live from the task list, agent runs and JARVIS's hand-offs."}`) + `<div class="p-body">${boardHTML(m)}</div>` };
+  return { ref: null, html: head("Task board", "Tasks", `${m.counts.open} open. ${m.source === "activity" ? "Live from the agent activity log." : "Live from the task list, agent runs and JARVIS's hand-offs."}`) + `<div class="p-body">${assignForm(m, "")}${boardHTML(m)}</div>` };
 }
 function panelAnalytics(m) {
   const w = m.week;
@@ -580,6 +586,41 @@ function panelSettings(m) {
       <div class="btns"><a class="btn" href="/chat">Full chat</a><a class="btn" href="/office">Earlier office view</a></div>
     </div>` };
 }
+
+// Assign a task from HQ: it goes on the real backlog (bin/jarvis task) for the chosen agent, with a model if picked.
+function assignForm(m, agentName, agents) {
+  const list = agents || m.agents;
+  return `<h3>Assign a task</h3><form class="assign" data-assign>
+    <input name="title" placeholder="What needs doing" maxlength="300" required>
+    <div class="assign-row"><select name="agent">${agentName === "" ? `<option value="">JARVIS decides who</option>` : ""}${list.map((a) => `<option value="${esc(a.name)}" ${a.name === agentName ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select>
+    ${modelSelect("name", "model", "inherit")}
+    ${m.products.length ? `<select name="product"><option value="">No product</option>${m.products.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("")}</select>` : ""}
+    <button class="btn gold" type="submit">Add to the backlog</button></div>
+    <p class="quiet">Goes on the task list JARVIS works from; to have it started straight away, say so in the talk bar.</p></form>`;
+}
+document.addEventListener("submit", async (e) => {
+  const f = e.target.closest("[data-assign]");
+  if (!f) return;
+  e.preventDefault();
+  const btn = f.querySelector("button[type=submit]"); btn.disabled = true;
+  const body = { title: f.title.value, agent: f.agent.value, model: f.model.value, product: f.product?.value || "" };
+  try {
+    const r = await J.post("/api/hq/task", body);
+    btn.textContent = `Added T${r.id}`;
+    await J.refresh();
+    open(`task:${r.id}`);
+  } catch (err) { btn.disabled = false; btn.textContent = err.message; }
+});
+document.addEventListener("change", async (e) => {
+  const el = e.target;
+  if (el.dataset.agentModel) {
+    try { await J.post("/api/hq/agent-model", { agent: el.dataset.agentModel, model: el.value }); el.classList.add("saved"); J.refresh(); }
+    catch (err) { caption("JARVIS", err.message); }
+  } else if (el.dataset.taskModel) {
+    try { await J.post("/api/hq/task-model", { task: el.dataset.taskModel, model: el.value }); el.classList.add("saved"); Feed.loadHQ(); }
+    catch (err) { caption("JARVIS", err.message); }
+  }
+});
 
 function renderPanel(keepScroll) {
   const m = Feed.model;
@@ -765,8 +806,9 @@ function cardRects() {
   if (performance.now() - rectsAt > 1000) {
     rectsAt = performance.now();
     const base = $("stage").getBoundingClientRect();
-    rects = [...document.querySelectorAll(".card, .views, .top > *, .center-bottom")].filter((e) => e.offsetParent !== null)
-      .map((e) => { const r = e.getBoundingClientRect(); return { left: r.left - base.left - 6, right: r.right - base.left + 6, top: r.top - base.top - 6, bottom: r.bottom - base.top + 6 }; });
+    // (offsetParent is null for fixed elements, so size is the test for "shown".)
+    rects = [...document.querySelectorAll(".card, .views, .top > *, .center-bottom")].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0)
+      .map((r) => ({ left: r.left - base.left - 6, right: r.right - base.left + 6, top: r.top - base.top - 6, bottom: r.bottom - base.top + 6 }));
   }
   return rects;
 }
