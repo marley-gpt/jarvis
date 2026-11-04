@@ -15,7 +15,7 @@ import re
 import sys
 import time
 
-from . import backup, brief, cli, db, journal, memory, paths, records
+from . import backup, brief, cli, db, journal, memory, paths, records, skills
 
 # MCP tool names whose last segment starts with one of these verbs are read-only.
 READ_VERBS = ("get", "list", "search", "query", "show", "find", "read", "fetch", "validate", "describe",
@@ -229,6 +229,8 @@ def main(argv: list[str]) -> int:
             tool = event.get("tool_name", "")
             if tool.startswith("mcp__") and not is_read_only_tool(tool):
                 records.log_action(conn, tool, _summarise(event.get("tool_input")), event.get("session_id"))
+            elif tool == "Skill":
+                skills.log_from_hook(conn, event)
         elif kind == "subagent":
             records.log_agent_run(conn, event.get("agent_type") or event.get("subagent_type"),
                                   event.get("session_id"), event.get("hook_event_name", "subagent"),

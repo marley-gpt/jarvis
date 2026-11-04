@@ -60,6 +60,14 @@ DEFAULT_CONFIG = {
     # specialists keep their own models.
     "dashboard_model": "opus",
     "dashboard_effort": "low",
+    # Skill learning (bin/jarvis skills): learning runs a day across all agents (12 agents at 6 a day = every
+    # agent every other day, overnight), the size of each run, and when notes get promoted or trimmed.
+    "skill_learning_daily_cap": 6,
+    "skill_notes_per_run": 3,
+    "skill_candidates_per_run": 3,
+    "skill_note_max_chars": 1200,
+    "skill_promote_helped": 3,
+    "skill_trim_days": 30,
     "store_url": "https://urbansupplied.com",  # watched by the dashboard; the owner is alerted if it stops loading
 }
 

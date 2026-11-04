@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, telegram
+from . import backup, dicloak, feedback, jobs, brief, db, journal, media, memory, paths, records, skills, telegram
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -604,6 +604,151 @@ def cmd_skills_backup(conn, args):
         out(f"Upload zips for claude.ai (Settings > Skills > Add > Upload): {zdir}")
 
 
+def _agents_arg(value) -> list[str]:
+    return [a.strip() for a in (value or "").split(",") if a.strip()]
+
+
+def cmd_skills_list(conn, args):
+    for name in [args.agent] if args.agent else skills.agent_names():
+        levels = skills.skill_levels(conn, name)
+        out(f"{name}: {len(levels)} skills")
+        for s in levels:
+            bar = "#" * s["level"] + "." * (5 - s["level"])
+            out(f"  [{bar}] {s['name']:28s} {s['label']:10s} {s['how']:7s} uses {s['uses']}, notes {s['notes']}")
+
+
+def cmd_skills_gaps(conn, args):
+    g = skills.gaps(conn, args.agent)
+    out(f"Gaps for {args.agent}:" if g["items"] else f"No recorded gaps for {args.agent}.")
+    for item in g["items"]:
+        out(f"  - {item}")
+    if g["keywords"]:
+        out("Keywords: " + ", ".join(g["keywords"]))
+    found = skills.suggest_installed(conn, args.agent, g)
+    if found:
+        out("Installed skills that fit and aren't assigned yet:")
+        for c in found:
+            out(f"  {c['name']:28s} {c['fit']:6s} score {c['score']:5}  {c['description'][:100]}")
+
+
+def cmd_skills_brief(conn, args):
+    out(json.dumps(skills.brief(conn, args.agent), default=str, indent=1) if args.json
+        else skills.brief_text(conn, args.agent))
+
+
+def cmd_skills_due(conn, args):
+    agents = skills.due(conn)
+    if args.json:
+        out(json.dumps(agents))
+        return
+    out("Due for a learning run today: " + (", ".join(agents) if agents else "nobody (today's cap is used up)"))
+
+
+def cmd_skills_run_start(conn, args):
+    rid, path = skills.run_start(conn, args.agent)
+    out(f"L{rid} started for {args.agent}. Brief: {paths.rel(path)}")
+
+
+def cmd_skills_run_done(conn, args):
+    skills.run_done(conn, args.id, args.summary, "skipped" if args.skipped else "done")
+    out(f"{args.id} closed.")
+
+
+def cmd_skills_runs(conn, args):
+    skills.ensure(conn)
+    for r in conn.execute("SELECT * FROM skill_runs ORDER BY id DESC LIMIT ?", (args.limit,)):
+        out(f"L{r['id']} {r['ts'][:16]} {r['kind']:5s} {r['agent']:18s} {r['status']:8s} {r['summary'] or ''}")
+
+
+def cmd_skills_note_add(conn, args):
+    nid = skills.note_add(conn, args.agent, args.title, read_body(args), skill=args.skill,
+                          for_agents=_agents_arg(args.for_agents), source=args.source)
+    row = skills.note_get(conn, nid)
+    out(f"N{nid} saved ({row['memory_id']}), for {row['for_agents'].replace(',', ', ')}.")
+
+
+def cmd_skills_notes(conn, args):
+    rows = skills.note_list(conn, agent=args.agent, for_agent=args.for_agent,
+                            status=None if args.all else "active", limit=args.limit)
+    if not rows:
+        out("No skill notes yet.")
+    for n in rows:
+        out(f"N{n['id']} {n['ts'][:10]} [{n['status']}] {n['agent']}: {n['title']}"
+            f"{' (' + n['skill'] + ')' if n['skill'] else ''}  helped {n['helped']}/{n['uses']}  "
+            f"for {n['for_agents']}  {n['memory_id']}")
+
+
+def cmd_skills_used(conn, args):
+    helped = True if args.helped else False if args.unhelpful else None
+    skills.log_use(conn, args.agent, skill=args.skill, note=args.note, helped=helped, task=args.task)
+    out("Logged.")
+
+
+def cmd_skills_teach(conn, args):
+    added = skills.teach(conn, args.ref, _agents_arg(args.for_agents), by=args.by, why=args.why or "")
+    out(f"{args.ref} now taught to: {', '.join(added)}" if added else f"{args.ref} was already tagged for them.")
+
+
+def cmd_skills_candidate_add(conn, args):
+    cid = skills.candidate_add(conn, args.agent, args.name, origin=args.origin, what=args.what, source=args.source,
+                               cost=args.cost, why=args.why)
+    out(f"C{cid} queued for review (nothing installed).")
+
+
+def cmd_skills_review(conn, args):
+    q = skills.review_queue(conn)
+    if not q["candidates"] and not q["changes"]:
+        out("Nothing waiting for review.")
+    for c in q["candidates"]:
+        cost = "free" if skills.is_free(c["cost"]) else f"COSTS {c['cost']} (needs approval request spend)"
+        out(f"C{c['id']} {c['agent']} <- {c['name']} [{c['origin']}] {cost}")
+        out(f"    source: {c['source'] or '-'}")
+        out(f"    what (untrusted, as described): {c['what']}")
+        out(f"    why: {c['why'] or '-'}")
+    for c in q["changes"]:
+        out(f"P{c['id']} {c['kind']:8s} {c['agent']}: {c['what']}  (why: {c['why']})")
+
+
+def cmd_skills_decide(approve: bool):
+    def run(conn, args):
+        out(skills.decide(conn, args.ref, approve, by=args.by, note=args.note or "", approval=args.approval))
+    return run
+
+
+def cmd_skills_installed(conn, args):
+    out(f"P{skills.mark_installed(conn, args.ref, args.as_name)} queued: assign it (review with `skills review`).")
+
+
+def cmd_skills_merge(conn, args):
+    res = skills.merge(conn, days=args.days)
+    out(f"Taught {len(res['taught'])}: " + (", ".join(res["taught"][:20]) or "-"))
+    out(f"Proposed {len(res['proposed'])} change(s) for review: " + (", ".join(res["proposed"]) or "-"))
+
+
+def cmd_skills_changes(conn, args):
+    skills.ensure(conn)
+    sql = "SELECT * FROM skill_changes" + (" WHERE agent = ?" if args.agent else "") + " ORDER BY id DESC LIMIT ?"
+    for c in conn.execute(sql, ([args.agent] if args.agent else []) + [args.limit]):
+        who = f" by {c['decided_by']}" if c["decided_by"] else ""
+        out(f"P{c['id']} {c['ts'][:10]} {c['status']:8s}{who} {c['kind']:8s} {c['agent']}: {c['what']} "
+            f"(why: {c['why']}{'; ' + c['decision_note'] if c['decision_note'] else ''})")
+
+
+def cmd_skills_board(conn, args):
+    out(skills.board_json(conn, args.agent))
+
+
+def cmd_skills_mine(conn, args):
+    """What an agent reads before working: its learned playbook and the notes taught to it."""
+    path = skills.playbook_path(args.agent)
+    out(path.read_text(encoding="utf-8") if path.exists() else f"No learned playbook for {args.agent} yet.")
+    rows = skills.note_list(conn, for_agent=args.agent, limit=args.limit)
+    if rows:
+        out("\nActive skill notes for you (`mem get <id>` to read; log what helped with `skills used`):")
+        for n in rows:
+            out(f"  N{n['id']} {n['memory_id']} {n['title']} (by {n['agent']})")
+
+
 def cmd_backup(conn, args):
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
@@ -939,11 +1084,105 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--urgent", action="store_true", help="kill rule hit, store down, money at risk: ring the owner")
     s.set_defaults(fn=cmd_alert)
 
-    skills = sub.add_parser("skills", help="private skills (Blake's playbooks)").add_subparsers(dest="sub", required=True)
-    s = skills.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")
+    skills_p = sub.add_parser("skills", help="skills: private playbooks, and the skill-learning loop").add_subparsers(
+        dest="sub", required=True)
+    s = skills_p.add_parser("backup", help="copy ~/.claude/skills/blake-* into brain/skills (or back with --restore)")
     s.add_argument("--restore", action="store_true", help="copy brain/skills back to ~/.claude/skills")
     s.add_argument("--zip", action="store_true", help="also package each one for upload to claude.ai Skills")
     s.set_defaults(fn=cmd_skills_backup)
+    s = skills_p.add_parser("list", help="each agent's skills with their level")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_skills_list)
+    s = skills_p.add_parser("gaps", help="where an agent's feedback and mistakes say it is weak, and skills that fit")
+    s.add_argument("agent")
+    s.set_defaults(fn=cmd_skills_gaps)
+    s = skills_p.add_parser("brief", help="the learning brief for an agent")
+    s.add_argument("agent")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_skills_brief)
+    s = skills_p.add_parser("due", help="agents due a learning run today (within the daily cap)")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_skills_due)
+    run = skills_p.add_parser("run", help="start or finish a learning run").add_subparsers(dest="sub2", required=True)
+    s = run.add_parser("start")
+    s.add_argument("agent")
+    s.set_defaults(fn=cmd_skills_run_start)
+    s = run.add_parser("done")
+    s.add_argument("id", help="L<n>")
+    s.add_argument("--summary", required=True)
+    s.add_argument("--skipped", action="store_true")
+    s.set_defaults(fn=cmd_skills_run_done)
+    s = skills_p.add_parser("runs", help="recent learning and merge runs")
+    s.add_argument("-n", "--limit", type=int, default=15)
+    s.set_defaults(fn=cmd_skills_runs)
+    note = skills_p.add_parser("note", help="skill notes").add_subparsers(dest="sub2", required=True)
+    s = note.add_parser("add", help="save a short skill note, tagged for the agents that need it")
+    s.add_argument("agent", help="who learned it")
+    s.add_argument("title")
+    s.add_argument("--body", help="text, or - for stdin")
+    s.add_argument("--body-file")
+    s.add_argument("--skill", help="the skill it is about")
+    s.add_argument("--for", dest="for_agents", help="other agents to teach, comma separated")
+    s.add_argument("--source", help="skill name, memory id or URL it came from")
+    s.set_defaults(fn=cmd_skills_note_add)
+    s = skills_p.add_parser("notes", help="list skill notes")
+    s.add_argument("--agent", help="written by")
+    s.add_argument("--for", dest="for_agent", help="taught to")
+    s.add_argument("--all", action="store_true", help="include promoted and trimmed")
+    s.add_argument("-n", "--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_skills_notes)
+    s = skills_p.add_parser("used", help="log that a skill or note was used, and whether it helped")
+    s.add_argument("agent")
+    s.add_argument("--skill")
+    s.add_argument("--note", help="N<n>")
+    s.add_argument("--helped", action="store_true")
+    s.add_argument("--unhelpful", action="store_true")
+    s.add_argument("--task")
+    s.set_defaults(fn=cmd_skills_used)
+    s = skills_p.add_parser("teach", help="tag a note (N<n>) or memory entry (lesson, feedback, mistake) for agents")
+    s.add_argument("ref")
+    s.add_argument("--for", dest="for_agents", required=True)
+    s.add_argument("--by", default="jarvis")
+    s.add_argument("--why")
+    s.set_defaults(fn=cmd_skills_teach)
+    cand = skills_p.add_parser("candidate", help="queue a skill, plugin or MCP for review").add_subparsers(
+        dest="sub2", required=True)
+    s = cand.add_parser("add")
+    s.add_argument("agent", help="the agent it is for")
+    s.add_argument("name")
+    s.add_argument("--origin", required=True, choices=tuple(skills.ORIGINS))
+    s.add_argument("--what", required=True, help="what it does, in your words")
+    s.add_argument("--source", help="catalogue id, plugin id or URL")
+    s.add_argument("--cost", default="free", help="price, credits or 'free'")
+    s.add_argument("--why", help="the gap it fixes")
+    s.set_defaults(fn=cmd_skills_candidate_add)
+    s = skills_p.add_parser("review", help="candidates and changes waiting for review")
+    s.set_defaults(fn=cmd_skills_review)
+    for name, ok in (("approve", True), ("reject", False)):
+        s = skills_p.add_parser(name, help=f"{name} a candidate (C<n>) or proposed change (P<n>)")
+        s.add_argument("ref")
+        s.add_argument("--by", required=True, choices=skills.REVIEWERS)
+        s.add_argument("--note")
+        s.add_argument("--approval", help="A<n>: the approved spend request, for anything that costs money")
+        s.set_defaults(fn=cmd_skills_decide(ok))
+    s = skills_p.add_parser("installed", help="an approved outside skill was installed by hand: queue assigning it")
+    s.add_argument("ref")
+    s.add_argument("--as", dest="as_name", help="session name of an account or plugin skill, e.g. anthropic-skills:x")
+    s.set_defaults(fn=cmd_skills_installed)
+    s = skills_p.add_parser("merge", help="weekly: teach new lessons to the agents they concern, propose promotions and trims")
+    s.add_argument("--days", type=int, default=30, help="how far back to look for lessons to teach")
+    s.set_defaults(fn=cmd_skills_merge)
+    s = skills_p.add_parser("changes", help="the promotion log: what changed, why, who reviewed it")
+    s.add_argument("--agent")
+    s.add_argument("-n", "--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_skills_changes)
+    s = skills_p.add_parser("board", help="JSON for the dashboard: skills and level, recently learned, backlog")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_skills_board)
+    s = skills_p.add_parser("mine", help="an agent's learned playbook and the notes taught to it")
+    s.add_argument("agent")
+    s.add_argument("-n", "--limit", type=int, default=10)
+    s.set_defaults(fn=cmd_skills_mine)
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")
@@ -965,7 +1204,7 @@ def main(argv=None) -> int:
     try:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
-            telegram.TelegramError, dicloak.DICloakError, jobs.JobError) as exc:
+            telegram.TelegramError, dicloak.DICloakError, jobs.JobError, skills.SkillError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

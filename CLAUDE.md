@@ -51,7 +51,7 @@ Anything that needs the screen (the Master Key tools in DICloak, computer use) g
 
 ## Skills
 
-There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
+There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. The agents keep learning new skills on their own: nightly learning runs, teaching each other, a review queue for anything new and a weekly merge (`jarvis-skill-learning` skill, `bin/jarvis skills`). Don't spawn an agent for something a single `bin/jarvis` command answers.
 
 ## Standing rules from the owner
 

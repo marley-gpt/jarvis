@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
+from . import brief, db, journal, memory, paths, readiness, records, skills, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
@@ -659,6 +659,15 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, data)
             if self.path == "/api/events":
                 return self._events()
+            if route == "/api/skills":  # per agent: skills and level, recently learned, backlog, review queue
+                conn = db.connect()
+                try:
+                    agent = (parse_qs(query).get("agent") or [None])[0]
+                    return self._json(200, skills.board(conn, agent))
+                except skills.SkillError as exc:
+                    return self._json(404, {"error": str(exc)})
+                finally:
+                    conn.close()
             self._json(404, {"error": "not found"})
 
         def _memory(self, q: dict):

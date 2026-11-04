@@ -54,7 +54,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__.*",
+        "matcher": "mcp__.*|Skill",
         "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/bin/hook\" post_tool", "timeout": 10 }]
       }
     ],
