@@ -1,8 +1,9 @@
 """Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
 
 `bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
-isometric office at `/`, the sidebar console at `/console`, the chat app at
-`/chat`, the first version at `/classic`, all sharing jarvis.js; the 3D HQ at `/hq`, see hq.py) and streams
+app at `/`: status board, talk bar and the 3D HQ, see core/dashboard/README.md; the
+isometric office at `/office`, the sidebar console at `/console`, the chat app at
+`/chat`, the first version at `/classic`, all sharing jarvis.js) and streams
 state over Server-Sent Events. Talking to JARVIS runs one headless Claude Code
 process (`claude -p`, stream-json in and out) that stays running between
 messages and resumes the saved conversation if restarted, so it uses the
@@ -36,11 +37,12 @@ from urllib.parse import parse_qs, unquote
 from . import brief, db, hq, journal, memory, paths, readiness, records, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
-# The office is the main view (owner decision D1); the console and the first version stay available.
-PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
-         "/classic": "index.html", "/hq": "hq.html"}
+# The HQ app is the main view (T54 revamp); the office, console and earlier versions stay available.
+PAGES = {"/": "hq.html", "/hq": "hq.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
+         "/classic": "index.html"}
 ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
-          "/hq.js": ("hq.js", "text/javascript; charset=utf-8")}
+          "/hq.js": ("hq.js", "text/javascript; charset=utf-8"),
+          "/hq-scene.js": ("hq-scene.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.

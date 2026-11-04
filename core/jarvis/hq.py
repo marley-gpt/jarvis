@@ -11,9 +11,10 @@ so the page switches to it without changes.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import memory, paths
+from . import memory, paths, records
 
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 SKILLS_DIR = paths.REPO_ROOT / ".claude" / "skills"
@@ -120,8 +121,34 @@ def live_activity(conn) -> dict | None:
         return None
 
 
+def board(conn) -> dict:
+    """Every open task, and what was finished in the last two weeks: the Now / Needs you / Done / To do board."""
+    marks = ",".join("?" * len(records.OPEN_TASK_STATUSES))
+    open_rows = conn.execute(f"SELECT id, parent_id, title, description, agent, product, status, priority, deliverable,"
+                             f" summary, created, updated FROM tasks WHERE status IN ({marks}) ORDER BY priority, id DESC",
+                             records.OPEN_TASK_STATUSES).fetchall()
+    since = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+    done = conn.execute("SELECT id, parent_id, title, description, agent, product, status, deliverable, summary, created,"
+                        " updated, completed FROM tasks WHERE status = 'done' AND completed >= ? ORDER BY completed DESC"
+                        " LIMIT 40", (since,)).fetchall()
+    return {"open": [dict(r) for r in open_rows], "done": [dict(r) for r in done]}
+
+
+def week(conn) -> dict:
+    """This week so far (Monday to today) against the weekly profit target."""
+    today = datetime.now()
+    start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+    rep = records.money_report(conn, start, today.strftime("%Y-%m-%d"))
+    return {"start": start, "profit": rep["profit"], "income": rep["total_income"], "expenses": rep["total_expenses"],
+            "target": paths.config()["weekly_profit_target_aud"], "pace": rep["target"], "days": rep["days"]}
+
+
 def data(conn) -> dict:
-    return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn)}
+    cfg = paths.config()
+    return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
+            "board": board(conn), "week": week(conn),
+            # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
+            "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance")}
 
 
 def resolve(ref: str) -> Path | None:

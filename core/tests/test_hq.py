@@ -31,6 +31,17 @@ class HQDataTest(BrainTest):
         if data["activity"] is not None:  # phase 1 installed: it must carry the shape the page reads
             self.assertIn("agents", data["activity"])
 
+    def test_board_and_week(self):
+        a = records.task_add(self.conn, "Write hooks", agent="creative-director")
+        b = records.task_add(self.conn, "Check the PDP", agent="store-qa")
+        records.task_update(self.conn, b, status="done")
+        data = hq.data(self.conn)
+        self.assertIn(a, [t["id"] for t in data["board"]["open"]])
+        self.assertEqual([t["id"] for t in data["board"]["done"]], [b])
+        self.assertEqual(data["week"]["target"], 380.0)
+        self.assertEqual(data["week"]["profit"], 0)
+        self.assertIsNone(data["milestone"])  # not set: the page says so
+
     def test_preview_reads_brain_files_only(self):
         work = self.home / "work" / "x"
         work.mkdir(parents=True)
@@ -77,13 +88,15 @@ class HQRoutesTest(BrainTest):
         status, html = self.get("/hq")
         self.assertEqual(status, 200)
         self.assertIn(self.server.token.encode(), html)
+        self.assertEqual(self.get("/")[1], html)  # the app is the main page
         status, js = self.get("/hq.js")
         self.assertEqual(status, 200)
         self.assertIn(b"const Feed", js)
+        self.assertEqual(self.get("/hq-scene.js")[0], 200)
         status, raw = self.get("/api/hq")
         self.assertEqual(status, 200)
         self.assertEqual(len(json.loads(raw)["teams"]), 8)
-        for path in ("/", "/console", "/chat"):  # the pages the owner uses are untouched
+        for path in ("/office", "/console", "/chat"):  # the earlier pages stay available
             self.assertEqual(self.get(path)[0], 200, path)
 
     def test_file_preview_route(self):
