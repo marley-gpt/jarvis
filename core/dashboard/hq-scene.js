@@ -1401,6 +1401,7 @@ function buildWorld(THREE, addons, renderer, opts) {
       const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && !covered && !(open && id === opts.selected());
       el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight)}px)`;
       el.style.opacity = visible ? "1" : "0";
+      el.style.visibility = visible ? "visible" : "hidden";
       el.style.zIndex = String(2000 - Math.round(dist));
       el.style.pointerEvents = visible ? "auto" : "none";
     }

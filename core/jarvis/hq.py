@@ -244,11 +244,52 @@ def recent_actions(conn, limit: int = 12) -> list[dict]:
     return out
 
 
+# Live store and ad figures (plan section 14). The dashboard server has no connectors of its own: JARVIS pulls them
+# read-only through its Claude Code session (Shopify and Meta ads connectors) and saves a snapshot with
+# `bin/jarvis metrics set`. The page shows the snapshot with its source and age, or says it hasn't been pulled.
+METRIC_KEYS = {
+    "shopify": ("sessions", "orders", "revenue", "aov", "cvr", "refunds", "add_to_cart", "checkouts"),
+    "meta": ("spend", "impressions", "cpm", "clicks", "ctr", "cpc", "add_to_cart", "checkouts", "purchases", "cpa", "roas"),
+}
+
+
+def metrics_path() -> Path:
+    return paths.home() / "metrics" / "latest.json"
+
+
+def metrics() -> dict | None:
+    try:
+        snap = json.loads(metrics_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return snap if isinstance(snap, dict) and snap.get("pulled") else None
+
+
+def metrics_set(snapshot: dict) -> dict:
+    """Save a snapshot {period, shopify: {...}, meta: {...}, products: [...], notes}; stamps `pulled` now."""
+    if not isinstance(snapshot, dict):
+        raise ValueError("The snapshot must be a JSON object.")
+    clean = {"pulled": paths.now(), "period": str(snapshot.get("period") or "today"), "source": str(snapshot.get("source") or "Shopify and Meta ads connectors, read-only"),
+             "notes": str(snapshot.get("notes") or "")}
+    for section, keys in METRIC_KEYS.items():
+        vals = snapshot.get(section) or {}
+        if not isinstance(vals, dict):
+            raise ValueError(f"'{section}' must be an object of figures.")
+        clean[section] = {k: vals[k] for k in keys if isinstance(vals.get(k), (int, float))}
+    products = snapshot.get("products") or []
+    clean["products"] = [{"name": str(p.get("name", "")), **{k: p[k] for k in ("spend", "revenue", "orders", "roas", "cpa") if isinstance(p.get(k), (int, float))}}
+                         for p in products if isinstance(p, dict)][:20]
+    path = metrics_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(clean, indent=2), encoding="utf-8")
+    return clean
+
+
 def data(conn) -> dict:
     cfg = paths.config()
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
-            "actions": recent_actions(conn),
+            "actions": recent_actions(conn), "metrics": metrics(),
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
             # Plan section 16 (parked): unlocks earned on real strong sales days. Nothing is unlocked until the rules are agreed.

@@ -154,7 +154,7 @@ const Feed = {
         agents: all.length, working: all.filter((a) => a.status === "working").length, idle: all.filter((a) => a.status === "idle").length,
         onTrack: openCount ? Math.round((open.filter((t) => t.status === "in_progress" || t.status === "todo").length / openCount) * 100) : 100,
       },
-      week: h.week, daily: h.daily || [], milestone: h.milestone, allowance: h.allowance, connectors: h.connectors, actions: h.actions || [],
+      week: h.week, daily: h.daily || [], milestone: h.milestone, allowance: h.allowance, connectors: h.connectors, actions: h.actions || [], metrics: h.metrics,
       tests: s.tests || [], activity: s.activity || [], journal: s.journal || [], jarvis: this.jarvis,
     };
   },
@@ -228,19 +228,22 @@ function renderOverview(m) {
   const pts = daily.map((d) => d.profit), hasData = daily.some((d) => d.income || d.expenses);
   const max = Math.max(1, ...pts.map(Math.abs)), W = 268, H = 46;
   const path = pts.map((v, i) => `${i ? "L" : "M"}${((i / Math.max(1, pts.length - 1)) * W).toFixed(1)},${(H / 2 - (v / max) * (H / 2 - 4)).toFixed(1)}`).join("");
-  const spend = m.tests.reduce((n, t) => n + (t.eval?.spend || 0), 0), revenue = m.tests.reduce((n, t) => n + (t.eval?.revenue || 0), 0);
-  const orders = m.tests.reduce((n, t) => n + (t.eval?.purchases || 0), 0);
+  // Live store and ad figures when JARVIS has pulled a snapshot; otherwise the ledger and logged tests.
+  const s = m.metrics, sh = s?.shopify || {}, me = s?.meta || {};
+  const usd = (n) => `$${Math.round(n).toLocaleString("en-US")}`;
+  const cells = s ? [
+      ["Revenue", sh.revenue != null ? usd(sh.revenue) : "–"], ["Orders", sh.orders ?? "–"],
+      ["ROAS", me.roas != null ? `${Number(me.roas).toFixed(1)}x` : me.spend && sh.revenue != null ? `${(sh.revenue / me.spend).toFixed(1)}x` : "–"],
+      ["Ad spend", me.spend != null ? usd(me.spend) : "–"], ["CPA", me.cpa != null ? usd(me.cpa) : "–"], ["CVR", sh.cvr != null ? `${Number(sh.cvr).toFixed(1)}%` : "–"],
+    ] : [["Sales", money(w.income)], ["Costs", money(w.expenses)], ["ROAS", "–"]];
   $("overview").innerHTML = `<h2 class="card-title">${icon("i-spark")}Business overview<span class="delta">${w.profit >= w.pace ? "On pace" : "Behind pace"}</span></h2>
     <div class="big">${money(w.profit)}<small>profit this week of ${money(w.target)}</small></div>
     <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily profit, last 14 days">
       <line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="rgba(255,255,255,.12)"/>
       <path d="${path}" fill="none" stroke="${hasData ? "#3fcf8e" : "rgba(255,255,255,.35)"}" stroke-width="2"/></svg>
-    <div class="metrics">
-      <div><span>Sales</span><b>${money(w.income)}</b></div>
-      <div><span>Costs</span><b>${money(w.expenses)}</b></div>
-      <div><span>ROAS</span><b>${spend ? (revenue / spend).toFixed(1) + "x" : "–"}</b></div>
-    </div>
-    <p class="source">${hasData ? "" : "No sales or costs logged in the last 14 days. "}From the accountant's ledger and logged test results (${orders} order${orders === 1 ? "" : "s"} in tests). Live Shopify and Meta numbers aren't connected to this panel yet: see Analytics.</p>`;
+    <div class="metrics">${cells.map(([k, v]) => `<div><span>${k}</span><b>${esc(String(v))}</b></div>`).join("")}</div>
+    <p class="source">${s ? `Shopify and Meta figures for ${esc(s.period)}, pulled ${esc(ago(s.pulled))} read-only by JARVIS. Profit line from the accountant's ledger.`
+      : `${hasData ? "" : "No sales or costs logged in the last 14 days. "}From the accountant's ledger. Live Shopify and Meta figures appear here once JARVIS pulls a snapshot (ask: "pull the store and ad figures").`}</p>`;
   void pace;
 }
 
@@ -520,9 +523,10 @@ function panelAnalytics(m) {
       <h3>Product tests</h3>
       ${tests.length ? `<table class="num"><tr><th>Test</th><th>Status</th><th class="r">Spend</th><th class="r">Sales</th><th class="r">Orders</th><th class="r">ROAS</th></tr>${tests.map((t) => { const e = t.eval || {}; return `<tr><td>X${t.id} ${esc(t.product)}</td><td>${esc(t.status)}</td><td class="r">${e.spend != null ? "$" + Number(e.spend).toFixed(0) : "–"}</td><td class="r">${e.revenue != null ? "$" + Number(e.revenue).toFixed(0) : "–"}</td><td class="r">${e.purchases ?? "–"}</td><td class="r">${e.spend ? (e.revenue / e.spend).toFixed(2) : "–"}</td></tr>`; }).join("")}</table>` : `<p class="empty">No product tests logged yet. Results appear here once the brush test starts.</p>`}
       <h3>Claude Max this week</h3>${allowanceHTML(m)}
-      <h3>Meta and Shopify</h3>
-      <p class="desc">Live Meta and Shopify figures (spend, CPM, CTR, CPC, add to cart, checkouts, purchases, CPA, ROAS, AOV, refunds) aren't pulled into this page yet. The connectors themselves are on the account${metaShop.length ? `: ${metaShop.map((s) => `${esc(connectorName(s.name))} ${esc(s.status.toLowerCase())}`).join(", ")}` : ""}; ask JARVIS for a read-only report in the meantime.</p>
-      <div class="btns"><button class="btn gold" data-ask="Pull this week's Meta and Shopify results (read-only) and give me the key numbers.">Ask JARVIS for a report</button></div>
+      <h3>Shopify and Meta</h3>
+      ${metricsHTML(m)}
+      <p class="desc">Connectors on the account${metaShop.length ? `: ${metaShop.map((s) => `${esc(connectorName(s.name))} ${esc(s.status.toLowerCase())}`).join(", ")}` : ""}. Read-only: JARVIS pulls, saves a snapshot, and nothing here can change the store or the ads.</p>
+      <div class="btns"><button class="btn gold" data-ask="Pull today's and this week's Shopify and Meta figures read-only (sessions, orders, revenue, AOV, CVR, refunds; spend, CPM, CTR, CPC, add to cart, checkouts, purchases, CPA, ROAS, per product test) and save them with bin/jarvis metrics set.">${m.metrics ? "Pull fresh figures" : "Pull the figures now"}</button></div>
     </div>` };
 }
 // Claude Max allowance: meant to be used nearly in full each week, never run out early. A pace line shows where usage
@@ -538,6 +542,19 @@ function allowanceHTML(m) {
     return `<p class="desc"><b>${Math.round(a.used_pct)}%</b> used, pace mark at ${Math.round(pace)}%. ${esc(word)}. Resets ${esc(relDay(a.resets))}.</p><p class="desc">${esc(idle)}</p>`;
   }
   return `<p class="desc"><span class="tag unknown">Not connected yet</span></p><p class="desc">Claude doesn't report Max usage to JARVIS yet. Once it does, this shows the week's usage against a pace line, so the allowance is used nearly in full without running out before the reset.</p><p class="desc">${esc(idle)}</p>`;
+}
+// Plan section 14: every important Shopify and Meta number, from the snapshot JARVIS pulled. Missing figures show as "–".
+function metricsHTML(m) {
+  const s = m.metrics;
+  if (!s) return `<p class="desc"><span class="tag unknown">Not pulled yet</span></p><p class="desc">Sessions, orders, revenue, AOV, CVR and refunds from Shopify; spend, CPM, CTR, CPC, add to cart, checkouts, purchases, CPA and ROAS from Meta, per day and per product test, appear here once JARVIS pulls them.</p>`;
+  const usd = (n) => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  const f = (v, kind) => v == null ? "–" : kind === "$" ? usd(v) : kind === "%" ? `${Number(v).toFixed(2)}%` : kind === "x" ? `${Number(v).toFixed(2)}x` : Number(v).toLocaleString("en-US");
+  const rows = (pairs) => `<table class="num">${pairs.map(([k, v, kind]) => `<tr><th>${k}</th><td class="r">${f(v, kind)}</td></tr>`).join("")}</table>`;
+  const sh = s.shopify || {}, me = s.meta || {};
+  return `<p class="quiet">${esc(s.period)}, pulled ${esc(ago(s.pulled))}. ${esc(s.source)}${s.notes ? `. ${esc(s.notes)}` : ""}</p>
+    <h3>Shopify</h3>${rows([["Sessions", sh.sessions], ["Orders", sh.orders], ["Revenue", sh.revenue, "$"], ["Average order", sh.aov, "$"], ["Conversion rate", sh.cvr, "%"], ["Add to cart", sh.add_to_cart], ["Checkouts", sh.checkouts], ["Refunds", sh.refunds, "$"]])}
+    <h3>Meta ads</h3>${rows([["Spend", me.spend, "$"], ["Impressions", me.impressions], ["CPM", me.cpm, "$"], ["Clicks", me.clicks], ["CTR", me.ctr, "%"], ["CPC", me.cpc, "$"], ["Add to cart", me.add_to_cart], ["Checkouts", me.checkouts], ["Purchases", me.purchases], ["CPA", me.cpa, "$"], ["ROAS", me.roas, "x"]])}
+    ${s.products?.length ? `<h3>By product test</h3><table class="num"><tr><th>Product</th><th class="r">Spend</th><th class="r">Revenue</th><th class="r">Orders</th><th class="r">ROAS</th></tr>${s.products.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${f(p.spend, "$")}</td><td class="r">${f(p.revenue, "$")}</td><td class="r">${f(p.orders)}</td><td class="r">${f(p.roas, "x")}</td></tr>`).join("")}</table>` : ""}`;
 }
 function panelSettings(m) {
   const c = m.connectors || {};

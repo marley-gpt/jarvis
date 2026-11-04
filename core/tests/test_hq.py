@@ -53,6 +53,19 @@ class HQDataTest(BrainTest):
         self.assertIsNone(hq.MCP_LINE.match("Checking MCP server health…"))
         self.assertIsNone(hq.connectors()["servers"])  # nothing is checked until asked
 
+    def test_metrics_snapshot_round_trip(self):
+        self.assertIsNone(hq.metrics())
+        snap = hq.metrics_set({"period": "today", "shopify": {"orders": 3, "revenue": 129.0, "bogus": "x"},
+                               "meta": {"spend": 40.5, "roas": 3.19}, "products": [{"name": "brush", "spend": 40.5, "orders": 3}]})
+        self.assertTrue(snap["pulled"])
+        self.assertEqual(snap["shopify"], {"orders": 3, "revenue": 129.0})
+        self.assertEqual(hq.metrics()["meta"]["roas"], 3.19)
+        self.assertEqual(hq.data(self.conn)["metrics"]["products"][0]["name"], "brush")
+        with self.assertRaises(ValueError):
+            hq.metrics_set({"shopify": "nope"})
+        out = self.run_cli("metrics", "show")
+        self.assertIn("orders=3", out.stdout)
+
     def test_preview_reads_brain_files_only(self):
         work = self.home / "work" / "x"
         work.mkdir(parents=True)

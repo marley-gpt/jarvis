@@ -516,6 +516,25 @@ def cmd_job_finish(ok):
     return run
 
 
+def cmd_metrics(conn, args):
+    from . import hq
+    if args.sub == "set":
+        raw = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
+        try:
+            snap = hq.metrics_set(json.loads(raw))
+        except (ValueError, OSError) as exc:
+            raise records.RecordError(f"metrics: {exc}") from exc
+        out(f"Saved the {snap['period']} snapshot ({len(snap['shopify'])} Shopify and {len(snap['meta'])} Meta figures) for the HQ.")
+        return
+    snap = hq.metrics()
+    if not snap:
+        out("No metrics snapshot yet. JARVIS pulls Shopify and Meta figures read-only and saves them with: bin/jarvis metrics set --file <json>")
+        return
+    out(f"Pulled {snap['pulled']} ({snap['period']}, {snap['source']})")
+    for section in ("shopify", "meta"):
+        out(f"  {section}: " + ", ".join(f"{k}={v}" for k, v in snap[section].items()))
+
+
 def cmd_dicloak(conn, args):
     if args.sub == "status":
         titles = dicloak.windows()
@@ -919,6 +938,13 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--summary", required=True)
         s.add_argument("--quiet", action="store_true", help="don't message the phone")
         s.set_defaults(fn=cmd_job_finish(ok))
+
+    mt = sub.add_parser("metrics", help="the live Shopify and Meta figures the HQ shows (a read-only snapshot JARVIS pulls)").add_subparsers(
+        dest="sub", required=True)
+    s = mt.add_parser("set", help="save a snapshot: JSON with period, shopify {...}, meta {...}, products [...]")
+    s.add_argument("--file", help="read the JSON from this file instead of stdin")
+    s.set_defaults(fn=cmd_metrics)
+    mt.add_parser("show").set_defaults(fn=cmd_metrics)
 
     dc = sub.add_parser("dicloak", help="the Master Key tools in the DICloak browser: status, show, lock, unlock")
     dc.add_argument("sub", choices=("status", "show", "lock", "unlock"))
