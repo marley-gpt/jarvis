@@ -790,8 +790,22 @@ setInterval(() => { if (selected?.startsWith("agent:") || selected?.startsWith("
 document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
   if (b.dataset.view === "reset") open(null);
   const on = scene?.view(b.dataset.view);
-  document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(!!on));
+  if (b.dataset.view !== "walk") document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(!!on));
 }));
+// Walk mode: the hint line, the button for whatever you are standing next to, eye level or over the shoulder, leave.
+function renderWalk(s) {
+  $("walk").hidden = !s.on; $("stage").classList.toggle("walking", s.on);
+  document.querySelector('[data-view="walk"]').setAttribute("aria-pressed", String(s.on));
+  if (s.on) document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", "false");
+  $("stick").hidden = !(s.on && s.touch);
+  $("walk-hint").textContent = s.touch ? "Stick to walk, drag to look" : s.locked ? "W A S D to walk, Shift to run, mouse to look, E to open, Esc frees the mouse" : "Click the view to take the mouse, then W A S D";
+  $("walk-eye").textContent = s.third ? "Eye level" : "Over the shoulder";
+  $("walk-talk").hidden = !s.near;
+  if (s.near) $("walk-talk").textContent = s.near.kind === "agent" ? `Talk to ${s.near.label}` : s.near.kind === "jarvis" ? "Talk to JARVIS" : `Open ${s.near.label}`;
+}
+$("walk-talk").addEventListener("click", () => scene?.interact());
+$("walk-eye").addEventListener("click", () => scene?.view("eye"));
+$("walk-leave").addEventListener("click", () => scene?.view("walk"));
 $("demo").addEventListener("click", () => {
   if (!scene?.demo) return;
   const on = $("demo").getAttribute("aria-pressed") !== "true";
@@ -815,11 +829,12 @@ function cardRects() {
 // Simplified mode: the owner's choice in Settings, ?simple in the address, or automatically on phones and low-power devices.
 const simple = /[?&]simple\b/.test(location.search) || J.pref("hqSimple") === "1" || (J.pref("hqSimple") !== "0" && (isPhone() || (navigator.hardwareConcurrency || 8) <= 4));
 import("/hq-scene.js").then(({ startScene }) => startScene({
-  stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), status: STATUS, simple,
+  stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), stick: $("stick"), status: STATUS, simple,
   selected: () => pavilionFor(selected),
   avoid: cardRects,
   onPick: (kind, id) => open(kind === "jarvis" ? "jarvis" : kind === "team" ? `agent:${id}` : `${kind}:${id}`),   // a pavilion is an agent's
   onExplore: (on) => document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(on)),
+  onWalk: renderWalk,
   fail: (text) => { $("nogl").hidden = false; $("nogl").textContent = text; $("veil").classList.add("gone"); document.querySelector(".views").hidden = true; return null; },
 })).then((s) => {
   scene = s;

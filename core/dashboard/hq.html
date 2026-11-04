@@ -129,6 +129,18 @@ nav.pill button[aria-current="true"] .n { border-color: rgba(27, 20, 8, .35); co
 .views button[aria-pressed="true"] { color: var(--gold-hi); background: rgba(198, 164, 106, .16); }
 .views .i { width: 20px; height: 20px; }
 
+/* walk mode: the hint and its buttons at the top, the stick (phones) bottom left */
+#walk { position: absolute; z-index: 12; top: 74px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; max-width: calc(100% - 32px); font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
+#walk[hidden] { display: none; }
+#walk button { padding: 6px 11px; border-radius: 9px; font-size: 12.5px; color: var(--text); background: rgba(255, 255, 255, .07); }
+#walk button:hover { background: rgba(255, 255, 255, .13); }
+#walk button.gold { color: #1a1406; background: var(--gold-hi); font-weight: 600; }
+#walk button[hidden] { display: none; }
+#stick { position: absolute; z-index: 12; left: 18px; bottom: 96px; width: 118px; height: 118px; border-radius: 50%; background: rgba(20, 26, 34, .35); border: 1px solid var(--edge); backdrop-filter: blur(8px); touch-action: none; }
+#stick[hidden] { display: none; }
+#stick i { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255, 255, 255, .55); border: 1px solid var(--gold-hi); pointer-events: none; }
+#stage.walking #scene { cursor: crosshair; }
+
 /* toast and talk bar, bottom centre */
 .center-bottom { position: fixed; z-index: 11; left: 50%; transform: translateX(-50%); bottom: max(18px, env(safe-area-inset-bottom)); width: min(560px, calc(100vw - 800px)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 #toast { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 13px; text-align: left; width: 100%; }
@@ -267,6 +279,9 @@ select.pick.saved { border-color: var(--working); }
   #jstate { display: none; }
   #panel { top: auto; left: 0; width: 100%; height: 82vh; border-radius: 20px 20px 0 0; border-left: 0; border-top: 1px solid var(--edge); transform: translateY(105%); }
   #demo-note { position: absolute; top: 120px; width: calc(100% - 28px); text-align: center; white-space: normal; }
+  #walk { top: auto; bottom: 58px; font-size: 12px; padding: 5px 6px 5px 10px; }
+  #walk-hint { overflow: hidden; text-overflow: ellipsis; }
+  #stick { left: 12px; bottom: 58px; width: 104px; height: 104px; }
 }
 @media (min-width: 861px) { .stack { display: contents; } #m-board { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; } }
@@ -290,6 +305,7 @@ select.pick.saved { border-color: var(--working); }
   <symbol id="i-plus" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M11 8v6M8 11h6M21 21l-5-5"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-5-5"/></symbol>
   <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></symbol>
+  <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13.5" cy="4" r="1.7"/><path d="M9.5 21l2.3-6.4-2.3-2.1 1.4-5.2 2.8 1.1 1.7 3 2.6 1.2M7.5 13.6l2.1-4.2M14.2 15.4l2.3 5.6"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></symbol>
   <symbol id="i-brush" viewBox="0 0 24 24"><path d="M14 4l6 6-8 8H6v-6z"/><path d="M6 18l-3 3"/></symbol>
@@ -333,9 +349,17 @@ select.pick.saved { border-color: var(--working); }
     <button data-view="in"><svg class="i"><use href="#i-plus"/></svg>Zoom in</button>
     <button data-view="out"><svg class="i"><use href="#i-minus"/></svg>Zoom out</button>
     <button data-view="explore" aria-pressed="false"><svg class="i"><use href="#i-compass"/></svg>Explore</button>
+    <button data-view="walk" aria-pressed="false"><svg class="i"><use href="#i-walk"/></svg>Walk</button>
     <button id="demo" aria-pressed="false"><svg class="i"><use href="#i-play"/></svg>Demo</button>
   </div>
   <div id="demo-note" hidden>Demo: sample sub-agents and a new hire, not real activity</div>
+  <div id="walk" class="glass" role="group" aria-label="Walk mode" hidden>
+    <span id="walk-hint"></span>
+    <button id="walk-talk" class="gold" hidden></button>
+    <button id="walk-eye">Over the shoulder</button>
+    <button id="walk-leave">Leave</button>
+  </div>
+  <div id="stick" aria-label="Walk stick" hidden><i></i></div>
 </div>
 
 <div class="stack">

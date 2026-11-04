@@ -60,6 +60,12 @@ function buildWorld(THREE, addons, renderer, opts) {
   controls.rotateSpeed = 0.5; controls.zoomSpeed = 0.8;
   // The concept's view: high over the estate's south lawn, looking north over HQ to the harbour and the city.
   const HOME = () => ({ az: 0, pol: 1.22, r: stage.clientWidth < stage.clientHeight ? 230 : 158, target: new V3(0, 4, -30) });
+  // What walk mode bumps into, in world x/z: round things (trees, lamps, desks), wall segments, and raised floors (a
+  // function of x and z giving the floor height there, or null). Each is registered where the thing is built.
+  const solid = { circles: [], segs: [], floors: [] };
+  solid.circle = (x, z, r) => solid.circles.push([x, z, r]);
+  solid.seg = (ax, az, bx, bz) => solid.segs.push([ax, az, bx, bz]);
+  solid.rect = (x, z, w, d) => { const l = x - w / 2, r = x + w / 2, t = z - d / 2, b = z + d / 2; solid.seg(l, t, r, t); solid.seg(r, t, r, b); solid.seg(r, b, l, b); solid.seg(l, b, l, t); };
 
   // ---------------------------------------------------------------- textures and materials
   function canvasTex(w, h, draw, repeat) {
@@ -518,7 +524,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     lawn(...l);
     const [x, z, w, d] = l;
     const n = Math.max(2, Math.round((w * d) / 420));
-    for (let k = 0; k < n; k++) olive(scene3, x + (rand() - 0.5) * (w - 6), 0, z + (rand() - 0.5) * (d - 6), 0.9 + rand() * 0.4);
+    for (let k = 0; k < n; k++) { const ox = x + (rand() - 0.5) * (w - 6), oz = z + (rand() - 0.5) * (d - 6); olive(scene3, ox, 0, oz, 0.9 + rand() * 0.4); solid.circle(ox, oz, 0.6); }
     for (let k = 0; k < n * 4; k++) flower(scene3, x + (rand() - 0.5) * (w - 3), 0.3, z + (rand() - 0.5) * (d - 3));
   });
 
@@ -529,6 +535,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     disc.rotation.x = -Math.PI / 2; disc.position.set(PLAZA.x, 0.06, PLAZA.z); disc.receiveShadow = !simple; scene3.add(disc);
     const basin = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.4, 1.1, 64, 1, true), M.marble); basin.position.set(PLAZA.x, 0.55, PLAZA.z); scene3.add(basin);
     const lip = new THREE.Mesh(new THREE.TorusGeometry(9.1, 0.28, 10, 96), M.gold); lip.rotation.x = Math.PI / 2; lip.position.set(PLAZA.x, 1.12, PLAZA.z); scene3.add(lip);
+    solid.circle(PLAZA.x, PLAZA.z, 9.9);
     const water = new THREE.Mesh(new THREE.CircleGeometry(9, 64), std({ color: 0x3fb7cf, roughness: 0.08, metalness: 0.2, normalMap: poolRipple, normalScale: new THREE.Vector2(0.4, 0.4), envMap: envTex, envMapIntensity: 0.8 }));
     water.rotation.x = -Math.PI / 2; water.position.set(PLAZA.x, 0.9, PLAZA.z); scene3.add(water);
     const ped = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.4, 3.2, 32), M.marble); ped.position.set(PLAZA.x, 2, PLAZA.z); ped.castShadow = !simple; scene3.add(ped);
@@ -578,12 +585,19 @@ function buildWorld(THREE, addons, renderer, opts) {
         box(35, 4.3, 11, M.tint, 0, sy + 3.05, -4.4, HQ);                       // the core
         box(34.6, 4.1, 0.2, M.interior, 0, sy + 3.05, 1.2, HQ, false);          // lit back wall of the office
         box(34.6, 0.08, 7.8, M.oak, 0, top + 0.04, 5.2, HQ, false);             // office floor
-        for (let k = -3; k <= 3; k++) workstation(HQ, k * 4.8, top + 0.08, 6.2, Math.PI, 1.15);
+        for (let k = -3; k <= 3; k++) if (f || k) workstation(HQ, k * 4.8, top + 0.08, 6.2, Math.PI, 1.15);   // (the ground floor's door is at k = 0)
         for (const px of [-16.4, 16.4]) { box(0.8, 0.8, 0.8, M.white, px, top + 0.48, 8, HQ, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, top + 1.5, 8); HQ.add(pl); }
-        box(35.2, 4.3, 0.12, M.glass, 0, sy + 3.05, 9.3, HQ, false);
-        for (let k = -4; k <= 4; k++) box(0.22, 4.3, 0.3, M.gold, k * 4.3, sy + 3.05, 9.4, HQ, false);
+        if (f === 0) {
+          // The ground floor has a door in the glass, a gap in the rail and steps down to the podium: walk mode goes in.
+          for (const s of [-1, 1]) { box(15.3, 4.3, 0.12, M.glass, s * 9.95, sy + 3.05, 9.3, HQ, false); box(15.8, 1.0, 0.06, M.glass, s * 10.2, top + 0.5, 11.55, HQ, false); box(0.22, 4.3, 0.3, M.gold, s * 2.3, sy + 3.05, 9.4, HQ, false); }
+          box(4.8, 0.25, 0.3, M.gold, 0, sy + 5.08, 9.4, HQ, false);
+          for (let i = 0; i < 3; i++) box(5, 0.3, 0.7, M.marble, 0, 3.75 - i * 0.3, 11.95 + i * 0.7, HQ);
+        } else {
+          box(35.2, 4.3, 0.12, M.glass, 0, sy + 3.05, 9.3, HQ, false);
+          box(36.2, 1.0, 0.06, M.glass, 0, top + 0.5, 11.55, HQ, false);           // glass rail
+        }
+        for (let k = -4; k <= 4; k++) if (f || k) box(0.22, 4.3, 0.3, M.gold, k * 4.3, sy + 3.05, 9.4, HQ, false);
         box(36.2, 0.3, 1.6, M.marble, 0, top - 0.15, 10.8, HQ);                 // terrace
-        box(36.2, 1.0, 0.06, M.glass, 0, top + 0.5, 11.55, HQ, false);           // glass rail
         box(36.2, 0.08, 0.08, M.gold, 0, top + 1.0, 11.55, HQ, false);
       }
     }
@@ -653,6 +667,25 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const z of [0.8, -0.8]) box(4, 0.12, 0.12, M.frame, 0, 0.1, z, heli, false);
     HQ.add(heli);
     HQ.traverse((o) => { o.userData.pick = "jarvis"; });
+    // Walk mode: the podium edge (open at the steps), the core, the ground-floor office through its door, the wings;
+    // and the floors: podium, office and terrace, with ramps on the steps.
+    {
+      const S = 1.15, Z0 = -40, w = (x, z) => [x * S, Z0 + z * S];
+      const seg = (ax, az, bx, bz) => solid.seg(...w(ax, az), ...w(bx, bz)), rect = (x, z, wd, d) => solid.rect(x * S, Z0 + z * S, wd * S, d * S);
+      seg(-32, 15, -13, 15); seg(13, 15, 32, 15); seg(-32, -15, 32, -15); seg(-32, -15, -32, 15); seg(32, -15, 32, 15);
+      rect(0, -4.4, 35, 11.2);
+      for (const s of [-1, 1]) { seg(s * 17.5, 1.2, s * 17.5, 9.3); seg(s * 2.3, 9.3, s * 17.6, 9.3); seg(s * 2.3, 11.55, s * 18.1, 11.55); seg(s * 18.1, 9.3, s * 18.1, 11.6); rect(s * 25, 1, 16, 18); }
+      for (let k = -3; k <= 3; k++) if (k) solid.circle(...w(k * 4.8, 6.2), 1.4);
+      for (const px of [-16.4, 16.4]) solid.circle(...w(px, 8), 0.8);
+      solid.floors.push((x, z) => {
+        const lx = x / S, lz = (z - Z0) / S;
+        if (Math.abs(lx) <= 17.5 && lz >= 1.2 && lz <= 11.6) return 3.9 * S;
+        if (Math.abs(lx) <= 2.5 && lz > 11.6 && lz <= 13.8) return (3 + 0.9 * (13.8 - lz) / 2.2) * S;
+        if (Math.abs(lx) <= 32 && Math.abs(lz) <= 15) return 3 * S;
+        if (Math.abs(lx) <= 13 && lz > 15 && lz <= 21.6) return 3 * S * (21.6 - lz) / 6.6;
+        return null;
+      });
+    }
   }
   // The light beam rising from the crown.
   const beamMat = new THREE.ShaderMaterial({
@@ -673,11 +706,13 @@ function buildWorld(THREE, addons, renderer, opts) {
     const pool = new THREE.Mesh(new THREE.PlaneGeometry(26, 9), std({ color: 0x2fb3cc, roughness: 0.06, metalness: 0.15, normalMap: poolRipple, normalScale: new THREE.Vector2(0.5, 0.5), envMap: envTex, envMapIntensity: 0.8 }));
     pool.rotation.x = -Math.PI / 2; pool.position.set(-62, 0.33, 46); scene3.add(pool);
     box(26.6, 0.2, 0.3, M.gold, -62, 0.35, 41.4, scene3, false); box(26.6, 0.2, 0.3, M.gold, -62, 0.35, 50.6, scene3, false);
+    solid.rect(-62, 46, 26.6, 9.6);
     for (let i = 0; i < 6; i++) {
       const x = -73 + i * 4.4;
       box(1.1, 0.35, 2.6, M.white, x, 0.5, 54.2);
       const umb = new THREE.Mesh(new THREE.ConeGeometry(2, 0.8, 12), M.white); umb.position.set(x + 2.2, 3.1, 54.4); umb.castShadow = !simple; scene3.add(umb);
       box(0.08, 2.8, 0.08, M.gold, x + 2.2, 1.6, 54.4, scene3, false);
+      solid.circle(x + 2.2, 54.4, 0.2); solid.circle(x, 54.2, 1.0);
     }
     const courtTex = canvasTex(512, 256, (g, w, h) => {
       g.fillStyle = "#b4664a"; g.fillRect(0, 0, w, h); g.fillStyle = "#2f7d74"; g.fillRect(36, 30, w - 72, h - 60);
@@ -686,10 +721,10 @@ function buildWorld(THREE, addons, renderer, opts) {
     });
     const court = new THREE.Mesh(new THREE.PlaneGeometry(30, 15), std({ map: courtTex, roughness: 0.8 }));
     court.rotation.x = -Math.PI / 2; court.position.set(66, 0.08, 46); court.receiveShadow = !simple; scene3.add(court);
-    box(0.1, 1, 11, M.white, 66, 0.5, 46, scene3, false);
+    box(0.1, 1, 11, M.white, 66, 0.5, 46, scene3, false); solid.seg(66, 40.5, 66, 51.5);
     for (const [x, z] of [[51, 38.5], [81, 38.5], [51, 53.5], [81, 53.5]]) box(0.15, 3.2, 0.15, M.frame, x, 1.6, z, scene3, false);
     // Forecourt turntable with three supercars.
-    turn = new THREE.Group(); turn.position.set(0, 0, 46); scene3.add(turn);
+    turn = new THREE.Group(); turn.position.set(0, 0, 46); scene3.add(turn); solid.circle(0, 46, 11.4);
     const tt = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, 0.4, 72), std({ color: 0x2b2f35, roughness: 0.25, metalness: 0.4 })); tt.position.y = 0.2; tt.receiveShadow = !simple; turn.add(tt);
     const ttRing = new THREE.Mesh(new THREE.TorusGeometry(11, 0.18, 8, 96), M.gold); ttRing.rotation.x = Math.PI / 2; ttRing.position.y = 0.42; turn.add(ttRing);
     // Side profile of a mid-engined supercar, extruded across its width, with a smoked canopy, intakes and wheels.
@@ -744,7 +779,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const pm = new THREE.Matrix4(), fm = new THREE.Matrix4(), q = new THREE.Quaternion();
     spots.forEach(([x, z], i) => {
       const s = 0.85 + (i % 5) * 0.08, ry = i * 1.7;
-      pm.copy(at(x, 0, z, ry, 1, s, 1)); trunks.setMatrixAt(i, pm);
+      pm.copy(at(x, 0, z, ry, 1, s, 1)); trunks.setMatrixAt(i, pm); solid.circle(x, z, 0.55);
       const top = new V3(0.012 * 100, 10, 0).applyMatrix4(pm);
       for (let k = 0; k < FRONDS; k++) {
         q.setFromEuler(new THREE.Euler(0, ry + (k / FRONDS) * Math.PI * 2 + (k % 2) * 0.2, (k % 3 - 1) * 0.12));
@@ -757,18 +792,18 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2 + 0.1; lampPos.push([PLAZA.x + Math.cos(a) * 17, PLAZA.z + Math.sin(a) * 17]); }
     const lamps = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.16, 4, 8), M.frame, lampPos.length);
     const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 12, 8), M.lampGlass, lampPos.length);
-    lampPos.forEach(([x, z], i) => { lamps.setMatrixAt(i, at(x, 2, z)); bulbs.setMatrixAt(i, at(x, 4.1, z)); });
+    lampPos.forEach(([x, z], i) => { lamps.setMatrixAt(i, at(x, 2, z)); bulbs.setMatrixAt(i, at(x, 4.1, z)); solid.circle(x, z, 0.3); });
     scene3.add(lamps, bulbs);
     const hedges = [[-30, 64, 26, 1.4, 1.6], [30, 64, 26, 1.4, 1.6], [-46, 36, 1.6, 1.4, 12], [46, 36, 1.6, 1.4, 12]];
     const hm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), M.hedge, hedges.length);
-    hedges.forEach(([x, z, w, h, d], i) => hm.setMatrixAt(i, at(x, h / 2, z, 0, w, h, d)));
+    hedges.forEach(([x, z, w, h, d], i) => { hm.setMatrixAt(i, at(x, h / 2, z, 0, w, h, d)); solid.rect(x, z, w, d); });
     hm.castShadow = !simple; scene3.add(hm);
     // Planting round the plaza ring: a bed of flowers outside the lamps, benches facing the globe, cypress pairs at the
     // corners of the estate, and visitors about the place (scenery, not agents).
     for (let i = 0; i < (simple ? 70 : 170); i++) { const a = rand() * Math.PI * 2, r = 20.2 + rand() * 1.8; flower(scene3, PLAZA.x + Math.cos(a) * r, 0.32, PLAZA.z + Math.sin(a) * r); }
-    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.13; prop("bench", scene3, PLAZA.x + Math.cos(a) * 15.2, 0.06, PLAZA.z + Math.sin(a) * 15.2, -a + Math.PI / 2); }
-    for (const [x, z] of [[-97, 84], [-92, 84], [97, 84], [92, 84], [-97, -62], [-92, -62], [97, -62], [92, -62], [-48, 84], [48, 84]]) prop("cypress", scene3, x, 0, z, 0, 0.9 + rand() * 0.3);
-    for (const x of [-80, -60, 60, 80]) olive(scene3, x, 0, 82, 1);
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.13, bx = PLAZA.x + Math.cos(a) * 15.2, bz = PLAZA.z + Math.sin(a) * 15.2; prop("bench", scene3, bx, 0.06, bz, -a + Math.PI / 2); solid.circle(bx, bz, 1.1); }
+    for (const [x, z] of [[-97, 84], [-92, 84], [97, 84], [92, 84], [-97, -62], [-92, -62], [97, -62], [92, -62], [-48, 84], [48, 84]]) { prop("cypress", scene3, x, 0, z, 0, 0.9 + rand() * 0.3); solid.circle(x, z, 0.5); }
+    for (const x of [-80, -60, 60, 80]) { olive(scene3, x, 0, 82, 1); solid.circle(x, 82, 0.6); }
     if (!simple) {
       for (let i = 0; i < 26; i++) { const a = rand() * Math.PI * 2, r = 11 + rand() * 7; visitor(scene3, PLAZA.x + Math.cos(a) * r, 0, PLAZA.z + Math.sin(a) * r, rand() * 6.3); }
       for (let i = 0; i < 8; i++) visitor(scene3, -74 + i * 3.6, 0.3, 44 + (i % 2) * 1.2, Math.PI);
@@ -1058,8 +1093,26 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const cx of [-(PW / 2) - 1.8, PW / 2 + 1.8]) prop("cypress", pav, cx, 0, -PD / 2 - 1.4, 0, 0.85);
     box(4.4, 0.05, 10, M.ivory, 0, 0.03, PD / 2 + 7, pav, false);
     for (const bz of [PD / 2 + 4, PD / 2 + 8, PD / 2 + 12]) for (const bx of [-2.7, 2.7]) { prop("bollard", pav, bx, 0, bz); prop("bollardLamp", pav, bx, 0, bz); }
+    // Walk mode: the glass walls (a door in the front), columns, furniture and planting are solid; the floor is raised.
+    const inv = pav.matrixWorld.clone().invert();
+    {
+      const W = (lx, lz) => { const p = pav.localToWorld(new V3(lx, 0, lz)); return [p.x, p.z]; };
+      const seg = (ax, az, bx, bz) => solid.seg(...W(ax, az), ...W(bx, bz)), circ = (lx, lz, r) => solid.circle(...W(lx, lz), r);
+      seg(-PW / 2, -PD / 2, PW / 2, -PD / 2); seg(-PW / 2, -PD / 2, -PW / 2, PD / 2); seg(PW / 2, -PD / 2, PW / 2, PD / 2);
+      seg(-PW / 2, PD / 2, -2, PD / 2); seg(2, PD / 2, PW / 2, PD / 2);
+      for (const [cx, cz] of [[-PW / 2, -PD / 2], [PW / 2, -PD / 2], [-PW / 2, PD / 2], [PW / 2, PD / 2]]) circ(cx, cz, 0.6);
+      offsets.forEach((ox) => circ(ox, -1.6, 1.7));
+      if (n === 1) for (const wx of [-5.6, 5.6]) circ(wx, -1.6, 1.3);
+      for (const [wx, wz] of [[8.6, 2.2], [8.6, 5.0], [-8.6, 2.4]]) circ(wx, wz, 1.3);
+      circ(-6.6, 5.6, 2.1);
+      for (const [px, pz] of [[-9, -5.6], [9, -5.6], [9.2, 6.2], [-9.3, 2.0]]) circ(px, pz, 0.7);
+      for (const cx of [-(PW / 2) - 1.8, PW / 2 + 1.8]) circ(cx, -PD / 2 - 1.4, 0.5);
+      for (const bz of [PD / 2 + 4, PD / 2 + 8, PD / 2 + 12]) for (const bx of [-2.7, 2.7]) circ(bx, bz, 0.3);
+      const lp = new V3();
+      solid.floors.push((x, z) => { lp.set(x, 0, z).applyMatrix4(inv); return Math.abs(lp.x) <= PW / 2 + 1 && Math.abs(lp.z) <= PD / 2 + 1 ? 0.62 : null; });
+    }
     const door = local(pav, 0, PD / 2 + 2.5, 0);
-    const P = { team: t, pav, desks, wall, door, anchor: pav.localToWorld(new V3(0, PH + 9.5, -1.8)), status: "idle", helpers: [], hires: [] };
+    const P = { team: t, pav, desks, wall, door, inv, anchor: pav.localToWorld(new V3(0, PH + 9.5, -1.8)), status: "idle", helpers: [], hires: [] };
     pav.traverse((o) => { if (!o.userData.pick) o.userData.pick = t.id; });
     hitTargets.push(pav);
     // Each agent comes out of its pavilion door and takes its seat.
@@ -1215,6 +1268,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   function place(v) { sph.set(v.r, v.pol, v.az); camera.position.copy(v.target).add(new V3().setFromSpherical(sph)); controls.target.copy(v.target); camera.lookAt(v.target); }
   function focus(id) {
     lastInput = performance.now();
+    if (me.on) { if (id) walkTo(id); return; }
     if (!id) return flyTo(HOME());
     if (id === "jarvis") return flyTo({ az: 0, pol: 1.12, r: 105, target: new V3(0, 10, -24) });
     const P = pavilions.get(id);
@@ -1225,7 +1279,10 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   function view(cmd) {
     lastInput = performance.now();
-    if (cmd === "reset") { exploring = false; focus(null); return false; }
+    if (cmd === "walk") { if (me.on) stopWalk(); else { const sel = opts.selected(); startWalk(); if (sel) walkTo(sel); } return me.on; }
+    if (cmd === "eye") { me.third = !me.third; you.root.visible = me.on && me.third; tell(); return me.on; }
+    if (cmd === "reset") { stopWalk(); exploring = false; focus(null); return false; }
+    if (me.on) stopWalk();
     if (cmd === "in" || cmd === "out") { const f = fromCam(); flyTo({ ...f, r: Math.max(controls.minDistance, Math.min(controls.maxDistance, f.r * (cmd === "in" ? 0.7 : 1.4))) }, 0.6); return exploring; }
     if (cmd === "explore") { exploring = !exploring; flight = null; return exploring; }
     return exploring;
@@ -1233,6 +1290,173 @@ function buildWorld(THREE, addons, renderer, opts) {
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   controls.addEventListener("start", () => { flight = null; if (exploring) { exploring = false; opts.onExplore?.(false); } lastInput = performance.now(); });
   controls.addEventListener("end", () => { lastInput = performance.now(); });
+
+  // ---------------------------------------------------------------- me mode: through the estate at eye level
+  // W A S D (or the arrows) and the mouse on a desktop, a stick and drag-to-look on a phone. The walker is a circle on
+  // the ground pushed out of the registered solids, so walls, trees and desks stop it and the doors let it inside.
+  const COARSE = matchMedia("(pointer: coarse)").matches;
+  const me = { on: false, third: false, pos: new V3(0, 0, 34), yaw: Math.PI, pitch: -0.04, vel: new V3(), keys: new Set(), stick: { x: 0, y: 0 }, near: null, bob: 0, drag: null };
+  const you = character("you", 0xc6a46a, 0.95); you.root.visible = false; scene3.add(you.root);
+  const youSt = { walk: 0, walkPhase: 0, sit: 0, type: 0, lean: 0, look: 0, tab: 0, swing: 0 };
+  const R = 0.55;   // the walker's radius
+  const locked = () => document.pointerLockElement === canvas;
+  const walkState = () => ({ on: me.on, third: me.third, near: me.near, locked: locked(), touch: COARSE });
+  const tell = () => opts.onWalk?.(walkState());
+  function groundAt(x, z) { let y = 0; for (const f of solid.floors) { const h = f(x, z); if (h !== null && h > y) y = h; } return y; }
+  function unstick(p) {
+    for (let pass = 0; pass < 3; pass++) {
+      for (const [cx, cz, r] of solid.circles) {
+        const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz), m = r + R;
+        if (d < m) { if (d < 1e-4) { p.x = cx + m; } else { p.x = cx + dx * (m / d); p.z = cz + dz * (m / d); } }
+      }
+      for (const [ax, az, bx, bz] of solid.segs) {
+        const vx = bx - ax, vz = bz - az, L = vx * vx + vz * vz;
+        const t = Math.max(0, Math.min(1, ((p.x - ax) * vx + (p.z - az) * vz) / L));
+        const qx = ax + vx * t, qz = az + vz * t, dx = p.x - qx, dz = p.z - qz, d = Math.hypot(dx, dz);
+        if (d < R) { const s = Math.sqrt(L), nx = d < 1e-4 ? -vz / s : dx / d, nz = d < 1e-4 ? vx / s : dz / d; p.x = qx + nx * R; p.z = qz + nz * R; }
+      }
+    }
+    p.x = Math.max(-97, Math.min(97, p.x)); p.z = Math.max(-63, Math.min(83, p.z));
+  }
+  function startWalk() {
+    me.on = true; exploring = false; flight = null; controls.enabled = false; controls.autoRotate = false;
+    me.pos.set(0, 0, 34); me.yaw = Math.PI; me.pitch = -0.04;
+    me.vel.set(0, 0, 0); me.keys.clear(); me.stick.x = me.stick.y = 0; me.near = null;
+    unstick(me.pos); me.pos.y = groundAt(me.pos.x, me.pos.z);
+    you.root.position.copy(me.pos); you.root.rotation.y = me.yaw; you.root.visible = me.third;
+    tell();
+  }
+  function stopWalk() {
+    if (!me.on) return;
+    me.on = false; controls.enabled = true; you.root.visible = false;
+    if (locked()) document.exitPointerLock();
+    // Back to the orbit view, lifting off from behind where you stood.
+    place({ az: me.yaw + Math.PI, pol: 1.25, r: 14, target: me.pos.clone().setY(me.pos.y + 1.6) });
+    flyTo({ az: me.yaw + Math.PI, pol: 1.05, r: 52, target: me.pos.clone().setY(2) }, 1.2);
+    tell();
+  }
+  // A chip or a panel while walking: step over to it instead of flying.
+  function walkTo(id) {
+    if (id === "jarvis") { me.pos.set(0, 0, -10); me.yaw = Math.PI; }
+    else {
+      const P = pavilions.get(id); if (!P) return;
+      const out = P.door.clone().sub(P.pav.position).setY(0).normalize();
+      me.pos.copy(P.door).setY(0).addScaledVector(out, 2);
+      me.yaw = Math.atan2(-out.x, -out.z);
+    }
+    me.vel.set(0, 0, 0); unstick(me.pos); me.pos.y = groundAt(me.pos.x, me.pos.z);
+    you.root.position.copy(me.pos); you.root.rotation.y = me.yaw;
+  }
+  // What you could open from here: an agent at its desk, the office you are in or at the door of, or JARVIS.
+  const lp = new V3();
+  function nearest() {
+    const p = me.pos;
+    let best = null, bd = 4;
+    for (const P of pavilions.values()) for (const d of P.desks) {
+      const dist = Math.hypot(d.seat.pos.x - p.x, d.seat.pos.z - p.z);
+      if (dist < bd) { bd = dist; best = { kind: "agent", id: d.name, label: P.team.agents.find((a) => a.name === d.name)?.label || d.name }; }
+    }
+    if (best) return best;
+    for (const P of pavilions.values()) {
+      lp.copy(p).setY(0).applyMatrix4(P.inv);
+      if (Math.abs(lp.x) <= PW / 2 + 1.5 && lp.z >= -PD / 2 - 1.5 && lp.z <= PD / 2 + 4) return { kind: "team", id: P.team.id, label: P.team.name };
+    }
+    const lx = p.x / 1.15, lz = (p.z + 40) / 1.15;
+    if ((Math.abs(lx) <= 18 && lz >= 1.2 && lz <= 14) || (Math.abs(lx) <= 13 && lz > 14 && lz <= 23) || Math.hypot(p.x - PLAZA.x, p.z - PLAZA.z) < 12.5) return { kind: "jarvis", id: "jarvis", label: "JARVIS" };
+    return null;
+  }
+  function interact() {
+    if (!me.on || !me.near) return;
+    if (locked()) document.exitPointerLock();
+    opts.onPick(me.near.kind, me.near.id);
+  }
+  const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  const KEYS = { w: "f", arrowup: "f", s: "b", arrowdown: "b", a: "l", arrowleft: "l", d: "r", arrowright: "r", shift: "run" };
+  addEventListener("keydown", (e) => {
+    if (!me.on || typing(e)) return;
+    const k = e.key.toLowerCase();
+    if (KEYS[k]) { me.keys.add(KEYS[k]); e.preventDefault(); }
+    else if (k === "e" || k === "enter") interact();
+    else if (k === "v") view("eye");
+    else if (k === "escape" && !locked() && !document.body.classList.contains("panel-open")) view("walk");   // Esc closes a panel first
+  }, true);
+  addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) me.keys.delete(k); });
+  addEventListener("blur", () => me.keys.clear());
+  document.addEventListener("pointerlockchange", tell);
+  const look = (dx, dy, k) => { me.yaw -= dx * k; me.pitch = Math.max(-1.1, Math.min(1.1, me.pitch - dy * k)); };
+  canvas.addEventListener("mousemove", (e) => { if (me.on && locked()) look(e.movementX, e.movementY, 0.0022); });
+  canvas.addEventListener("pointerdown", (e) => { if (me.on && !locked()) me.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+  canvas.addEventListener("pointermove", (e) => {
+    const d = me.drag; if (!me.on || !d || d.id !== e.pointerId) return;
+    look(e.clientX - d.x, e.clientY - d.y, COARSE ? 0.006 : 0.004); d.x = e.clientX; d.y = e.clientY;
+  });
+  // The on-screen stick (phones): its knob follows the finger, and the direction and push drive the me.
+  if (opts.stick) {
+    const stick = opts.stick, knob = stick.firstElementChild; let sid = null;
+    const set = (e) => {
+      const r = stick.getBoundingClientRect(), rad = r.width / 2;
+      let x = (e.clientX - r.left - rad) / rad, y = (e.clientY - r.top - rad) / rad; const L = Math.hypot(x, y);
+      if (L > 1) { x /= L; y /= L; }
+      me.stick.x = x; me.stick.y = y; knob.style.transform = `translate(${x * rad * 0.55}px, ${y * rad * 0.55}px)`;
+    };
+    stick.addEventListener("pointerdown", (e) => { sid = e.pointerId; try { stick.setPointerCapture(sid); } catch {} set(e); e.preventDefault(); });
+    stick.addEventListener("pointermove", (e) => { if (e.pointerId === sid) set(e); });
+    const end = (e) => { if (e.pointerId !== sid) return; sid = null; me.stick.x = me.stick.y = 0; knob.style.transform = ""; };
+    stick.addEventListener("pointerup", end); stick.addEventListener("pointercancel", end);
+  }
+  const fwd = new V3(), side = new V3(), want = new V3(), eye = new V3(), up = new V3(0, 1, 0);
+  // How far behind the walker the view can sit before it meets a wall or a tree (a ray against the solids, on the ground plane).
+  function clearBehind(x, z, dx, dz, max) {
+    let best = max;
+    for (const [ax, az, bx, bz] of solid.segs) {
+      const vx = bx - ax, vz = bz - az, den = dx * vz - dz * vx;
+      if (Math.abs(den) < 1e-6) continue;
+      const t = ((ax - x) * vz - (az - z) * vx) / den, u = ((ax - x) * dz - (az - z) * dx) / den;
+      if (t > 0 && t < best && u >= 0 && u <= 1) best = t;
+    }
+    for (const [cx, cz, r] of solid.circles) {
+      const ox = x - cx, oz = z - cz, b = ox * dx + oz * dz, c = ox * ox + oz * oz - (r + 0.3) * (r + 0.3), disc = b * b - c;
+      if (disc < 0) continue;
+      const t = -b - Math.sqrt(disc);
+      if (t > 0 && t < best) best = t;
+    }
+    return best;
+  }
+  function stepWalk(dt, time) {
+    const k = me.keys;
+    let ix = (k.has("r") ? 1 : 0) - (k.has("l") ? 1 : 0) + me.stick.x, iz = (k.has("f") ? 1 : 0) - (k.has("b") ? 1 : 0) - me.stick.y;
+    const L = Math.hypot(ix, iz); if (L > 1) { ix /= L; iz /= L; }
+    fwd.set(Math.sin(me.yaw), 0, Math.cos(me.yaw)); side.crossVectors(fwd, up);
+    const speed = k.has("run") ? 8 : 4.5;
+    want.copy(fwd).multiplyScalar(iz * speed).addScaledVector(side, ix * speed);
+    me.vel.lerp(want, 1 - Math.exp(-9 * dt));
+    // Short sub-steps so a fast walker cannot pass through a wall between frames.
+    const n = Math.max(1, Math.ceil(me.vel.length() * dt / 0.35));
+    for (let i = 0; i < n; i++) { me.pos.addScaledVector(me.vel, dt / n); unstick(me.pos); }
+    const g = groundAt(me.pos.x, me.pos.z);
+    me.pos.y += (g - me.pos.y) * (1 - Math.exp(-8 * dt));
+    const moving = Math.min(1, me.vel.length() / 4.5);
+    me.bob += dt * (5 + 4 * moving) * moving;
+    // The avatar (seen over the shoulder) walks with you.
+    youSt.walk = damp(youSt.walk, moving > 0.15 ? 1 : 0, 6, dt);
+    if (youSt.walk > 0.01) youSt.walkPhase += dt * 7.2 * (0.5 + 0.5 * youSt.walk) * (k.has("run") ? 1.4 : 1);
+    pose(you, youSt, time);
+    you.root.position.copy(me.pos);
+    you.root.rotation.y += wrap(me.yaw - you.root.rotation.y) * (1 - Math.exp(-10 * dt));
+    const bob = REDUCED ? 0 : Math.sin(me.bob) * 0.035 * moving;
+    const cp = Math.cos(me.pitch), sp = Math.sin(me.pitch);
+    eye.set(me.pos.x, me.pos.y + 1.6, me.pos.z);
+    if (me.third) {
+      const back = Math.max(1.2, Math.min(5.5, clearBehind(eye.x, eye.z, -fwd.x * cp, -fwd.z * cp, 5.5) - 0.4));
+      camera.position.set(eye.x - fwd.x * back * cp, Math.max(g + 0.5, eye.y + 0.4 - back * sp), eye.z - fwd.z * back * cp);
+      controls.target.set(eye.x + fwd.x * 3 * cp, eye.y + 3 * sp, eye.z + fwd.z * 3 * cp);
+    } else {
+      camera.position.set(eye.x, eye.y + 0.05 + bob, eye.z);
+      controls.target.set(eye.x + fwd.x * cp * 10, eye.y + sp * 10, eye.z + fwd.z * cp * 10);
+    }
+    camera.lookAt(controls.target);
+    if ((frameCount % 8) === 0) { const nr = nearest(); if (nr?.kind !== me.near?.kind || nr?.id !== me.near?.id) { me.near = nr; tell(); } }
+  }
 
   // Rendering: bloom on capable devices (lit windows, the beam, the globe); plain rendering in simplified mode.
   let composer = null;
@@ -1260,9 +1484,12 @@ function buildWorld(THREE, addons, renderer, opts) {
   let down = null;
   canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY }; });
   canvas.addEventListener("pointerup", (e) => {
+    me.drag = null;
     if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+    if (me.on && !COARSE && !locked()) { canvas.requestPointerLock?.(); return; }   // the first click takes the mouse
     const rect = canvas.getBoundingClientRect();
-    ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    if (me.on && locked()) ndc.set(0, 0);   // with the mouse taken, a click picks what is in the middle of the view
+    else ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     const hit = ray.intersectObjects([...hitTargets, HQ, globe], true)[0];
     if (!hit) return;
@@ -1277,7 +1504,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   // ---------------------------------------------------------------- the frame loop
   const damp = (a, b, lambda, dt) => a + (b - a) * (1 - Math.exp(-lambda * dt));
   const clock = new THREE.Clock();
-  const tmp = new V3(), up = new V3(0, 1, 0), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
+  const tmp = new V3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
   let first = true, ringSpin = 0.2, frameCount = 0;
   applyTime();
   place({ ...HOME(), az: -0.5, r: HOME().r * 1.35, pol: 1.0 });
@@ -1287,7 +1514,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     // Real time, so a slow device keeps pace; capped so a long pause (a hidden tab) does not jump everything.
     const dt = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime;
     if (!first && !onScreen()) return;
-    if (flight) {
+    if (me.on) stepWalk(dt, time);
+    else if (flight) {
       flight.t = Math.min(1, (performance.now() - flight.start) / (flight.dur * 1000));
       const k = ease(flight.t), f = flight.from, g = flight.goal;
       place({ az: f.az + (g.az - f.az) * k, pol: f.pol + (g.pol - f.pol) * k, r: f.r + (g.r - f.r) * k, target: f.target.clone().lerp(g.target, k) });
@@ -1423,6 +1651,6 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
-  stage.hq = { camera, controls, actors, frame, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
-  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward };
+  stage.hq = { camera, controls, actors, frame, me, solid, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on };
 }
