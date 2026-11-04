@@ -782,6 +782,8 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
                 phone.decided(row, via="dashboard")  # approved: JARVIS carries it out now
                 return self._json(200, {"ok": True, "status": row["status"]})
+            if self.path == "/api/hq/connectors":
+                return self._json(202, hq.check_connectors())
             if self.path == "/api/stop":
                 runner.stop()
                 return self._json(200, {"ok": True})

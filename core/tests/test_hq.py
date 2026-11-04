@@ -42,6 +42,17 @@ class HQDataTest(BrainTest):
         self.assertEqual(data["week"]["profit"], 0)
         self.assertIsNone(data["milestone"])  # not set: the page says so
 
+    def test_daily_profit_and_connector_parsing(self):
+        records.money_add(self.conn, "income", "sales", 120, currency="AUD")
+        records.money_add(self.conn, "expense", "ads", 50, currency="AUD")
+        daily = hq.daily_profit(self.conn)
+        self.assertEqual(len(daily), 14)
+        self.assertEqual(daily[-1]["profit"], 70)
+        m = hq.MCP_LINE.match("plugin:github:github: https://api.githubcopilot.com/mcp/ (HTTP) - ✔ Connected")
+        self.assertEqual(m["name"], "plugin:github:github")
+        self.assertIsNone(hq.MCP_LINE.match("Checking MCP server health…"))
+        self.assertIsNone(hq.connectors()["servers"])  # nothing is checked until asked
+
     def test_preview_reads_brain_files_only(self):
         work = self.home / "work" / "x"
         work.mkdir(parents=True)

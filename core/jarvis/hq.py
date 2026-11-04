@@ -11,6 +11,10 @@ so the page switches to it without changes.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -143,10 +147,76 @@ def week(conn) -> dict:
             "target": paths.config()["weekly_profit_target_aud"], "pace": rep["target"], "days": rep["days"]}
 
 
+def daily_profit(conn, days: int = 14) -> list[dict]:
+    """Profit per day from the accountant's ledger (sales less costs), oldest first; days with nothing logged are 0."""
+    start = (datetime.now() - timedelta(days=days - 1)).date()
+    rows = {r["day"]: r for r in conn.execute(
+        "SELECT day, SUM(CASE WHEN kind = 'income' THEN amount_aud ELSE 0 END) AS income,"
+        " SUM(CASE WHEN kind = 'expense' THEN amount_aud ELSE 0 END) AS expenses FROM money WHERE day >= ? GROUP BY day",
+        (start.isoformat(),))}
+    out = []
+    for i in range(days):
+        day = (start + timedelta(days=i)).isoformat()
+        r = rows.get(day)
+        income, expenses = (r["income"] or 0, r["expenses"] or 0) if r else (0, 0)
+        out.append({"day": day, "income": round(income, 2), "expenses": round(expenses, 2), "profit": round(income - expenses, 2)})
+    return out
+
+
+# Connector status, as Claude Code itself reports it (`claude mcp list`): the same connectors the desktop app and
+# the dashboard's JARVIS conversation use. Checked only when asked (it starts Claude Code), and kept in memory.
+_mcp: dict = {"checked": None, "servers": None, "error": None, "running": False}
+_mcp_lock = threading.Lock()
+MCP_LINE = re.compile(r"^(?P<name>.+?):\s+(?P<target>\S.*?)\s+-\s+(?P<status>.+)$")  # "name: url - ✔ Connected"
+
+
+def _claude() -> list[str] | None:
+    cfg = paths.config().get("claude_command")
+    if cfg:
+        return cfg if isinstance(cfg, list) else [cfg]
+    exe = shutil.which("claude")
+    native = Path.home() / ".local" / "bin" / "claude.exe"
+    return [exe] if exe else [str(native)] if native.exists() else None
+
+
+def _check_connectors() -> None:
+    try:
+        claude = _claude()
+        if not claude:
+            raise FileNotFoundError("Claude Code isn't installed on this computer.")
+        res = subprocess.run([*claude, "mcp", "list"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=120, cwd=paths.REPO_ROOT, stdin=subprocess.DEVNULL, creationflags=paths.NO_WINDOW)
+        servers = []
+        for line in res.stdout.splitlines():
+            m = MCP_LINE.match(line.strip())
+            if m:
+                status = m["status"].strip()
+                ok = "connected" in status.lower() and "fail" not in status.lower()
+                servers.append({"name": m["name"].strip(), "status": re.sub(r"^\W+", "", status), "ok": ok})
+        _mcp.update(servers=servers, error=None if servers or res.returncode == 0 else (res.stderr.strip() or "no answer")[:300])
+    except (OSError, subprocess.SubprocessError) as exc:
+        _mcp.update(error=str(exc)[:300])
+    finally:
+        _mcp.update(checked=paths.now(), running=False)
+
+
+def check_connectors() -> dict:
+    """Start a check unless one is running; returns the state so far."""
+    with _mcp_lock:
+        if not _mcp["running"]:
+            _mcp["running"] = True
+            threading.Thread(target=_check_connectors, daemon=True).start()
+    return connectors()
+
+
+def connectors() -> dict:
+    return {k: _mcp[k] for k in ("checked", "servers", "error", "running")}
+
+
 def data(conn) -> dict:
     cfg = paths.config()
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
-            "board": board(conn), "week": week(conn),
+            "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance")}
 

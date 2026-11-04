@@ -4,36 +4,37 @@
 
 | Route | File | What it is |
 |---|---|---|
-| `/` (also `/hq`) | `hq.html` + `hq.js` + `hq-scene.js` | The app: status board, talk bar, teams and the 3D HQ |
+| `/` (also `/hq`) | `hq.html` + `hq.js` + `hq-scene.js` | The app: the Monaco Estate (3D HQ) with glass overlays, task board, panels and talk bar |
 | `/chat` | `chat.html` | The full chat app (also the phone-sized window) |
 | `/office` | `office.html` | The earlier isometric office |
 | `/console`, `/classic` | `console.html`, `index.html` | Earlier designs, kept |
 
-All pages share `jarvis.js` (`window.J`): the live connection (`/api/events`), `/api/state`, sending messages, the mic, the wake word and the Kokoro voice. Don't open a second event stream in a page; listen with `J.on(type, fn)`.
+All pages share `jarvis.js` (`window.J`): the live connection (`/api/events`), `/api/state`, sending messages, the mic, the wake word and the Kokoro voice. Talking to JARVIS from any page goes through `/api/chat`, the same headless Claude Code session on this PC, so it has the same connectors, skills, memory, hooks and approval gates as the desktop app. Don't open a second event stream in a page; listen with `J.on(type, fn)`.
 
 ## The app, piece by piece
 
-**`hq.html`**: the layout and all the CSS. Colour, type and spacing tokens are on `:root`. Desktop order: header, 3D HQ, board, teams. Phone (860px wide or less): header, board as four tabs, 3D HQ, teams, with the talk bar fixed at the bottom.
+**`hq.html`**: the layout and all the CSS. Tokens are on `:root` (white marble, champagne gold, ivory, navy; smoked-glass panels). Desktop: the estate fills the screen; overlays sit round it (top nav, Business overview, Live activity, Quick actions, Agent performance, view controls, latest-event toast and talk bar). Up to 1180px wide, Live activity and Agent performance hide. Phone (860px or less): the estate on top, then the cards and the task board, with the talk bar fixed at the bottom; building chips become icon badges.
 
 **`hq.js`**: everything except the 3D view. Its sections, in order:
 - *Data adapter* (`Feed`): the only place data comes in. It combines `J.state` (`/api/state`), `/api/hq` and live events (`dispatch`, `agent_activity`, `agent_done`, `status`) into one model, and works out each agent's status. When the activity log (`core/jarvis/activity.py`) is installed, `/api/hq` carries it and it takes priority. To add a data source, add it here and give it a field on the model.
-- *Header*: live counts (tap one to jump to that board column), the next milestone, profit this week against the weekly target.
-- *Board*: Now, Needs you (one-tap Approve and Reject), Done, To do. Every item is tagged with its team and opens its task.
-- *Teams and allowance*: the eight teams with each agent's model, and the Claude Max weekly pace panel.
-- *Panels*: team, agent, task and JARVIS. Anything with `data-team`, `data-agent`, `data-task` or `data-ask` opens the matching panel, or puts text in the talk bar.
+- *Top bar*: navigation (Dashboard, Agents, Tasks, Analytics, Settings; each opens its panel), Monaco weather (Open-Meteo, hidden if it can't load), the next milestone.
+- *Corner cards*: Business overview (this week's profit against the weekly target, a 14-day daily profit line, sales, costs, ROAS from logged tests), Live activity (task events and live hand-offs), Agent performance (tasks finished per day, share of open tasks on track), the latest finished task.
+- *Task board*: Now, Needs you (one-tap Approve and Reject), Done today, To do. In the Tasks panel on a desktop, inline on a phone.
+- *Panels*: team (its workspace), agent (profile), task, JARVIS (command chat from the journal, and the boardroom: work shared across teams), Agents, Tasks, Analytics, Settings. Anything with `data-team`, `data-agent`, `data-task`, `data-nav` or `data-ask` opens the matching panel or fills the talk bar.
 - *Talk bar*: typed messages go to `J.send`, the mic to `J.listen`; replies show as a caption and are spoken by `jarvis.js`.
+- Simplified mode (no bloom or shadows, less scenery): automatic on phones and devices with 4 or fewer cores, `?simple` in the address, or Settings.
 
-**`hq-scene.js`**: the three.js world (three@0.160.0 from jsdelivr, through the import map in `hq.html`). `startScene(opts)` returns `update(model)`, `dispatch(agent)`, `focus(teamId)` and `demo(on)`. It draws only what the model says; the city, yachts and cars are scenery. If three.js can't load, the rest of the page still works.
+**`hq-scene.js`**: the three.js world (three@0.160.0 from jsdelivr, through the import map in `hq.html`). `startScene(opts)` returns `update(model)`, `dispatch(agent)`, `focus(id)`, `demo(on)`, `view("reset" | "in" | "out" | "explore")` and `whereabouts()`. Sections: textures and materials, golden-hour light, the harbour, circuit and city, the estate (plaza and globe, HQ, beam, pool, tennis, forecourt, palms), the people (one low-poly style, looks fixed per agent), actors (walk, sit, type, play), pavilions (one per team, desks inside), idle life (agents with no live task take a break round the estate and come back when work arrives), hand-off pulses, sub-agents and new hires (demo only until the hiring feed exists), camera and the frame loop. It draws only what the model says; the city, yachts and cars are scenery. If three.js can't load, the rest of the page still works. `stage.hq.snap()` returns the current frame as an image, for checking the view.
 
-**`core/jarvis/hq.py`** (server side, `GET /api/hq`): teams (T54 plan, section 7), each agent's tools, connections, skills and model from `.claude/agents/*.md`, the board (all open tasks, plus tasks done in the last 14 days), this week's profit against `weekly_profit_target_aud`, and the activity log when it exists. `GET /api/hq/file?path=` previews a deliverable: brain files only, never `secrets/`.
+**`core/jarvis/hq.py`** (server side): `GET /api/hq` returns teams (T54 plan, section 7); each agent's tools, connectors, skills and model from `.claude/agents/*.md`; the board (all open tasks, plus tasks done in the last 14 days); this week's money against `weekly_profit_target_aud`; daily profit for 14 days; and the activity log when it exists. `POST /api/hq/connectors` runs `claude mcp list` (Claude Code's own connector health check) and keeps the result in memory. `GET /api/hq/file?path=` previews a deliverable: brain files only, never `secrets/`.
 
 ## Settings the page reads (brain/config.json)
 
-- `hq_milestone`: `{"title": "Brush launch", "when": "2026-11-05T20:00"}`, shown in the header.
-- `max_allowance`: `{"used_pct": 42, "resets": "2026-11-10T09:00+10:30", "source": "..."}`, the Claude Max weekly pace panel. Until something fills it in, the panel says "Not connected yet".
+- `hq_milestone`: `{"title": "Brush launch", "when": "2026-11-05T20:00"}`, shown in the top bar.
+- `max_allowance`: `{"used_pct": 42, "resets": "2026-11-10T09:00+10:30", "source": "..."}`, the Claude Max weekly pace in Analytics. Until something fills it in, it says "Not connected yet".
 
 ## Rules for changes
 
-- Real data only. If something isn't known or isn't built, say so on the page. Demo content must be labelled as demo where it shows.
-- Keep the board readable at a glance on a phone. The 3D view must never hide the status.
+- Real data only. If something isn't known or isn't built, say so on the page. Demo content must be labelled as demo where it shows. No control that does nothing.
+- Keep the task board one tap away and readable on a phone. The 3D view must never hide the status.
 - Run `python -m unittest discover -s core/tests` (tests in `core/tests/test_hq.py` and `test_dashboard.py`), then check the page in a browser at desktop and phone width with no console errors.
