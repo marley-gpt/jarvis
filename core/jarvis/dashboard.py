@@ -2,7 +2,7 @@
 
 `bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
 isometric office at `/`, the sidebar console at `/console`, the chat app at
-`/chat`, the first version at `/classic`, all sharing jarvis.js) and streams
+`/chat`, the first version at `/classic`, all sharing jarvis.js; the 3D HQ at `/hq`, see hq.py) and streams
 state over Server-Sent Events. Talking to JARVIS runs one headless Claude Code
 process (`claude -p`, stream-json in and out) that stays running between
 messages and resumes the saved conversation if restarted, so it uses the
@@ -33,13 +33,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
+from . import brief, db, hq, journal, memory, paths, readiness, records, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
 PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
-         "/classic": "index.html"}
-ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8")}
+         "/classic": "index.html", "/hq": "hq.html"}
+ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
+          "/hq.js": ("hq.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -637,6 +638,16 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._send(200, (STATIC / name).read_bytes(), ctype)
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
+            if route == "/api/hq":
+                conn = db.connect()
+                try:
+                    return self._json(200, hq.data(conn))
+                finally:
+                    conn.close()
+            if route == "/api/hq/file":
+                found = hq.preview((parse_qs(query).get("path") or [""])[0])
+                # A deliverable that moved is normal, not an error the page should log: 204, nothing to show.
+                return self._send(200, *found) if found else self._send(204, b"", "text/plain")
             if route.startswith("/api/memory/"):
                 conn = db.connect()
                 try:
