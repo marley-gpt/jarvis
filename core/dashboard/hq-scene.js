@@ -309,19 +309,29 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
       world.tenders.push({ grp, cx: -60 + k * 90, cz: -470 - k * 60, r: 120 + k * 40, speed: 0.012 + k * 0.004, a: k * 1.6 });
     }
 
-    // Supercars on the circuit (scenery), slowing for the corners.
+    // Grand Prix cars racing the street circuit (scenery): braking for corners, queueing behind slower cars.
+    const wheel = new THREE.CylinderGeometry(0.34, 0.34, 0.38, 14); wheel.rotateX(Math.PI / 2);
+    const DARK = 0x16191e;
     const carGeo = merge([
-      { geo: new THREE.BoxGeometry(4.6, 0.8, 2.1), color: 0xffffff, m: at(0, 0.55, 0) },
-      { geo: new THREE.BoxGeometry(2.0, 0.55, 1.6), color: 0x1a1f26, m: at(-0.3, 1.15, 0) },
-      { geo: new THREE.BoxGeometry(0.4, 0.25, 2.2), color: 0x1a1f26, m: at(-2.2, 1.05, 0) },
+      { geo: new THREE.BoxGeometry(3.2, 0.36, 0.78), color: 0xffffff, m: at(-0.2, 0.42, 0) },   // tub
+      { geo: new THREE.BoxGeometry(1.5, 0.22, 0.42), color: 0xffffff, m: at(2.0, 0.34, 0) },    // nose
+      { geo: new THREE.BoxGeometry(0.45, 0.06, 2.0), color: DARK, m: at(2.75, 0.18, 0) },       // front wing
+      { geo: new THREE.BoxGeometry(1.4, 0.3, 0.42), color: 0xffffff, m: at(-0.3, 0.44, 0.58) }, // sidepods
+      { geo: new THREE.BoxGeometry(1.4, 0.3, 0.42), color: 0xffffff, m: at(-0.3, 0.44, -0.58) },
+      { geo: new THREE.BoxGeometry(1.3, 0.34, 0.3), color: 0xffffff, m: at(-0.9, 0.75, 0) },    // engine cover
+      { geo: new THREE.BoxGeometry(0.42, 0.3, 0.32), color: DARK, m: at(0.45, 0.72, 0) },       // cockpit and halo
+      { geo: new THREE.SphereGeometry(0.17, 10, 8), color: 0xf4f4f4, m: at(0.32, 0.88, 0) },    // helmet
+      { geo: new THREE.BoxGeometry(0.42, 0.08, 1.5), color: DARK, m: at(-2.05, 1.05, 0) },      // rear wing
+      { geo: new THREE.BoxGeometry(0.12, 0.55, 0.12), color: DARK, m: at(-2.0, 0.75, 0) },
+      ...[[1.75, 0.9], [1.75, -0.9], [-1.6, 0.9], [-1.6, -0.9]].map(([x, z]) => ({ geo: wheel, color: 0x101010, m: at(x, 0.34, z) })),
     ]);
-    const carColors = [0xf28c1b, 0xc8102e, 0x7cc42d, 0xf5c518, 0xf4f4f4, 0x1d2a3f, 0x2f6fd6, 0xc8102e, 0xf28c1b];
-    const cars = new THREE.InstancedMesh(carGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.4, envMapIntensity: 1.3 }), carColors.length);
-    carColors.forEach((c, i) => cars.setColorAt(i, C(c)));
+    const liveries = [0xd0101b, 0x9aa3ab, 0x1b2a55, 0xff8000, 0x0d5c46, 0x1f5fd1, 0xf2f2f2, 0xf1c40f, 0xd0101b, 0x0aa5a0];
+    const cars = new THREE.InstancedMesh(carGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.35, envMapIntensity: 1.3 }), liveries.length);
+    liveries.forEach((c, i) => cars.setColorAt(i, C(c)));
     scene3.add(cars);
     const len = curve.getLength();
-    const bend = pts.map((p, i) => { const a = pts[(i + N - 4) % N], b = pts[(i + 4) % N]; return a.clone().sub(p).normalize().dot(b.clone().sub(p).normalize()) + 1; });
-    world.cars = { mesh: cars, len, bend, list: carColors.map((_, i) => ({ u: i / carColors.length, v: 0, top: 26 + (i % 3) * 3 })) };
+    const bend = pts.map((p, i) => { const a = pts[(i + N - 5) % N], b = pts[(i + 5) % N]; return a.clone().sub(p).normalize().dot(b.clone().sub(p).normalize()) + 1; });
+    world.cars = { mesh: cars, len, bend, list: liveries.map((_, i) => ({ u: 1 - i * 0.035, v: 30, top: 60 + ((i * 7) % 9) })) };
   }
 
   // ---------------------------------------------------------------- the tower and the HQ floor
@@ -400,23 +410,129 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
     sc.t.needsUpdate = true;
   }
 
-  function avatar(color) {
-    const grp = new THREE.Group();
-    const suit = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.05 });
-    // Seated: the body sits on the chair (seat top at 0.62), the head just above the screen.
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.5, 6, 16), suit); body.position.y = 1.21; body.castShadow = true;
-    const head = new THREE.Group(); head.position.y = 2.1;
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.3, 32, 20), M.ceramic); skull.castShadow = true;
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.305, 32, 12, Math.PI / 2 - 0.9, 1.8, 1.25, 0.55), M.visor);
-    head.add(skull, visor);
-    const arm = (side) => {
-      const pivot = new THREE.Group(); pivot.position.set(side * 0.4, 1.64, 0);
-      const limb = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.46, 4, 8), suit); limb.position.y = -0.28; limb.castShadow = true;
-      pivot.add(limb); pivot.rotation.x = -0.9; grp.add(pivot); return pivot;
+  // ---------------------------------------------------------------- the agents: one consistent low-poly figure
+  // Jointed so they can walk, sit, type and stand with a tablet: hips > legs (knee) and torso > head and arms (elbow).
+  // Faceted team-colour jacket, navy trousers, ceramic head with a dark visor. Front is +z.
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x1d2738, roughness: 0.75, flatShading: true });
+  const shoeMat = new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 0.4 });
+  const shirtMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, flatShading: true });
+  const body = {
+    thigh: new THREE.CylinderGeometry(0.1, 0.08, 0.44, 7).translate(0, -0.22, 0),
+    shin: new THREE.CylinderGeometry(0.075, 0.062, 0.42, 7).translate(0, -0.21, 0),
+    shoe: new THREE.BoxGeometry(0.15, 0.08, 0.28).translate(0, -0.44, 0.06),
+    pelvis: new THREE.BoxGeometry(0.36, 0.17, 0.22),
+    torso: new THREE.CylinderGeometry(0.25, 0.19, 0.56, 8).translate(0, 0.3, 0),
+    shirt: new THREE.BoxGeometry(0.12, 0.26, 0.05).translate(0, 0.44, 0.2),
+    neck: new THREE.CylinderGeometry(0.06, 0.07, 0.14, 8).translate(0, 0.64, 0),
+    head: new THREE.IcosahedronGeometry(0.19, 1),
+    visor: new THREE.SphereGeometry(0.194, 20, 8, Math.PI / 2 - 0.85, 1.7, 1.3, 0.42),
+    upper: new THREE.CylinderGeometry(0.068, 0.058, 0.3, 7).translate(0, -0.15, 0),
+    fore: new THREE.CylinderGeometry(0.056, 0.048, 0.27, 7).translate(0, -0.135, 0),
+    hand: new THREE.IcosahedronGeometry(0.058, 0).translate(0, -0.3, 0),
+    tablet: new THREE.BoxGeometry(0.24, 0.3, 0.02).translate(0, -0.32, 0.05),
+  };
+  const part = (geo, mat, shadow) => { const m = new THREE.Mesh(geo, mat); if (shadow && !phone) m.castShadow = true; return m; };
+  function character(color, size = 1) {
+    const jacket = new THREE.MeshStandardMaterial({ color, roughness: 0.55, flatShading: true });
+    const root = new THREE.Group(); root.scale.setScalar(1.3 * size);
+    const hips = new THREE.Group(); hips.position.y = 0.95; root.add(hips);
+    hips.add(part(body.pelvis, cloth));
+    const leg = (side) => {
+      const hip = new THREE.Group(); hip.position.set(side * 0.11, -0.04, 0);
+      const knee = new THREE.Group(); knee.position.y = -0.44;
+      knee.add(part(body.shin, cloth), part(body.shoe, shoeMat));
+      hip.add(part(body.thigh, cloth, true), knee); hips.add(hip);
+      return { hip, knee };
     };
-    grp.add(body, head);
-    const arms = [arm(-1), arm(1)];
-    return { grp, body, head, arms, suit };
+    const torso = new THREE.Group(); torso.position.y = 0.06; hips.add(torso);
+    torso.add(part(body.torso, jacket, true), part(body.shirt, shirtMat), part(body.neck, M.ceramic));
+    const head = new THREE.Group(); head.position.y = 0.86; torso.add(head);
+    head.add(part(body.head, M.ceramic, true), part(body.visor, M.visor));
+    const arm = (side) => {
+      const sh = new THREE.Group(); sh.position.set(side * 0.29, 0.52, 0); sh.rotation.z = side * 0.08;
+      const el = new THREE.Group(); el.position.y = -0.3;
+      el.add(part(body.fore, jacket), part(body.hand, M.ceramic));
+      sh.add(part(body.upper, jacket), el); torso.add(sh);
+      return { sh, el };
+    };
+    const tablet = part(body.tablet, M.frame); tablet.visible = false;
+    const c = { root, hips, legs: [leg(-1), leg(1)], torso, head, arms: [arm(-1), arm(1)], jacket, tablet };
+    c.arms[1].el.add(tablet);
+    return c;
+  }
+  const lerp = (a, b, t) => a + (b - a) * t;
+  // Pose from blend weights: st.walk (stride), st.sit, st.type (hands on the keys), st.lean (+ back when idle,
+  // - slumped when blocked), st.look (waiting: watching for the hand-off), st.tab (holding a tablet).
+  function pose(c, st, time, ph) {
+    const a = st.walk, s = st.sit, ty = st.type, w = st.walkPhase, calm = REDUCED ? 0 : 1;
+    const swing = Math.sin(w) * 0.55 * a;
+    c.legs[0].hip.rotation.x = lerp(swing, -1.5, s);
+    c.legs[1].hip.rotation.x = lerp(-swing, -1.5, s);
+    c.legs[0].knee.rotation.x = lerp(Math.max(0, Math.cos(w)) * 0.85 * a, 1.5, s);
+    c.legs[1].knee.rotation.x = lerp(Math.max(0, -Math.cos(w)) * 0.85 * a, 1.5, s);
+    c.hips.position.y = lerp(0.95 + Math.abs(Math.cos(w)) * 0.035 * a - 0.02 * a, 0.6, s);
+    const breathe = Math.sin(ph * 1.7) * 0.01 * calm;
+    c.torso.scale.y = 1 + breathe;
+    c.torso.rotation.x = 0.04 * a + 0.12 * ty - 0.16 * Math.max(0, st.lean) * s + 0.22 * Math.max(0, -st.lean);
+    c.torso.rotation.y = Math.sin(w) * 0.08 * a;
+    const tap = (Math.sin(ph * 11) * 0.5 + Math.sin(ph * 17.3) * 0.5) * 0.08 * calm;
+    c.arms.forEach((arm, i) => {
+      const side = i ? 1 : -1;
+      const rest = lerp(0.04, -0.32, s), restEl = lerp(-0.12, -0.9, s);
+      let sh = lerp(rest, -0.55, ty), el = lerp(restEl, -1.1, ty) + tap * ty * side;
+      sh = lerp(sh, -side * Math.sin(w) * 0.5, a); el = lerp(el, -0.3, a);
+      sh = lerp(sh, -0.5, st.tab); el = lerp(el, -1.35 + tap * 0.4 * side, st.tab);
+      arm.sh.rotation.x = sh; arm.el.rotation.x = el;
+    });
+    c.tablet.visible = st.tab > 0.5;
+    c.head.rotation.x = 0.1 * ty + 0.32 * Math.max(0, -st.lean) - 0.12 * st.look + 0.18 * st.tab + Math.sin(ph * 0.6) * 0.03 * calm;
+    c.head.rotation.y = Math.sin(ph * 0.31) * (0.06 + 0.25 * Math.max(0, st.lean) * (1 - a) + 0.35 * st.look) * calm;
+  }
+
+  // An actor is a character that walks a path of floor points, then sits, stands facing a way, or leaves.
+  const actors = [];
+  const wrap = (x) => Math.atan2(Math.sin(x), Math.cos(x));
+  function actor(c, parent, from, face) {
+    parent.add(c.root);
+    c.root.position.copy(from); c.root.rotation.y = face;
+    const A = { c, parent, path: [], then: null, seat: null, sitting: false, face, status: "idle", grow: 0, gone: false, wait: 0,
+      phase: rand() * 10, size: c.root.scale.x, st: { walk: 0, walkPhase: 0, sit: 0, type: 0, lean: 0, look: 0, tab: 0 } };
+    c.root.scale.setScalar(0.001);
+    actors.push(A);
+    return A;
+  }
+  function walk(A, points, then) { A.path = points.map((p) => p.clone()); A.then = then || null; A.sitting = false; }
+  const sitDown = (A) => { A.sitting = true; A.face = A.seat.face; };
+  const tmp2 = new V3();
+  function stepActor(A, dt, time) {
+    const r = A.c.root, st = A.st;
+    if (A.wait > 0) { A.wait -= dt; r.scale.setScalar(0.001); return; }
+    A.grow = damp(A.grow, A.gone ? 0 : 1, 5, dt);
+    r.scale.setScalar(Math.max(0.001, A.grow * A.size));
+    let moving = false;
+    if (A.path.length) {
+      const d = tmp2.copy(A.path[0]).sub(r.position); d.y = 0;
+      const dist = d.length();
+      if (dist < 0.06) A.path.shift();
+      else {
+        moving = true;
+        const speed = 2.3 * (0.35 + 0.65 * st.walk);  // eases into the stride
+        r.position.addScaledVector(d.normalize(), Math.min(dist, speed * dt));
+        A.face = Math.atan2(d.x, d.z);
+      }
+      if (!A.path.length && A.then) { const next = A.then; A.then = null; next(A); }
+    }
+    if (A.sitting && A.seat) r.position.lerp(A.seat.pos, 1 - Math.exp(-7 * dt));
+    r.rotation.y += wrap(A.face - r.rotation.y) * (1 - Math.exp(-7 * dt));
+    st.walk = damp(st.walk, moving ? 1 : 0, 6, dt);
+    if (st.walk > 0.01) st.walkPhase += dt * 7.2 * (0.5 + 0.5 * st.walk);
+    st.sit = damp(st.sit, A.sitting && !moving ? 1 : 0, 5, dt);
+    const seated = A.sitting && st.sit > 0.6;
+    st.type = damp(st.type, seated && A.status === "working" ? 1 : 0, 4, dt);
+    st.lean = damp(st.lean, seated ? (A.status === "idle" ? 1 : A.status === "blocked" ? -1 : 0) : 0, 2, dt);
+    st.look = damp(st.look, seated && A.status === "waiting" ? 1 : 0, 2.5, dt);
+    st.tab = damp(st.tab, A.helper && !moving && !A.gone ? 1 : 0, 4, dt);
+    pose(A.c, st, time, A.phase + time);
   }
 
   function desk(team, agentName, angle, offset) {
@@ -430,20 +546,17 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
     grp.add(topM, frameM);
     for (const sx of [-1.1, 1.1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.72, 0.9), M.gold); leg.position.set(sx, 0.37, 0); grp.add(leg); }
     const sc = screenTexture();
-    const mon = new THREE.Group(); mon.position.set(0, 1.42, -0.3);
+    const mon = new THREE.Group(); mon.position.set(0, 1.3, -0.3);
     const bezel = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.98, 0.05), M.frame); bezel.castShadow = true;
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.54, 0.9), new THREE.MeshBasicMaterial({ map: sc.t, toneMapped: false }));
     screen.position.z = 0.03;
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.42), M.gold); stem.position.y = -0.62;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.3), M.gold); stem.position.y = -0.5;
     mon.add(bezel, screen, stem); grp.add(mon);
     const chair = new THREE.Group(); chair.position.set(0, 0, 0.95);
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.14, 0.75), M.leather); seat.position.y = 0.55; seat.castShadow = true;
+    const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.14, 0.75), M.leather); cushion.position.y = 0.55; cushion.castShadow = true;
     const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.85, 0.12), M.leather); back.position.set(0, 1.0, 0.36); back.castShadow = true;
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.3, 0.5, 12), M.gold); base.position.y = 0.25;
-    chair.add(seat, back, base); grp.add(chair);
-    const av = avatar(team.color);
-    av.grp.position.set(0, 0, 0.95); av.grp.rotation.y = Math.PI;  // faces its screen and, past it, JARVIS
-    grp.add(av.grp);
+    chair.add(cushion, back, base); grp.add(chair);
     // Status lamp: a gold stem with a glowing bead.
     const lamp = new THREE.Group(); lamp.position.set(1.0, 0.84, -0.35);
     const lstem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.05, 0.55), M.gold); lstem.position.y = 0.27;
@@ -453,7 +566,34 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
     glow.position.y = 0.6; glow.scale.setScalar(0.9);
     lamp.add(lstem, bulb, glow); grp.add(lamp);
     grp.traverse((o) => { o.userData.team = team.id; });
-    return { name: agentName, grp, av, sc, bulbMat, glow, lampPos: new V3(), status: "idle", pose: { lean: 0, look: 0, type: 0 }, phase: rand() * 10 };
+    // Where its agent sits: the chair, facing the screen and, past it, JARVIS.
+    const seat = { pos: spot(angle, SUITE_R + 0.95 * 1.3, offset), face: Math.atan2(-Math.cos(angle), -Math.sin(angle)) };
+    return { name: agentName, grp, sc, bulbMat, glow, seat, offset, angle, status: "idle", phase: rand() * 10 };
+  }
+
+  // A point on the floor in a suite's own terms: distance out from JARVIS, and sideways along the suite.
+  function spot(angle, r, off) { return new V3(Math.cos(angle) * r - Math.sin(angle) * off, 0, Math.sin(angle) * r + Math.cos(angle) * off); }
+  const DOOR_R = 7.4, AISLE_R = 13.4, BACK_R = 19.7, WINDOW_R = 22.4;
+  // The way from the lift door to a chair: round the end of the desk (never through it) and in from behind.
+  function routeToDesk(d) {
+    const side = d.offset > 0.1 ? -1 : 1, lane = d.offset + side * 1.95;
+    return [spot(d.angle, AISLE_R, lane), spot(d.angle, BACK_R, lane), spot(d.angle, BACK_R, d.offset)];
+  }
+  function seatAgent(A, d, delay) {
+    A.seat = d.seat; A.desk = d; A.wait = delay;
+    walk(A, routeToDesk(d), sitDown);
+  }
+  const liftMat = new THREE.MeshStandardMaterial({ color: 0xa88454, metalness: 0.85, roughness: 0.32, envMapIntensity: 1.1 });
+  function lift(angle) {
+    const door = new THREE.Group(), p = spot(angle, DOOR_R - 0.4, 0);
+    door.position.copy(p); door.rotation.y = Math.PI / 2 - angle;
+    // Brushed-bronze lift doors in a gold frame, a hairline seam down the middle.
+    for (const x of [-0.72, 0.72]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.5, 0.14), M.gold); post.position.set(x, 1.25, 0); door.add(post); }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.1, 0.16), M.gold); lintel.position.y = 2.52;
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.36, 2.45, 0.04), liftMat); panel.position.set(0, 1.23, -0.02);
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.015, 2.45, 0.05), M.frame); seam.position.set(0, 1.23, -0.01);
+    door.add(lintel, panel, seam);
+    return door;
   }
 
   function buildSuites(teams) {
@@ -490,8 +630,16 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
       flow.rotation.copy(inlay.rotation); flow.position.set(inlayMid.x, 0.02, inlayMid.z);
       group.add(inlay, flow);
       const desks = t.agents.map((a, i) => { const d = desk(t, a.name, angle, offsets[t.agents.length]?.[i] ?? (i - 1) * 4); group.add(d.grp); return d; });
+      group.add(lift(angle));
+      // Each agent arrives through the lift and walks to its desk; the floor fills up one by one.
+      desks.forEach((d, i) => {
+        const A = actor(character(t.color), group, spot(angle, DOOR_R, 0), angle + Math.PI / 2);
+        A.name = d.name; A.home = d; A.nextStroll = 25 + rand() * 50;
+        seatAgent(A, d, REDUCED ? 0 : 0.6 + k * 0.35 + i * 0.5);
+        d.actor = A;
+      });
       group.traverse((o) => { o.userData.team = t.id; });
-      suites.set(t.id, { team: t, angle, group, desks, flowMat, tex, anchor: new V3(Math.cos(angle) * SUITE_R, 4.4, Math.sin(angle) * SUITE_R), status: "idle", ghosts: [] });
+      suites.set(t.id, { team: t, angle, group, desks, flowMat, tex, anchor: new V3(Math.cos(angle) * SUITE_R, 4.4, Math.sin(angle) * SUITE_R), status: "idle", helpers: [], hires: [] });
     });
   }
 
@@ -522,22 +670,77 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
         const key = JSON.stringify([a.status, a.now, a.next, a.tool, a.open.length]);
         if (key !== d.key) { d.key = key; drawScreen(d.sc, t, a); }
         d.status = a.status;
+        if (d.actor) d.actor.status = a.status;
         const c = C(STATUS[a.status].color);
         d.bulbMat.emissive.copy(c); d.glow.material.color.copy(c);
-        d.runs = a.runs.length;
+        // More than one run for an agent means JARVIS has sub-agents working in parallel: they join its desk.
+        helpers(s, d, Math.max(0, a.runs.length - 1), false);
       });
-      // Extra sub-agents JARVIS has running in parallel for this team appear as translucent helpers.
-      const extra = Math.max(0, t.agents.reduce((n, a) => n + Math.max(0, a.runs.length - 1), 0));
-      while (s.ghosts.length < Math.min(extra, 4)) {
-        const g = avatar(t.color); g.suit.transparent = true; g.suit.opacity = 0.55;
-        const i = s.ghosts.length, ang = s.angle + (i % 2 ? 1 : -1) * (0.17 + 0.06 * Math.floor(i / 2));
-        g.grp.position.set(Math.cos(ang) * (SUITE_R + 3.2), 0, Math.sin(ang) * (SUITE_R + 3.2));
-        g.grp.rotation.y = -Math.PI / 2 - ang; g.grp.scale.setScalar(0.01);
-        s.group.add(g.grp); s.ghosts.push({ ...g, grow: 0, gone: false });
-      }
-      s.ghosts.forEach((g, i) => { g.gone = i >= extra; });
     }
     jarvisBusy = m.jarvis.status === "idle" ? 0 : m.jarvis.status === "delegating" ? 1 : 0.6;
+  }
+
+  // Sub-agents walk in from the lift and stand at the lead agent's desk with a tablet; when the work is done
+  // they walk back to the lift. `demo` ones come only from the labelled demo.
+  function helpers(s, d, want, demo) {
+    const mine = s.helpers.filter((h) => h.lead === d && h.demo === demo && !h.leaving);
+    while (mine.length < Math.min(want, 3)) {
+      const i = s.helpers.filter((h) => h.lead === d && !h.leaving).length;
+      const col = C(s.team.color).lerp(C(0xffffff), 0.35).getHex();
+      const A = actor(character(col, 0.9), s.group, spot(s.angle, DOOR_R, 0), s.angle + Math.PI / 2);
+      A.helper = true; A.lead = d; A.demo = demo; A.status = "working";
+      const stand = spot(s.angle, BACK_R + 0.3, d.offset + [-1.1, 1.1, 0][i % 3]);
+      const face = Math.atan2(-Math.cos(s.angle), -Math.sin(s.angle));
+      walk(A, [...routeToDesk(d).slice(0, 2), stand], (x) => { x.face = face; });
+      s.helpers.push(A); mine.push(A);
+    }
+    mine.slice(Math.max(0, want)).forEach((A) => leave(s, A));
+  }
+  function leave(s, A) {
+    if (A.leaving) return;
+    A.leaving = true;
+    const back = A.lead ? routeToDesk(A.lead).slice(0, 2).reverse() : [];
+    walk(A, [...back, spot(s.angle, DOOR_R, 0)], (x) => { x.gone = true; });
+  }
+  // A new permanent agent: a desk slides in at a free place in the suite and its agent walks to it.
+  function hire(s, demo) {
+    const used = s.desks.map((d) => d.offset).concat(s.hires.map((h) => h.desk.offset));
+    const off = [4.2, -4.2, 2.1, -2.1].find((o) => used.every((u) => Math.abs(u - o) > 3.3));
+    if (off === undefined) return;
+    const d = desk(s.team, "new-hire", s.angle, off);
+    d.grp.scale.setScalar(0.001); s.group.add(d.grp);
+    d.grp.traverse((o) => { o.userData.team = s.team.id; });
+    drawScreen(d.sc, s.team, { label: demo ? "New hire (demo)" : "New hire", status: "working", now: "Setting up: reading the team's playbooks", tool: null, open: [] });
+    d.bulbMat.emissive.copy(C(STATUS.working.color)); d.glow.material.color.copy(C(STATUS.working.color));
+    const A = actor(character(s.team.color), s.group, spot(s.angle, DOOR_R, 0), s.angle + Math.PI / 2);
+    A.status = "working"; A.home = d;
+    seatAgent(A, d, 1.2);
+    s.hires.push({ desk: d, actor: A, demo, grow: 0, gone: false });
+  }
+  function fire(s, h) {
+    h.gone = true;
+    walk(h.actor, [...routeToDesk(h.desk).reverse(), spot(s.angle, DOOR_R, 0)], (x) => { x.gone = true; });
+  }
+  // The demo: clearly labelled on the page, shows what sub-agents and a new hire look like before the real feed exists.
+  let demoTimers = [];
+  function demo(on) {
+    demoTimers.forEach(clearTimeout); demoTimers = [];
+    const cr = suites.get("creative"), rs = suites.get("research");
+    if (!cr || !rs) return;
+    if (on) {
+      const later = (ms, fn) => demoTimers.push(setTimeout(fn, ms));
+      dispatch("creative-director");
+      later(700, () => helpers(cr, cr.desks[0], 2, true));
+      later(2600, () => dispatch("market-research"));
+      later(3200, () => helpers(rs, rs.desks.find((d) => d.name === "market-research") || rs.desks[0], 1, true));
+      later(6500, () => hire(cr, true));
+      focus("creative");
+    } else {
+      for (const s of suites.values()) {
+        s.helpers.filter((h) => h.demo).forEach((h) => leave(s, h));
+        s.hires.filter((h) => h.demo && !h.gone).forEach((h) => fire(s, h));
+      }
+    }
   }
 
   // ---------------------------------------------------------------- camera: home view and flying to a suite
@@ -604,7 +807,8 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
   flyTo(HOME, 2.6);
 
   function frame() {
-    const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+    // Real time, so a slow device keeps pace; capped so a long pause (a hidden tab) does not jump everything.
+    const dt = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime;
     if (!first && !onScreen()) return;
     if (flight) {
       flight.t = Math.min(1, (performance.now() - flight.start) / (flight.dur * 1000));
@@ -644,32 +848,37 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
       s.flowMat.opacity = damp(s.flowMat.opacity, working ? 0.85 : s.status === "idle" ? 0 : 0.35, 3, dt);
       if (!REDUCED) s.tex.offset.x -= dt * (working ? 0.55 : 0.15);
       for (const d of s.desks) {
-        const p = d.pose, a = d.av, ph = d.phase + time;
-        // Poses ease between states: typing at work, turned towards JARVIS while waiting, head down when blocked, leaning back when idle.
-        p.type = damp(p.type, d.status === "working" ? 1 : 0, 4, dt);
-        p.look = damp(p.look, d.status === "waiting" ? 1 : 0, 2.5, dt);
-        p.lean = damp(p.lean, d.status === "idle" ? 1 : d.status === "blocked" ? -1 : 0, 2, dt);
-        const breathe = REDUCED ? 0 : Math.sin(ph * 1.7) * 0.012;
-        a.body.scale.set(1, 1 + breathe, 1);
-        a.body.rotation.x = -p.lean * 0.12;
-        const tap = REDUCED ? 0 : (Math.sin(ph * 11) * 0.5 + Math.sin(ph * 17.3) * 0.5) * 0.09 * p.type;
-        a.arms[0].rotation.x = -0.9 - 0.45 * p.type + tap + p.lean * 0.6;
-        a.arms[1].rotation.x = -0.9 - 0.45 * p.type - tap + p.lean * 0.6;
-        a.head.rotation.x = 0.12 * p.type + (d.status === "blocked" ? 0.35 : 0) * (1 - p.look) - p.lean * 0.1 + (REDUCED ? 0 : Math.sin(ph * 0.6) * 0.03);
-        // Waiting: glances up and across, as if watching for the hand-off; idle: a slow look around.
-        a.head.rotation.y = REDUCED ? 0 : Math.sin(ph * 0.31) * (0.08 + 0.22 * Math.max(0, p.lean) + 0.3 * p.look);
-        a.head.position.y = 2.1 - 0.05 * p.type;
+        const ph = d.phase + time, A = d.actor;
+        // An idle agent now and then gets up, looks out over the harbour, and comes back. Anyone with work stays put.
+        if (A && !REDUCED) {
+          A.nextStroll -= dt;
+          if (A.status !== "idle" && A.away) { A.away = false; walk(A, [spot(s.angle, BACK_R, d.offset)], sitDown); }
+          else if (A.status === "idle" && A.sitting && A.nextStroll < 0) {
+            A.away = true; A.nextStroll = 40 + rand() * 60;
+            const view = spot(s.angle, WINDOW_R, d.offset * 0.6 + (rand() - 0.5) * 2);
+            walk(A, [spot(s.angle, BACK_R, d.offset), view], (x) => {
+              x.face = Math.atan2(Math.cos(s.angle), Math.sin(s.angle));
+              setTimeout(() => { if (x.away) { x.away = false; walk(x, [spot(s.angle, BACK_R, d.offset)], sitDown); } }, 7000 + rand() * 6000);
+            });
+          }
+        }
         // Lamp: steady when waiting or idle, a soft slow pulse while working, a quicker one when blocked.
         const pulse = REDUCED ? 1 : d.status === "working" ? 0.75 + Math.sin(ph * 2.2) * 0.25 : d.status === "blocked" ? 0.7 + Math.sin(ph * 4) * 0.3 : 0.85;
         d.bulbMat.emissiveIntensity = 1.4 * pulse + (d.status === "idle" ? -0.5 : 0.6);
         d.glow.material.opacity = d.status === "idle" ? 0.25 : 0.75 * pulse;
       }
-      for (let i = s.ghosts.length - 1; i >= 0; i--) {
-        const g = s.ghosts[i];
-        g.grow = damp(g.grow, g.gone ? 0 : 1, 3.5, dt);
-        g.grp.scale.setScalar(Math.max(0.001, g.grow));
-        if (g.gone && g.grow < 0.02) { s.group.remove(g.grp); s.ghosts.splice(i, 1); }
+      for (let i = s.hires.length - 1; i >= 0; i--) {
+        const h = s.hires[i];
+        h.grow = damp(h.grow, h.gone ? 0 : 1, 3, dt);
+        h.desk.grp.scale.setScalar(Math.max(0.001, h.grow * 1.3));
+        if (h.gone && h.grow < 0.02 && h.actor.grow < 0.02) { s.group.remove(h.desk.grp); s.hires.splice(i, 1); }
       }
+      s.helpers = s.helpers.filter((h) => !(h.gone && h.grow < 0.02));
+    }
+    for (let i = actors.length - 1; i >= 0; i--) {
+      const A = actors[i];
+      stepActor(A, dt, time);
+      if (A.gone && A.grow < 0.02) { A.parent.remove(A.c.root); actors.splice(i, 1); }
     }
 
     for (let i = pulses.length - 1; i >= 0; i--) {
@@ -694,10 +903,15 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
         b.grp.rotation.y = -Math.atan2(Math.cos(b.a) * b.r * 0.5, -Math.sin(b.a) * b.r);
       }
       const cs = world.cars, m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+      const order = [...cs.list].sort((a, b) => a.u - b.u);
       cs.list.forEach((c, i) => {
-        const idx = Math.floor(c.u * cs.bend.length) % cs.bend.length;
-        const want = c.top * (1 - Math.min(0.65, cs.bend[idx] * 1.6));
-        c.v = damp(c.v, want, 1.2, dt);
+        // Look ahead for the next corner, brake for it, and don't drive through the car in front.
+        const idx = Math.floor(((c.u + 12 / cs.len) % 1) * cs.bend.length) % cs.bend.length;
+        let want = c.top * (1 - Math.min(0.68, cs.bend[idx] * 1.9));
+        const k = order.indexOf(c), ahead = order[(k + 1) % order.length];
+        const gap = ((((ahead.u - c.u) % 1) + 1) % 1) * cs.len;
+        if (ahead !== c && gap < 16) want = Math.min(want, ahead.v * (gap < 9 ? 0.85 : 0.99));
+        c.v = damp(c.v, want, want < c.v ? 2.4 : 0.9, dt);
         c.u = (c.u + (c.v * dt) / cs.len) % 1;
         const p = world.curve.getPointAt(c.u), t = world.curve.getTangentAt(c.u);
         q.setFromAxisAngle(new V3(0, 1, 0), Math.atan2(-t.z, t.x));
@@ -729,8 +943,8 @@ function buildWorld(THREE, OrbitControls, RoomEnvironment, renderer, opts) {
     if (first) { first = false; requestAnimationFrame(() => veil.classList.add("gone")); }
   }
   renderer.setAnimationLoop(frame);
-  stage.hq = { camera, controls };  // for inspecting the view from the browser console
-  return { update, dispatch, focus };
+  stage.hq = { camera, controls, actors };  // for inspecting the view from the browser console
+  return { update, dispatch, focus, demo };
 }
 
 // The scenery objects the frame loop moves; filled in while the world is built.

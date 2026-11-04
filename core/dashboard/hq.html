@@ -95,6 +95,7 @@ main { display: flex; flex-direction: column; gap: 22px; padding: 18px 24px 0; m
 #demo-note { position: absolute; z-index: 3; top: 14px; left: 50%; transform: translateX(-50%); font-size: 12.5px; font-weight: 600; white-space: nowrap;
   padding: 7px 14px; border-radius: 999px; background: #fff7e3; color: #6b4b00; border: 1px solid rgba(217, 150, 15, .5); }
 #demo-note[hidden] { display: none; }
+@media (max-width: 860px) { #demo-note { white-space: normal; text-align: center; width: calc(100% - 28px); } }
 #nogl { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--ink-2); background: var(--paper); }
 #nogl[hidden] { display: none; }
 .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); flex: none; margin-left: auto; }
