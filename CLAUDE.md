@@ -51,7 +51,7 @@ Anything that needs the screen (the Master Key tools in DICloak, computer use) g
 
 ## Skills
 
-There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. Don't spawn an agent for something a single `bin/jarvis` command answers.
+There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3 Liquid-theme, `jarvis-memory`, and 16 installed per user (15 Shopify-dev, `frontend-design`). They're catalogued with their fit for this business in `.claude/skills/README.md`, and each specialist's agent file lists the ones it should use. Name the relevant skills in delegation prompts. Mentor methods outrank skills, and skill-derived advice is a **JARVIS recommendation**. Never spend on a tool a skill suggests without approval. Find a skill with `bin/jarvis mem search "<topic>" -c procedures`. The agents keep learning new skills on their own: nightly learning runs, teaching each other, a review queue for anything new and a weekly merge (`jarvis-skill-learning` skill, `bin/jarvis skills`). Don't spawn an agent for something a single `bin/jarvis` command answers.
 
 ## Standing rules from the owner
 
@@ -61,7 +61,7 @@ There are 85 playbook skills: 52 marketing, 8 Anthropic marketing, 5 Meta Ads, 3
 - **Fewer questions:** do routine work without asking. Approval is only for the gates below.
 - **Feedback loop:** every verdict on the team's work (your ad and PDP reviews, test data, QC) is recorded with `bin/jarvis feedback add`. When the owner gives feedback in chat or by voice, JARVIS records it straight away. Agents read `feedback list` / `digest` before similar work.
 - **Save every mistake** to memory (`-c procedures`, tag `mistake`) and check them before similar work.
-- **New agents** may be added when a recurring job isn't covered. Tell the owner.
+- **New agents** may be added when a recurring job isn't covered. Tell the owner. Rules (D36): temporary sub-agents need no permission but are logged (`bin/jarvis team delegate`, `team next`); a permanent agent within a team's role, with the team's own tools and no cost, is added after JARVIS reviews it (`team review`, `team approve H<n> --by jarvis`, which alerts the owner); new tools, connectors, paid services or a new role need the owner's approval first. Background agent work is paced to the weekly Claude limit with a reserve for urgent work (`bin/jarvis pace`).
 - **Product research:** the owner brings products, and since 2026-10-29 JARVIS also hunts for candidates itself with the Master Key tools and Blake's checklist, and sends a short list for the owner's yes.
 - These rules are repeated for the specialists in the `jarvis-memory` skill (section 0).
 

@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brief, db, hq, journal, memory, paths, readiness, records, telegram, tts, wakeword
+from . import activity, brief, db, hq, journal, memory, paths, readiness, records, skills, team, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The HQ app is the main view (T54 revamp); the office, console and earlier versions stay available.
@@ -674,6 +674,21 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._activity(parse_qs(query))
             if self.path == "/api/events":
                 return self._events()
+            if route == "/api/team":  # teams, sub-agents at work, hires, and the usage pacer
+                conn = db.connect()
+                try:
+                    return self._json(200, team.board(conn))
+                finally:
+                    conn.close()
+            if route == "/api/skills":  # per agent: skills and level, recently learned, backlog, review queue
+                conn = db.connect()
+                try:
+                    agent = (parse_qs(query).get("agent") or [None])[0]
+                    return self._json(200, skills.board(conn, agent))
+                except skills.SkillError as exc:
+                    return self._json(404, {"error": str(exc)})
+                finally:
+                    conn.close()
             self._json(404, {"error": "not found"})
 
         def _memory(self, q: dict):

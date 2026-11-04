@@ -101,6 +101,17 @@ class DashboardTest(BrainTest):
         self.assertEqual(json.loads(raw)["meta"]["id"], rows[0]["id"])
         self.assertEqual(self.request("GET", "/api/memory/M-NOPE", token=False)[0], 404)
 
+    def test_skills_board_for_the_new_dashboard(self):
+        data = json.loads(self.request("GET", "/api/skills", token=False)[1])
+        names = [a["name"] for a in data["agents"]]
+        self.assertIn("creative-director", names)
+        self.assertIn("backlog", data["agents"][0])
+        one = json.loads(self.request("GET", "/api/skills?agent=shopify", token=False)[1])
+        self.assertEqual([a["name"] for a in one["agents"]], ["shopify"])
+        self.assertEqual(self.request("GET", "/api/skills?agent=nobody", token=False)[0], 404)
+        crew = json.loads(self.request("GET", "/api/team", token=False)[1])
+        self.assertEqual(set(crew), {"generated", "teams", "sub_agents", "hires", "pace"})
+
     def test_approval_from_dashboard(self):
         aid = records.approval_request(self.conn, "spend", "Test budget A$100")
         self.assertEqual(self.request("POST", "/api/approval", {"id": aid, "approve": True}, token=False)[0], 403)

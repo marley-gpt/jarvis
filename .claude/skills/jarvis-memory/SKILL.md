@@ -19,7 +19,8 @@ The brain lives in `brain/` and is reached through `bin/jarvis` (run it from the
 6. **Honesty.** Separate evidence from speculation. Never invent quotes, metrics or Blake's steps. Too little data is "insufficient data", never a win. Never create fake reviews, invented doctors or experts, fake review counts or unprovable health claims for ads or pages, even where Blake or competitors do (decision D11). Build honest proof that converts instead.
 7. **Private stays private.** Blake's material and business data stay in `brain/` or `~/.claude/skills/blake-*`. The repo is public, so never commit them.
 8. **Feedback loop.** Before a task, check `bin/jarvis feedback list --agent <you>` and `feedback digest`. When any feedback arrives (owner review, test data, QC), record it with `bin/jarvis feedback add` (see the `jarvis-feedback-loop` skill), so the team gets better every round.
-9. **Speakable results.** The owner mostly talks to JARVIS by voice, so end with a short plain-English summary that JARVIS can say out loud.
+9. **Keep learning.** Before a task, read `bin/jarvis skills mine <you>`: your learned playbook and the skill notes other agents taught you. When a note or skill helps (or doesn't), log it with `bin/jarvis skills used <you> --note N<n>|--skill <name> --helped|--unhelpful`; that is how useful notes get promoted. Learning runs and teaching follow the `jarvis-skill-learning` skill.
+10. **Speakable results.** The owner mostly talks to JARVIS by voice, so end with a short plain-English summary that JARVIS can say out loud.
 
 ## 1. Before working: retrieve only what's relevant
 

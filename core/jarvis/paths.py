@@ -60,6 +60,22 @@ DEFAULT_CONFIG = {
     # specialists keep their own models.
     "dashboard_model": "opus",
     "dashboard_effort": "low",
+    # Pacing background agent work against the plan's weekly allowance (bin/jarvis pace): keep this much of the
+    # week for urgent owner work, pause when the 5-hour window is this full, the estimated % of the weekly limit
+    # one agent run costs (recalibrated from readings), the most runs started per check, and checks' spacing.
+    "usage_reserve_pct": 10.0,
+    "usage_5h_ceiling_pct": 85.0,
+    "pace_pct_per_run": 0.5,
+    "pace_max_batch": 4,
+    "pace_interval_hours": 2,
+    # Skill learning (bin/jarvis skills): how often one agent may learn (the pacer sets how many run), the size
+    # of each run, and when notes get promoted or trimmed.
+    "skill_min_hours_between_runs": 12,
+    "skill_notes_per_run": 3,
+    "skill_candidates_per_run": 3,
+    "skill_note_max_chars": 1200,
+    "skill_promote_helped": 3,
+    "skill_trim_days": 30,
     "store_url": "https://urbansupplied.com",  # watched by the dashboard; the owner is alerted if it stops loading
 }
 
