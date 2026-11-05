@@ -50,9 +50,20 @@ function toolName(line) {
   const server = { "claude-in-chrome": "Chrome", "computer-use": "Computer use", Shopify: "Shopify", claude_ai_Shopify: "Shopify" }[parts[1]] || parts[1];
   return `${server}: ${(parts[2] || "").replace(/_/g, " ")}`;
 }
-const MODEL_WORDS = { inherit: "JARVIS's model", opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
-const modelName = (m) => MODEL_WORDS[m] || (!m ? "JARVIS's model" : m[0].toUpperCase() + m.slice(1));
-const modelSelect = (attr, id, current) => `<select class="pick" ${attr}="${esc(id)}">${["inherit", "opus", "sonnet", "haiku", "fable"].map((v) => `<option value="${v}" ${v === (current || "inherit") ? "selected" : ""}>${MODEL_WORDS[v]}</option>`).join("")}</select>`;
+const MODEL_WORDS = { inherit: "Same as JARVIS", opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
+const modelName = (m) => MODEL_WORDS[m] || (!m ? "Same as JARVIS" : m[0].toUpperCase() + m.slice(1));
+// The picker: "Same as JARVIS" (the agent runs on whatever model JARVIS's session uses), JARVIS's recommendation for
+// this agent with its reason, or a fixed model. The option the agent has now is the one selected.
+const modelSelect = (attr, id, current, agent) => {
+  const rec = agent && (Feed.hq?.recommended || {})[agent];
+  const cur = current || "inherit";
+  const opts = [["inherit", MODEL_WORDS.inherit + (cur === "inherit" ? " (now)" : "")]];
+  if (rec) opts.push([`rec:${rec.model}`, `Recommended: ${MODEL_WORDS[rec.model]}${cur === rec.model ? " (now)" : ""}`]);
+  for (const v of ["opus", "sonnet", "haiku", "fable"]) opts.push([v, MODEL_WORDS[v] + (cur === v ? " (now)" : "")]);
+  const selected = rec && cur === rec.model ? `rec:${rec.model}` : cur;
+  return `<select class="pick" ${attr}="${esc(id)}">${opts.map(([v, l]) => `<option value="${v}" ${v === selected ? "selected" : ""}>${l}</option>`).join("")}</select>`
+    + (rec ? ` <span class="quiet">Recommended: ${MODEL_WORDS[rec.model]}, ${esc(rec.why)}.</span>` : "");
+};
 // "claude.ai Shopify" -> "Shopify", "plugin:github:github" -> "GitHub"
 const connectorName = (n) => { const x = n.replace(/^claude\.ai /i, "").replace(/^plugin:[^:]+:/i, ""); return x === "github" ? "GitHub" : x; };
 const initials = (label) => String(label || "?").split(/[\s&-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
@@ -420,7 +431,7 @@ function agentFacts(a) {
     ["Now", a.now ? esc(a.now) : a.next ? `Nothing running. Next up: ${esc(a.next)}` : "Nothing running"],
     a.status === "working" && ["Tool", a.tool ? esc(a.tool) : "Not reported yet"],
     a.since && ["Since", esc(ago(a.since))],
-    ["Model", `${modelSelect("data-agent-model", a.name, a.model)} <span class="quiet">default for every task; saved to its agent file</span>`],
+    ["Model", `${modelSelect("data-agent-model", a.name, a.model, a.name)} <span class="quiet">Default for every task, saved to its agent file.</span>`],
     ["Voice", `${voiceSelect(a.name, (Feed.hq?.agent_voices || {})[a.name])} <span class="quiet">how ${esc(a.label)} speaks when you talk to it</span>`],
     ["Open tasks", String(a.open.length)],
     a.via && ["Seen in", esc(a.via)],
@@ -618,13 +629,13 @@ document.addEventListener("submit", async (e) => {
 document.addEventListener("change", async (e) => {
   const el = e.target;
   if (el.dataset.agentModel) {
-    try { await J.post("/api/hq/agent-model", { agent: el.dataset.agentModel, model: el.value }); el.classList.add("saved"); J.refresh(); }
+    try { await J.post("/api/hq/agent-model", { agent: el.dataset.agentModel, model: el.value.replace(/^rec:/, "") }); el.classList.add("saved"); J.refresh(); }
     catch (err) { caption("JARVIS", err.message); }
   } else if (el.dataset.agentVoice) {
     try { await J.post("/api/hq/agent-voice", { agent: el.dataset.agentVoice, voice: el.value }); el.classList.add("saved"); await Feed.loadHQ(); J.replyVoice = voiceFor(addressee); }
     catch (err) { caption("JARVIS", err.message); }
   } else if (el.dataset.taskModel) {
-    try { await J.post("/api/hq/task-model", { task: el.dataset.taskModel, model: el.value }); el.classList.add("saved"); Feed.loadHQ(); }
+    try { await J.post("/api/hq/task-model", { task: el.dataset.taskModel, model: el.value.replace(/^rec:/, "") }); el.classList.add("saved"); Feed.loadHQ(); }
     catch (err) { caption("JARVIS", err.message); }
   }
 });
@@ -687,7 +698,7 @@ document.addEventListener("change", (e) => {
   if (!k) return;
   if (k === "simple") { J.pref("hqSimple", e.target.checked ? "1" : "0"); location.reload(); return; }
   if (k === "voice") { J.settings.voice = e.target.value; J.preview(); return; }
-  if (k === "time") { J.pref("hqTime", e.target.value); scene?.setTime(e.target.value); return; }
+  if (k === "time") { J.pref("hqTime", e.target.value); scene?.setTime(e.target.value); if (cinema.on) cinemaLoad(); return; }
   J.settings[k] = e.target.checked;
 });
 document.addEventListener("click", async (e) => {
@@ -732,6 +743,7 @@ function renderChips(m) {
       <div class="btns"><button class="btn gold" data-approve="${a.id}">Approve</button><button class="btn" data-reject="${a.id}">Reject</button></div>`;
   }
   layer.querySelectorAll(".acard").forEach((el) => { if (!pending.some((a) => String(a.id) === el.dataset.approval)) el.remove(); });
+  if (cinema.on) placeCinema();
 }
 const labelOfAgent = (m, name) => (m.agents.find((a) => a.name === name) || {}).label || name;
 
@@ -783,12 +795,39 @@ function askTo(prefix) {
   input.focus();
   input.setSelectionRange(prefix.length, prefix.length);
 }
+// Images to go with the next message: pasted anywhere on the page (Ctrl+V), dropped on the talk bar, or picked.
+let pics = [];
+function showPics() {
+  $("pics").hidden = !pics.length;
+  $("pics").innerHTML = pics.map((p, i) => `<div class="th"><img src="${p.url}" alt="Image to send"><button type="button" data-i="${i}" aria-label="Remove">&times;</button></div>`).join("");
+  $("pics").querySelectorAll("button").forEach((b) => (b.onclick = () => { pics.splice(+b.dataset.i, 1); showPics(); }));
+}
+async function addPics(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    if (pics.length >= 4) { caption("JARVIS", "Up to 4 images per message, sir."); break; }
+    try { pics.push(await J.readImage(f)); } catch (err) { caption("JARVIS", err.message); }
+  }
+  showPics();
+  input.focus();
+}
+$("attach").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => { addPics(e.target.files); e.target.value = ""; });
+document.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (files.length) { e.preventDefault(); addPics(files); }
+});
+for (const zone of [$("talkform"), $("pics")]) {
+  zone.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); zone.classList.add("drop"); } });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drop"));
+  zone.addEventListener("drop", (e) => { e.preventDefault(); zone.classList.remove("drop"); addPics(e.dataTransfer.files); });
+}
 $("talkform").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !pics.length) return;
   input.value = "";
-  J.send(text);
+  J.send(text, pics); pics = []; showPics();
 });
 $("mic").addEventListener("click", () => (J.listening ? J.stop() : J.listen()));
 $("stop").addEventListener("click", () => J.stop());
@@ -827,10 +866,111 @@ Feed.on((kind, data) => {
 });
 setInterval(() => { if (selected?.startsWith("agent:") || selected?.startsWith("team:") || selected === "agents") renderPanel(true); }, 5000);  // whereabouts change as agents move
 
+// ================================================================== the cinematic view
+// The estate as Higgsfield rendered it from the owner's brief (brain/files/hq/backdrop-{day,sunset,evening}.jpg,
+// 4K, generated 2026-11-05), with the live building chips and approval cards laid over it at each building's
+// spot. The light follows the clock like the 3D view; the owner can zoom (wheel, pinch, the +/- buttons) and drag.
+const BACKDROPS = {
+  // Where each pavilion and the HQ sit in each still, as fractions of the frame (left column back to front, then right).
+  day: { jarvis: [0.42, 0.2], left: [[0.284, 0.378], [0.236, 0.442], [0.188, 0.514], [0.136, 0.544], [0.106, 0.622], [0.09, 0.68]], right: [[0.544, 0.378], [0.6, 0.44], [0.656, 0.511], [0.706, 0.544], [0.74, 0.622], [0.76, 0.68]] },
+  sunset: { jarvis: [0.5, 0.2], left: [[0.325, 0.372], [0.297, 0.45], [0.275, 0.533], [0.253, 0.628], [0.205, 0.745], [0.165, 0.655]], right: [[0.66, 0.383], [0.69, 0.46], [0.722, 0.544], [0.75, 0.633], [0.795, 0.745], [0.845, 0.655]] },
+  evening: { jarvis: [0.5, 0.22], left: [[0.35, 0.353], [0.306, 0.4], [0.263, 0.467], [0.225, 0.55], [0.194, 0.622], [0.17, 0.67]], right: [[0.625, 0.353], [0.669, 0.4], [0.709, 0.472], [0.747, 0.556], [0.781, 0.622], [0.8, 0.67]] },
+};
+const LEFT_COLUMN = ["market-research", "product-research", "creative-research", "operations", "mentor-learning", "accountant"];
+const RIGHT_COLUMN = ["meta-ads-auditor", "meta-ads", "shopify", "creative-director", "store-qa", "product-testing"];
+const cinema = { on: false, variant: null, scale: 1, x: 0, y: 0, drag: null, touches: new Map(), missing: false };
+function cinemaVariant() {
+  const pref = J.pref("hqTime");
+  if (pref && pref !== "live") return pref;
+  const h = new Date().getHours() + new Date().getMinutes() / 60;
+  return h >= 6.5 && h < 16.5 ? "day" : h < 19 ? "sunset" : "evening";
+}
+function cinemaSpot(id) {
+  const B = BACKDROPS[cinema.variant] || BACKDROPS.sunset;
+  if (id === "jarvis") return B.jarvis;
+  let i = LEFT_COLUMN.indexOf(id); if (i >= 0) return B.left[i];
+  i = RIGHT_COLUMN.indexOf(id); return i >= 0 ? B.right[i] : null;
+}
+function setCinema(on) {
+  cinema.on = on;
+  $("cinema").hidden = !on;
+  document.body.classList.toggle("cinema", on);
+  document.querySelector('[data-view="cinema"]').setAttribute("aria-pressed", String(on));
+  scene?.pause?.(on);
+  if (on) { cinemaLoad(); cinema.scale = 1; cinema.x = cinema.y = 0; placeCinema(); }
+}
+function cinemaLoad() {
+  const v = cinemaVariant();
+  if (v === cinema.variant) return;
+  cinema.variant = v;
+  const img = $("backdrop");
+  img.onerror = () => { cinema.missing = true; $("cinema-note").hidden = false; };
+  img.onload = () => { cinema.missing = false; $("cinema-note").hidden = true; placeCinema(); };
+  img.src = `/api/hq/file?path=brain/files/hq/backdrop-${v}.jpg`;
+}
+// The frame of the picture on screen (object-fit: cover, then the owner's zoom and drag), and the chips on it.
+function cinemaFrame() {
+  const st = $("stage").getBoundingClientRect(), W = st.width, H = st.height, k = Math.max(W / 3840, H / 2160);
+  const w = 3840 * k * cinema.scale, h = 2160 * k * cinema.scale;
+  return { left: (W - w) / 2 + cinema.x, top: (H - h) / 2 + cinema.y, w, h, W, H };
+}
+function placeCinema() {
+  if (!cinema.on) return;
+  const f = cinemaFrame();
+  $("backdrop").style.transform = `translate(${f.left}px, ${f.top}px)`;
+  $("backdrop").style.width = `${f.w}px`; $("backdrop").style.height = `${f.h}px`;
+  for (const el of $("labels").children) {
+    const spot = el.dataset.approval ? cinemaSpot("jarvis") : cinemaSpot(el.dataset.id);
+    if (!spot) { el.style.opacity = 0; el.style.visibility = "hidden"; continue; }
+    const x = f.left + spot[0] * f.w, y = f.top + spot[1] * f.h - (el.dataset.approval ? 110 : 10);
+    el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight)}px)`;
+    el.style.opacity = 1; el.style.visibility = "visible"; el.style.pointerEvents = "auto";
+  }
+}
+function cinemaZoom(factor, cx, cy) {
+  const f = cinemaFrame(), s = Math.max(1, Math.min(3.5, cinema.scale * factor)), r = s / cinema.scale;
+  // zoom about the cursor: the point under it stays put, then keep the picture covering the stage
+  const newLeft = cx - (cx - f.left) * r, newTop = cy - (cy - f.top) * r;
+  cinema.scale = s;
+  const g = cinemaFrame();
+  cinema.x += newLeft - g.left; cinema.y += newTop - g.top;
+  cinemaClamp(); placeCinema();
+}
+function cinemaClamp() {
+  const f = cinemaFrame();
+  const maxX = Math.max(0, (f.w - f.W) / 2), maxY = Math.max(0, (f.h - f.H) / 2);
+  cinema.x = Math.max(-maxX, Math.min(maxX, cinema.x)); cinema.y = Math.max(-maxY, Math.min(maxY, cinema.y));
+}
+{
+  const el = $("cinema");
+  el.addEventListener("wheel", (e) => { e.preventDefault(); const r = el.getBoundingClientRect(); cinemaZoom(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+  el.addEventListener("pointerdown", (e) => { cinema.touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); cinema.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; el.setPointerCapture?.(e.pointerId); });
+  el.addEventListener("pointermove", (e) => {
+    const t = cinema.touches.get(e.pointerId);
+    if (t && cinema.touches.size === 2) {
+      const [a, b] = [...cinema.touches.values()], before = Math.hypot(a.x - b.x, a.y - b.y);
+      t.x = e.clientX; t.y = e.clientY;
+      const after = Math.hypot(a.x - b.x, a.y - b.y), r = el.getBoundingClientRect();
+      if (before > 0) cinemaZoom(after / before, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+      return;
+    }
+    if (t) { t.x = e.clientX; t.y = e.clientY; }
+    const d = cinema.drag; if (!d || d.id !== e.pointerId) return;
+    cinema.x += e.clientX - d.x; cinema.y += e.clientY - d.y; d.x = e.clientX; d.y = e.clientY; cinemaClamp(); placeCinema();
+  });
+  const end = (e) => { cinema.touches.delete(e.pointerId); if (cinema.drag?.id === e.pointerId) cinema.drag = null; };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  addEventListener("resize", () => { cinemaClamp(); placeCinema(); });
+  setInterval(() => { if (cinema.on) cinemaLoad(); }, 60000);   // the light follows the clock
+}
 document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
-  if (b.dataset.view === "reset") open(null);
-  const on = scene?.view(b.dataset.view);
-  if (b.dataset.view !== "walk") document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(!!on));
+  const v = b.dataset.view;
+  if (v === "cinema") { setCinema(!cinema.on); return; }
+  if (cinema.on && (v === "in" || v === "out")) { const f = cinemaFrame(); cinemaZoom(v === "in" ? 1.3 : 1 / 1.3, f.W / 2, f.H / 2); return; }
+  if (cinema.on) setCinema(false);
+  if (v === "reset") open(null);
+  const on = scene?.view(v);
+  if (v !== "walk") document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", String(!!on));
 }));
 // Walk mode: the hint line, the button for whatever you are standing next to, eye level or over the shoulder, leave.
 function renderWalk(s) {

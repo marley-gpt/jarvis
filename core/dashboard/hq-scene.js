@@ -56,13 +56,13 @@ function buildWorld(THREE, addons, renderer, opts) {
   const controls = new addons.OrbitControls(camera, canvas);
   controls.enableDamping = true; controls.dampingFactor = 0.07;
   controls.enablePan = true; controls.screenSpacePanning = false; controls.panSpeed = 0.7;
-  controls.minDistance = 30; controls.maxDistance = 360; controls.minPolarAngle = 0.35; controls.maxPolarAngle = 1.32;
+  controls.minDistance = 5; controls.maxDistance = 360; controls.minPolarAngle = 0.25; controls.maxPolarAngle = 1.5;
   controls.rotateSpeed = 0.5; controls.zoomSpeed = 0.8;
   // The concept's view: high over the estate's south lawn, looking north over HQ to the harbour and the city.
   const HOME = () => ({ az: 0, pol: 1.22, r: stage.clientWidth < stage.clientHeight ? 230 : 158, target: new V3(0, 4, -30) });
   // What walk mode bumps into, in world x/z: round things (trees, lamps, desks), wall segments, and raised floors (a
   // function of x and z giving the floor height there, or null). Each is registered where the thing is built.
-  const solid = { circles: [], segs: [], floors: [] };
+  const solid = { circles: [], segs: [], floors: [], camSegs: [] };   // camSegs: walls only the camera respects (upper floors)
   solid.circle = (x, z, r) => solid.circles.push([x, z, r]);
   solid.seg = (ax, az, bx, bz) => solid.segs.push([ax, az, bx, bz]);
   solid.rect = (x, z, w, d) => { const l = x - w / 2, r = x + w / 2, t = z - d / 2, b = z + d / 2; solid.seg(l, t, r, t); solid.seg(r, t, r, b); solid.seg(r, b, l, b); solid.seg(l, b, l, t); };
@@ -627,6 +627,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     const pfloor = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 11.4), M.oak); pfloor.rotation.x = -Math.PI / 2; pfloor.position.set(0, 21.42, -1); HQ.add(pfloor);
     box(18, 4.7, 0.3, M.tint, 0, 23.75, -6.85, HQ);
     for (const s of [-1, 1]) box(0.3, 4.7, 12, M.tint, s * 8.85, 23.75, -1, HQ);
+    { const S = 1.15, w = (x, z) => [x * S, -40 + z * S];
+      solid.camSegs.push([...w(-8.85, -6.85), ...w(8.85, -6.85)], [...w(-8.85, -6.85), ...w(-8.85, 5)], [...w(8.85, -6.85), ...w(8.85, 5)]); }
     box(17.2, 3.9, 0.1, M.interior, 0, 23.4, -6.62, HQ, false);
     box(17.4, 4.5, 0.08, M.glass, 0, 23.65, 4.96, HQ, false);
     for (let k = -2; k <= 2; k++) box(0.18, 4.5, 0.25, M.gold, k * 4.3, 23.65, 5.0, HQ, false);
@@ -1389,7 +1391,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   // The owner's office view: from behind his chair, over the desk and out across the plaza to the sea.
   const CEO = () => ({ az: Math.PI, pol: 1.3, r: 8.5, target: HQ.localToWorld(new V3(0, 22.4, 1.2)) });
   let mode = "ceo";
-  function setMode(m) { mode = m; controls.minDistance = m === "ceo" ? 3 : 30; }
+  function setMode(m) { mode = m; controls.minDistance = m === "ceo" ? 2 : 5; }
   function flyTo(goal, dur = 1.4) {
     const from = fromCam();
     let daz = goal.az - from.az; daz = Math.atan2(Math.sin(daz), Math.cos(daz));
@@ -1411,7 +1413,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   function view(cmd) {
     lastInput = performance.now();
     if (cmd === "walk") { if (me.on) stopWalk(); else { const sel = opts.selected(); startWalk(); if (sel) walkTo(sel); } return me.on; }
-    if (cmd === "eye") { me.third = !me.third; you.root.visible = me.on && me.third; tell(); return me.on; }
+    if (cmd === "eye") { setDist(me.third ? 0 : 5.5); return me.on; }
+    if ((cmd === "in" || cmd === "out") && me.on) { setDist(me.dist * (cmd === "in" ? 0.7 : 1.4)); return true; }
     if (cmd === "ceo") { stopWalk(); exploring = false; setMode("ceo"); bossHome(true); flyTo(CEO(), 1.6); return false; }
     if (cmd === "reset") { stopWalk(); exploring = false; setMode("estate"); focus(null); return false; }
     if (me.on) stopWalk();
@@ -1428,7 +1431,13 @@ function buildWorld(THREE, addons, renderer, opts) {
   // W A S D (or the arrows) and the mouse on a desktop, a stick and drag-to-look on a phone. The walker is a circle on
   // the ground pushed out of the registered solids, so walls, trees and desks stop it and the doors let it inside.
   const COARSE = matchMedia("(pointer: coarse)").matches;
-  const me = { on: false, third: false, pos: new V3(0, 0, 34), yaw: Math.PI, pitch: -0.04, vel: new V3(), keys: new Set(), stick: { x: 0, y: 0 }, near: null, bob: 0, drag: null };
+  const me = { on: false, third: false, dist: 0, pos: new V3(0, 0, 34), yaw: Math.PI, pitch: -0.04, vel: new V3(), keys: new Set(), stick: { x: 0, y: 0 }, near: null, bob: 0, drag: null, touches: new Map() };
+  // The walker's view distance: 0 is eye level; anything from 1.6 m out is over the shoulder, up to 12 m.
+  function setDist(d) {
+    me.dist = d < 1.6 ? 0 : Math.min(12, d);
+    const third = me.dist > 0;
+    if (third !== me.third) { me.third = third; you.root.visible = me.on && third; tell(); }
+  }
   const you = character("you", 0xc6a46a, 0.95); you.root.visible = false; scene3.add(you.root);
   const youSt = { walk: 0, walkPhase: 0, sit: 0, type: 0, lean: 0, look: 0, tab: 0, swing: 0 };
   const R = 0.55;   // the walker's radius
@@ -1449,12 +1458,18 @@ function buildWorld(THREE, addons, renderer, opts) {
         if (d < R) { const s = Math.sqrt(L), nx = d < 1e-4 ? -vz / s : dx / d, nz = d < 1e-4 ? vx / s : dz / d; p.x = qx + nx * R; p.z = qz + nz * R; }
       }
     }
+    for (const A of actors) {   // people: nobody is walked through
+      if (A.grow < 0.5 || A.wait > 0) continue;
+      const o = A.c.root.position, dx = p.x - o.x, dz = p.z - o.z, d = Math.hypot(dx, dz), m = 0.5 + R;
+      if (d < m && d > 1e-4 && Math.abs(p.y - o.y) < 2) { p.x = o.x + dx * (m / d); p.z = o.z + dz * (m / d); }
+    }
     p.x = Math.max(-97, Math.min(97, p.x)); p.z = Math.max(-63, Math.min(83, p.z));
   }
   function startWalk() {
     me.on = true; exploring = false; flight = null; controls.enabled = false; controls.autoRotate = false;
     me.fromOffice = mode === "ceo"; me.auto = null;
-    if (me.fromOffice) { me.pos.set(0, 0, -12); me.yaw = 0; me.third = true; bossHome(false); }   // down the lift to the forecourt
+    if (me.fromOffice) { me.pos.set(0, 0, -12); me.yaw = 0; me.third = true; me.dist = 5.5; bossHome(false); }   // down the lift to the forecourt
+    else if (me.third) me.dist = me.dist || 5.5;
     else { me.pos.set(0, 0, 34); me.yaw = Math.PI; }
     me.pitch = -0.04;
     me.vel.set(0, 0, 0); me.keys.clear(); me.stick.x = me.stick.y = 0; me.near = null;
@@ -1481,7 +1496,7 @@ function buildWorld(THREE, addons, renderer, opts) {
       const out = P.door.clone().sub(P.pav.position).setY(0).normalize();
       to = P.door.clone().setY(0).addScaledVector(out, 1.2);
     }
-    me.auto = route(me.pos, to); me.third = true; tell();
+    me.auto = route(me.pos, to); if (!me.third) setDist(5.5); tell();
   }
   function route(from, to) {
     const pts = [], c = PLAZA, ring = 12.5;
@@ -1534,11 +1549,29 @@ function buildWorld(THREE, addons, renderer, opts) {
   document.addEventListener("pointerlockchange", tell);
   const look = (dx, dy, k) => { me.yaw -= dx * k; me.pitch = Math.max(-1.1, Math.min(1.1, me.pitch - dy * k)); };
   canvas.addEventListener("mousemove", (e) => { if (me.on && locked()) look(e.movementX, e.movementY, 0.0022); });
-  canvas.addEventListener("pointerdown", (e) => { if (me.on && !locked()) me.drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!me.on) return;
+    if (e.pointerType === "touch") me.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!locked()) me.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
   canvas.addEventListener("pointermove", (e) => {
-    const d = me.drag; if (!me.on || !d || d.id !== e.pointerId) return;
+    if (!me.on) return;
+    if (e.pointerType === "touch" && me.touches.has(e.pointerId)) {
+      const t = me.touches.get(e.pointerId);
+      if (me.touches.size === 2) {   // pinch: the view distance
+        const [a, b] = [...me.touches.values()], before = Math.hypot(a.x - b.x, a.y - b.y);
+        t.x = e.clientX; t.y = e.clientY;
+        const after = Math.hypot(a.x - b.x, a.y - b.y);
+        if (before > 0) setDist((me.dist || 1.6) * (before / after)); return;
+      }
+      t.x = e.clientX; t.y = e.clientY;
+    }
+    const d = me.drag; if (!d || d.id !== e.pointerId) return;
     look(e.clientX - d.x, e.clientY - d.y, COARSE ? 0.006 : 0.004); d.x = e.clientX; d.y = e.clientY;
   });
+  const endTouch = (e) => me.touches.delete(e.pointerId);
+  canvas.addEventListener("pointerup", endTouch); canvas.addEventListener("pointercancel", endTouch);
+  canvas.addEventListener("wheel", (e) => { if (!me.on) return; e.preventDefault(); setDist((me.dist || 1.2) * Math.exp(e.deltaY * 0.0012)); }, { passive: false });
   // The on-screen stick (phones): its knob follows the finger, and the direction and push drive the me.
   if (opts.stick) {
     const stick = opts.stick, knob = stick.firstElementChild; let sid = null;
@@ -1555,15 +1588,15 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   const fwd = new V3(), side = new V3(), want = new V3(), eye = new V3(), up = new V3(0, 1, 0);
   // How far behind the walker the view can sit before it meets a wall or a tree (a ray against the solids, on the ground plane).
-  function clearBehind(x, z, dx, dz, max) {
+  function clearBehind(x, z, dx, dz, max, wallsOnly) {
     let best = max;
-    for (const [ax, az, bx, bz] of solid.segs) {
+    for (const [ax, az, bx, bz] of wallsOnly ? [...solid.segs, ...solid.camSegs] : solid.segs) {
       const vx = bx - ax, vz = bz - az, den = dx * vz - dz * vx;
       if (Math.abs(den) < 1e-6) continue;
       const t = ((ax - x) * vz - (az - z) * vx) / den, u = ((ax - x) * dz - (az - z) * dx) / den;
       if (t > 0 && t < best && u >= 0 && u <= 1) best = t;
     }
-    for (const [cx, cz, r] of solid.circles) {
+    for (const [cx, cz, r] of wallsOnly ? [] : solid.circles) {
       const ox = x - cx, oz = z - cz, b = ox * dx + oz * dz, c = ox * ox + oz * oz - (r + 0.3) * (r + 0.3), disc = b * b - c;
       if (disc < 0) continue;
       const t = -b - Math.sqrt(disc);
@@ -1602,7 +1635,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const cp = Math.cos(me.pitch), sp = Math.sin(me.pitch);
     eye.set(me.pos.x, me.pos.y + 1.6, me.pos.z);
     if (me.third) {
-      const back = Math.max(1.2, Math.min(5.5, clearBehind(eye.x, eye.z, -fwd.x * cp, -fwd.z * cp, 5.5) - 0.4));
+      const back = Math.max(1.2, Math.min(me.dist, clearBehind(eye.x, eye.z, -fwd.x * cp, -fwd.z * cp, me.dist) - 0.4));
       camera.position.set(eye.x - fwd.x * back * cp, Math.max(g + 0.5, eye.y + 0.4 - back * sp), eye.z - fwd.z * back * cp);
       controls.target.set(eye.x + fwd.x * 3 * cp, eye.y + 3 * sp, eye.z + fwd.z * 3 * cp);
     } else {
@@ -1641,7 +1674,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   canvas.addEventListener("pointerup", (e) => {
     me.drag = null;
     if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
-    if (me.on && !COARSE && !locked()) { canvas.requestPointerLock?.(); return; }   // the first click takes the mouse
+    if (me.on && !COARSE && !locked()) { try { canvas.requestPointerLock?.()?.catch?.(() => {}); } catch {} return; }   // the first click takes the mouse (not allowed in some embedded views)
     const rect = canvas.getBoundingClientRect();
     if (me.on && locked()) ndc.set(0, 0);   // with the mouse taken, a click picks what is in the middle of the view
     else ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
@@ -1656,11 +1689,43 @@ function buildWorld(THREE, addons, renderer, opts) {
     opts.onPick("team", o.userData.pick);
   });
 
+  // Nobody walks through anyone: walking people are pushed apart from each other, and round the owner (seated at his
+  // desk or out walking), with a sideways nudge so they go round rather than stop dead.
+  let kaDt = 0.016;
+  function keepApart(dt) {
+    kaDt = dt;
+    const walking = actors.filter((A) => A.path.length && A.grow > 0.5 && A.wait <= 0 && !A.sitting);
+    const push = (A, ox, oz, minD, both) => {
+      const o = A.c.root.position, dx = o.x - ox, dz = o.z - oz, d = Math.hypot(dx, dz);
+      if (d >= minD + 0.6 || d < 1e-4) return null;
+      const nx = dx / d, nz = dz / d, head = A.path[0];
+      // The next waypoint sits behind whoever is in the way: move it to one side, so the route goes round them.
+      if (Math.hypot(head.x - ox, head.z - oz) < minD + 0.4) { const s = (head.x - o.x) * nz - (head.z - o.z) * nx < 0 ? -1 : 1; head.x = ox + nx * 0.3 + s * -nz * (minD + 1.2); head.z = oz + nz * 0.3 + s * nx * (minD + 1.2); }
+      if (d >= minD) return null;
+      const k = (minD - d) * (both ? 0.5 : 1);
+      // Mostly away, and a steady slide to the side they were heading, so they pass rather than stop dead.
+      const hx = head.x - o.x, hz = head.z - o.z, side = (hx * nz - hz * nx) < 0 ? -1 : 1, slide = 2.2 * kaDt;
+      o.x += nx * k + side * -nz * slide; o.z += nz * k + side * nx * slide;
+      return [nx * k, nz * k];
+    };
+    for (let i = 0; i < walking.length; i++) {
+      const A = walking[i], a = A.c.root.position;
+      for (let j = i + 1; j < walking.length; j++) {
+        const B = walking[j], b = B.c.root.position;
+        if (Math.abs(a.y - b.y) > 2) continue;
+        const moved = push(A, b.x, b.z, 1.0, true);
+        if (moved) { b.x -= moved[0]; b.z -= moved[1]; }
+      }
+      for (const S of actors) if (!S.path.length && S !== A && S.grow > 0.5 && Math.abs(S.c.root.position.y - a.y) < 2) push(A, S.c.root.position.x, S.c.root.position.z, 1.0, false);
+      if (me.on && Math.abs(me.pos.y - a.y) < 2) push(A, me.pos.x, me.pos.z, 1.2, false);
+    }
+  }
+
   // ---------------------------------------------------------------- the frame loop
   const damp = (a, b, lambda, dt) => a + (b - a) * (1 - Math.exp(-lambda * dt));
   const clock = new THREE.Clock();
   const tmp = new V3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
-  let first = true, ringSpin = 0.2, frameCount = 0;
+  let first = true, ringSpin = 0.2, frameCount = 0, paused = false;
   applyTime();
   // HQ opens in the owner's office; the 3D View button goes out to the estate.
   setMode("ceo");
@@ -1670,7 +1735,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   function frame() {
     // Real time, so a slow device keeps pace; capped so a long pause (a hidden tab) does not jump everything.
     const dt = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime;
-    if (!first && !onScreen()) return;
+    if (!first && (!onScreen() || paused)) return;
     if (me.on) stepWalk(dt, time);
     else if (flight) {
       flight.t = Math.min(1, (performance.now() - flight.start) / (flight.dur * 1000));
@@ -1685,6 +1750,13 @@ function buildWorld(THREE, addons, renderer, opts) {
       controls.target.x = Math.max(-110, Math.min(110, controls.target.x));
       controls.target.z = Math.max(-120, Math.min(90, controls.target.z));
       controls.target.y = Math.max(0, Math.min(32, controls.target.y));
+      // Close in, the view stops at a wall instead of passing through it, and never goes under a floor.
+      const dx = camera.position.x - controls.target.x, dz = camera.position.z - controls.target.z, flat = Math.hypot(dx, dz);
+      if (flat > 0.05 && flat < 12) {
+        const free = clearBehind(controls.target.x, controls.target.z, dx / flat, dz / flat, flat, true);
+        if (free < flat) { const k = Math.max(0.15, (free - 0.3) / flat); camera.position.set(controls.target.x + dx * k, controls.target.y + (camera.position.y - controls.target.y) * k, controls.target.z + dz * k); }
+      }
+      camera.position.y = Math.max(camera.position.y, groundAt(camera.position.x, camera.position.z) + 0.7);
     }
     // A side panel covers the right of the view on a desktop: shift the picture so the subject stays visible.
     const open = document.body.classList.contains("panel-open");
@@ -1734,6 +1806,7 @@ function buildWorld(THREE, addons, renderer, opts) {
       stepActor(A, dt, time);
       if (A.gone && A.grow < 0.02) { scene3.remove(A.c.root); actors.splice(i, 1); }
     }
+    keepApart(dt);
     for (let i = pulses.length - 1; i >= 0; i--) {
       const p = pulses[i];
       p.t += dt / 1.6;
@@ -1809,5 +1882,5 @@ function buildWorld(THREE, addons, renderer, opts) {
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
   stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
-  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on };
+  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on, pause: (on) => { paused = !!on; } };
 }

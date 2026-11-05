@@ -43,6 +43,13 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 #nogl { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--navy); background: var(--marble); }
 #nogl[hidden] { display: none; }
 #labels { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+/* the cinematic view: the rendered estate under the same chips and cards */
+#cinema { position: absolute; inset: 0; z-index: 1; overflow: hidden; background: #0e1420; touch-action: none; cursor: grab; }
+#cinema[hidden] { display: none; }
+#backdrop { position: absolute; left: 0; top: 0; display: block; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+#cinema-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 16px; border-radius: 12px; background: rgba(20, 26, 34, .8); color: var(--text); font-size: 13px; }
+#cinema-note[hidden] { display: none; }
+body.cinema .views button[data-view="explore"], body.cinema .views button[data-view="walk"], body.cinema #demo { opacity: .45; }
 
 /* glass, the one material for every overlay */
 .glass { background: var(--glass); border: 1px solid var(--edge); border-radius: 14px; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -160,6 +167,13 @@ nav.pill button[aria-current="true"] .n { border-color: rgba(27, 20, 8, .35); co
 #caption[hidden] { display: none; }
 #caption small { display: block; color: var(--gold-hi); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 2px; }
 .talkbar { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 999px; }
+/* images waiting to go with the next message: pasted, dropped or picked */
+.pics { display: flex; gap: 8px; padding: 8px; border-radius: 14px; }
+.pics[hidden] { display: none; }
+.pics .th { position: relative; width: 64px; height: 64px; border-radius: 9px; overflow: hidden; border: 1px solid var(--edge); }
+.pics .th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pics .th button { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, .6); color: #fff; font-size: 14px; line-height: 1; display: grid; place-items: center; }
+.talkbar.drop, .pics.drop { box-shadow: 0 0 0 2px var(--gold-hi); }
 .talkbar .to { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 11px; border-radius: 999px; font-size: 12.5px; white-space: nowrap;
   color: #1b1408; background: linear-gradient(180deg, #e7cd96, #c6a46a); }
 .talkbar .to b { font-weight: 600; }
@@ -324,12 +338,15 @@ select.pick.saved { border-color: var(--working); }
   <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.3 3.3 0 0 1 4.7 4.7l-9 9a1.6 1.6 0 0 1-2.3-2.3l8-8"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
   <symbol id="i-ok" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
 </svg>
 
 <div id="stage">
   <canvas id="scene" tabindex="-1" aria-label="3D view of the JARVIS HQ estate: HQ, the globe, and a pavilion for each team"></canvas>
+  <div id="cinema" hidden><img id="backdrop" alt="The estate, rendered"><div id="cinema-note" hidden>The rendered backdrops aren't in brain/files/hq yet.</div></div>
   <div id="labels"></div>
   <div id="veil"></div>
   <div id="nogl" hidden></div>
@@ -352,6 +369,7 @@ select.pick.saved { border-color: var(--working); }
     </div>
   </header>
   <div class="views glass" role="group" aria-label="View">
+    <button data-view="cinema" aria-pressed="false"><svg class="i"><use href="#i-photo"/></svg>Cinematic</button>
     <button data-view="ceo"><svg class="i"><use href="#i-crown"/></svg>My office</button>
     <button data-view="reset"><svg class="i"><use href="#i-cube"/></svg>3D View</button>
     <button data-view="in"><svg class="i"><use href="#i-plus"/></svg>Zoom in</button>
@@ -390,8 +408,11 @@ select.pick.saved { border-color: var(--working); }
 <div class="center-bottom">
   <button class="glass" id="toast" hidden></button>
   <p class="glass" id="caption" hidden aria-live="polite"></p>
+  <div class="pics glass" id="pics" hidden></div>
   <form class="talkbar glass" id="talkform" autocomplete="off">
     <button type="button" class="round" id="mic" aria-label="Talk to JARVIS"><svg class="i"><use href="#i-mic"/></svg></button>
+    <button type="button" class="round" id="attach" aria-label="Add images: paste, drop or pick" title="Add images (paste with Ctrl+V, drop them here, or pick)"><svg class="i"><use href="#i-clip"/></svg></button>
+    <input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
     <span class="to" id="to" hidden>To <b></b><button type="button" aria-label="Talk to JARVIS instead">&times;</button></span>
     <input id="say" type="text" placeholder="Talk to JARVIS, or name a team: “Creative, show me ad 4”" aria-label="Message JARVIS">
     <span id="jstate"></span>

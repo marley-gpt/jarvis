@@ -60,6 +60,22 @@ BUILTIN = {"WebSearch": "Web search", "WebFetch": "Web pages", "Bash": "JARVIS c
 MODELS = ("inherit", "opus", "sonnet", "haiku", "fable")
 MODEL_IDS = {"fable": "claude-fable-5-1"}   # Claude Code knows opus/sonnet/haiku by name; Fable goes in by id
 MODEL_LINE = re.compile(r"^model:[^\n]*$", re.M)
+# JARVIS's recommendation per agent (the owner can still pick anything): the strongest model where the work is
+# creative or customer-facing, a mid model for research and analysis, the cheapest for record-keeping.
+RECOMMENDED = {
+    "creative-director": ("opus", "ad concepts and copy: the strongest model earns its cost"),
+    "shopify": ("opus", "product page builds and CRO: wording and layout decide sales"),
+    "store-qa": ("sonnet", "clicking through the store and writing fixes: careful, not creative"),
+    "market-research": ("sonnet", "reading reviews and threads at volume: good judgement, lower cost"),
+    "product-research": ("sonnet", "dossiers from many sources: steady analysis"),
+    "creative-research": ("sonnet", "ad library and competitor analysis"),
+    "meta-ads": ("sonnet", "campaign drafts and performance reads"),
+    "meta-ads-auditor": ("sonnet", "graded audits against a checklist"),
+    "mentor-learning": ("sonnet", "turning lessons into cited notes: accuracy over flair"),
+    "product-testing": ("haiku", "test records, metrics and verdicts: structured work"),
+    "operations": ("haiku", "status reports and priorities: fast and cheap"),
+    "accountant": ("haiku", "the ledger: exact, simple, frequent"),
+}
 
 
 def model_alias(value: str | None) -> str:
@@ -138,7 +154,7 @@ PREVIEW_TEXT = {".md", ".txt", ".csv", ".json"}
 PREVIEW_IMAGE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                  ".gif": "image/gif"}
 PREVIEW_MAX_TEXT = 6000
-PREVIEW_MAX_IMAGE = 8 * 1024 * 1024
+PREVIEW_MAX_IMAGE = 8 * 1024 * 1024   # the 4K backdrops in brain/files/hq are about 4.5 MB
 
 
 def _list(value) -> list[str]:
@@ -372,7 +388,7 @@ def data(conn) -> dict:
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
             "actions": recent_actions(conn), "metrics": metrics(), "models": MODELS, "task_models": task_models(),
-            "agent_voices": _agent_voices(),
+            "agent_voices": _agent_voices(), "recommended": {k: {"model": m, "why": w} for k, (m, w) in RECOMMENDED.items()},
             "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
