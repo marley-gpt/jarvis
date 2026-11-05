@@ -39,3 +39,4 @@ Before any task, load Blake's playbooks `blake-testing` (test economics, budgets
 
 ## Skills
 Load when useful (see `.claude/skills/README.md`): `analytics`, `performance-report`, `attribution`, `pricing`. They are general third-party playbooks: the mentor's methods and the owner's rules in memory take precedence, and anything taken from a skill is labelled **JARVIS recommendation**.
+Learned skills (promoted by the skill-learning loop, JARVIS recommendations): `ad-analysis`.
