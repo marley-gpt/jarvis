@@ -162,6 +162,19 @@ class HQRoutesTest(BrainTest):
         self.assertEqual(post("/api/hq/task", {"title": ""})[0], 400)
         self.assertEqual(post("/api/hq/agent-model", {"agent": "nope", "model": "opus"})[0], 400)
         self.assertEqual(json.loads(self.get("/api/hq")[1])["task_models"], {f"T{data['id']}": "opus"})
+        # Every head agent, Blake and Mark have a voice of their own; the owner can change any of them.
+        voices = json.loads(self.get("/api/hq")[1])["agent_voices"]
+        self.assertEqual(voices["jarvis"], "jarvis")
+        self.assertEqual(voices["shopify"], "voice_shopify")
+        self.assertEqual(len(set(voices.values())), len(voices), "voices must all be different")
+        self.assertEqual(post("/api/hq/agent-voice", {"agent": "blake", "voice": "bm_lewis"}), (200, {"ok": True, "voice": "bm_lewis"}))
+        self.assertEqual(json.loads(self.get("/api/hq")[1])["agent_voices"]["blake"], "bm_lewis")
+        self.assertEqual(post("/api/hq/agent-voice", {"agent": "blake", "voice": ""})[1]["voice"], "voice_blake")
+        self.assertEqual(post("/api/hq/agent-voice", {"agent": "blake", "voice": "nope"})[0], 400)
+        self.assertEqual(post("/api/hq/agent-voice", {"agent": "nobody", "voice": "bm_lewis"})[0], 400)
+        state = json.loads(self.get("/api/state")[1])
+        self.assertTrue(any(v["agent"] == "mark" for v in state["tts"]["team_voices"]))
+        self.assertFalse(any(v["id"].startswith("voice_") for v in state["tts"]["voices"]))   # not in the owner's own voice list
 
     def test_file_preview_route(self):
         (self.home / "work").mkdir(exist_ok=True)

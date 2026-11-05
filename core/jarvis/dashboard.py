@@ -816,6 +816,12 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
+            if self.path == "/api/hq/agent-voice":
+                # The voice an agent (or Blake / Mark) speaks with in the HQ, kept in brain/config.json.
+                try:
+                    return self._json(200, {"ok": True, "voice": tts.set_agent_voice(body.get("agent") or "", body.get("voice") or "")})
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
             if self.path in ("/api/hq/task", "/api/hq/agent-model", "/api/hq/task-model"):
                 # Control from HQ: assign a task, pick an agent's model, pick a model for one task.
                 conn = db.connect()

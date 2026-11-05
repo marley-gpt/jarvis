@@ -96,6 +96,11 @@ def set_agent_model(name: str, model: str) -> str:
     return value
 
 
+def _agent_voices() -> dict:
+    from . import tts
+    return tts.agent_voices()
+
+
 def task_models() -> dict:
     tm = paths.config().get("task_models") or {}
     return tm if isinstance(tm, dict) else {}
@@ -367,6 +372,7 @@ def data(conn) -> dict:
     return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
             "actions": recent_actions(conn), "metrics": metrics(), "models": MODELS, "task_models": task_models(),
+            "agent_voices": _agent_voices(),
             "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),

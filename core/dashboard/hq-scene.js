@@ -572,7 +572,7 @@ function buildWorld(THREE, addons, renderer, opts) {
 
   // The JARVIS HQ building: podium with grand steps, a glass main block, two wings, the crown sign and the light beam.
   const HQ = new THREE.Group(); HQ.position.set(0, 0, -40); HQ.scale.setScalar(1.15); scene3.add(HQ);
-  let ceoSeat, ceoScreen;   // the owner's chair and the figures on his desk, set up with the penthouse below
+  let ceoSeat, ceoScreen, jarvisSeat;   // the owner's chair and desk figures, and JARVIS's chair, set up with the building below
   {
     box(64, 3, 30, M.marble, 0, 1.5, 0, HQ);
     for (let i = 0; i < 6; i++) box(26 - i * 0.6, 0.5, 1.2, M.marble, 0, 0.25 + i * 0.5, 15.6 + (5 - i) * 1.2, HQ);
@@ -650,6 +650,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     box(1.3, 0.06, 0.7, M.walnut, -6.2, 0.5, -1.9, ceoDesk, false);                 // low table
     box(0.08, 0.5, 0.08, M.gold, -6.2, 0.25, -1.9, ceoDesk, false);
     box(2.2, 1.2, 0.5, M.walnut, 6.6, 0.6, -5.5, ceoDesk);                          // cabinet
+    box(1.6, 2.6, 0.12, M.gold, -6, 1.3, -7.75, ceoDesk, false);                      // the lift door
+    box(1.9, 0.12, 0.3, M.frame, -6, 2.66, -7.7, ceoDesk, false);
     for (const [px, pz] of [[-7.6, 4.2], [7.6, 4.2], [7.6, -2.4]]) { box(0.8, 0.8, 0.8, M.white, px, 0.4, pz, ceoDesk, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.3, pz); ceoDesk.add(pl); }
     HQ.updateWorldMatrix(true, true);
     ceoSeat = { pos: HQ.localToWorld(new V3(0, 21.42, -0.1)), face: 0 };   // the owner's chair, facing the glass
@@ -674,6 +676,8 @@ function buildWorld(THREE, addons, renderer, opts) {
       const mini = new THREE.Mesh(new THREE.SphereGeometry(0.75, 20, 14), new THREE.MeshBasicMaterial({ color: 0x7fd3ff, wireframe: true, transparent: true, opacity: 0.8 })); mini.position.set(0, top + 2.3, 6.3); HQ.add(mini);
       const jsign = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), signMat); jsign.position.set(0, top + 2.4, 1.45); HQ.add(jsign);
       box(1.0, 0.7, 1.0, M.leather, 0, top + 0.43, 7.4, HQ, false);
+      HQ.updateWorldMatrix(true, true);
+      jarvisSeat = { pos: HQ.localToWorld(new V3(0, top + 0.02, 7.4)), face: Math.PI };
       for (const px of [-8, 8]) { box(0.9, 0.9, 0.9, M.white, px, top + 0.53, 7.6, HQ, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), M.leaf); pl.position.set(px, top + 1.6, 7.6); HQ.add(pl); }
     }
     // A champagne-gold crown on the penthouse roof, where the beam starts.
@@ -1289,6 +1293,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     jarvisBusy = m.jarvis.status === "idle" ? 0 : m.jarvis.status === "delegating" ? 1 : 0.6;
     const ck = JSON.stringify([m.week, m.counts]);
     if (ck !== ceoKey) { ceoKey = ck; drawCeo(m); }
+    syncErrands(m);
   }
   let ceoKey = "";
   // Where each agent is right now, for the panels: at the desk, walking, or where it is taking its break.
@@ -1296,7 +1301,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     const out = {};
     for (const P of pavilions.values()) for (const d of P.desks) {
       const A = d.actor; if (!A) continue;
-      out[d.name] = A.path.length ? (A.away ? "heading out for a break" : "walking to the desk") : A.leisure ? A.leisure.label : "at the desk";
+      out[d.name] = A.errand ? (A.errand.stage === "asking" ? "in your office with an approval" : A.errand.stage === "back" ? "coming back from your office" : "on the way to your office with an approval")
+        : A.path.length ? (A.away ? "heading out for a break" : "walking to the desk") : A.leisure ? A.leisure.label : "at the desk";
     }
     return out;
   }
@@ -1304,6 +1310,61 @@ function buildWorld(THREE, addons, renderer, opts) {
   // ---------------------------------------------------------------- the owner: at his desk in the penthouse, or out walking
   const boss = actor(character("owner", 0xc6a46a), ceoSeat.pos, 0);
   boss.seat = ceoSeat; boss.sitting = true; boss.name = "owner";
+  // JARVIS at his own desk on floor 2; he walks up with his own approvals.
+  const jarvisA = actor(character("jarvis", 0xc6a46a), jarvisSeat.pos, Math.PI);
+  jarvisA.seat = jarvisSeat; jarvisA.sitting = true; jarvisA.name = "jarvis";
+
+  // ---------------------------------------------------------------- errands: an agent brings an approval to the owner's office
+  // A pending approval sends the agent whose task it is (JARVIS for his own) out of its office, round the plaza, up the
+  // HQ steps and into the lift; it reappears at the penthouse lift door and stands in front of the owner's desk with
+  // the card until the approval is decided, then goes back the same way. Driven by the real approval records.
+  const errands = new Map();
+  const FOOT = new V3(0, 0, -15), STEP_TOP = new V3(0, 3.45, -23), FRONT_DOOR = new V3(0, 4.49, -29.1), LOBBY = new V3(0, 4.49, -31.5);
+  const LIFT_TOP = HQ.localToWorld(new V3(-6, 21.42, -5.4));
+  // Where a visitor stands: beside the desk, in the owner's view, not behind his screen; two spots, then they queue.
+  const ASK_SPOTS = [[3.0, 2.0], [-3.0, 2.0], [3.6, 4.6], [-3.6, 4.6]].map(([x, z]) => HQ.localToWorld(new V3(x, 21.42, z)));
+  const askSpot = () => ASK_SPOTS[[...errands.values()].filter((E) => E.spot != null).length % ASK_SPOTS.length];
+  const JARVIS_LIFT = HQ.localToWorld(new V3(-6, 14.3, 7.4));
+  function errandStart(id, agent) {
+    let A = null, home = null;
+    if (agent === "jarvis") A = jarvisA;
+    else for (const P of pavilions.values()) { const d = P.desks.find((x) => x.name === agent); if (d?.actor) { A = d.actor; home = P; break; } }
+    if (!A || A.errand) return;
+    const E = { A, home, stage: "going", id, spot: null };
+    E.spot = askSpot();
+    errands.set(id, E);
+    A.errand = E; A.leisure = null; A.away = false; A.activity = null;
+    const lift = (A) => { A.wait = 1.6; A.c.root.position.copy(LIFT_TOP); walk(A, [E.spot], (A) => { A.face = Math.atan2(ceoSeat.pos.x - E.spot.x, ceoSeat.pos.z - E.spot.z); E.stage = "asking"; }); };
+    if (home) walk(A, [home.door.clone(), ...route(home.door, FOOT), STEP_TOP, FRONT_DOOR, LOBBY], lift);
+    else walk(A, [JARVIS_LIFT], lift);
+  }
+  function errandEnd(id) {
+    const E = errands.get(id); if (!E) return;
+    errands.delete(id);
+    const { A, home } = E; E.stage = "back";
+    const done = (A) => { A.errand = null; if (home) goToDesk(A, home); else { A.seat = jarvisSeat; A.face = Math.PI; A.sitting = true; } };
+    walk(A, [LIFT_TOP], (A) => {
+      A.wait = 1.6;
+      if (home) { A.c.root.position.copy(LOBBY); walk(A, [FRONT_DOOR, STEP_TOP, FOOT, ...route(FOOT, home.door), home.door.clone()], done); }
+      else { A.c.root.position.copy(JARVIS_LIFT); walk(A, [jarvisSeat.pos.clone()], done); }
+    });
+  }
+  function syncErrands(m) {
+    const pending = m.board?.ask?.approvals || [];
+    const ids = new Set(pending.map((a) => String(a.id)));
+    for (const a of pending) {
+      if (errands.has(String(a.id))) continue;
+      const task = a.task_id ? m.allTasks.find((t) => t.id === a.task_id) : null;
+      errandStart(String(a.id), task?.agent || "jarvis");
+    }
+    for (const id of [...errands.keys()]) if (!ids.has(id)) errandEnd(id);
+  }
+  // Where the approval card sits: over the agent's head once it is standing at the desk.
+  function errandAnchor(id) {
+    const E = errands.get(String(id));
+    if (!E || E.stage !== "asking") return null;
+    return E.A.c.root.position.clone().add(new V3(0, 2.6, 0));
+  }
   const bossHome = (home) => { boss.c.root.visible = home; };
   function drawCeo(m) {
     const g = ceoScreen.c.getContext("2d"), W = ceoScreen.c.width, H = ceoScreen.c.height, w = m.week || {}, c = m.counts || {};
@@ -1648,7 +1709,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const P of pavilions.values()) {
       for (const d of P.desks) {
         const A = d.actor, ph = d.phase + time;
-        if (A && !A.leaving) {
+        if (A && !A.leaving && !A.errand) {
           // Real work brings an agent back to its desk; with nothing to do it heads out for a while.
           if (A.status !== "idle" && A.away) goToDesk(A, P);
           else if (A.status === "idle" && !A.away && A.sitting && !REDUCED) {
@@ -1715,7 +1776,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const el of tags.children) {
       const id = el.dataset.id;
       const P = pavilions.get(id);
-      const anchor = id === "jarvis" ? tmp.set(0, 37, -40) : P ? tmp.copy(P.anchor) : null;
+      const anchor = el.dataset.approval ? errandAnchor(el.dataset.approval) : id === "jarvis" ? tmp.set(0, 37, -40) : P ? tmp.copy(P.anchor) : null;
       if (!anchor) { el.style.opacity = 0; continue; }
       const v = anchor.clone().project(camera);
       const dist = camera.position.distanceTo(anchor);
@@ -1747,6 +1808,6 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
-  stage.hq = { camera, controls, actors, frame, me, solid, boss, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
   return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on };
 }

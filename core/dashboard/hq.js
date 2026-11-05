@@ -421,6 +421,7 @@ function agentFacts(a) {
     a.status === "working" && ["Tool", a.tool ? esc(a.tool) : "Not reported yet"],
     a.since && ["Since", esc(ago(a.since))],
     ["Model", `${modelSelect("data-agent-model", a.name, a.model)} <span class="quiet">default for every task; saved to its agent file</span>`],
+    ["Voice", `${voiceSelect(a.name, (Feed.hq?.agent_voices || {})[a.name])} <span class="quiet">how ${esc(a.label)} speaks when you talk to it</span>`],
     ["Open tasks", String(a.open.length)],
     a.via && ["Seen in", esc(a.via)],
   ]);
@@ -496,7 +497,10 @@ function panelJarvis(m) {
   const shared = m.allTasks.filter((t) => t.status !== "done" && m.allTasks.some((x) => x.parent_id === t.id));
   return { ref: null, html: head("Main brain", "JARVIS", "Every team reads from and writes to the same memory, and JARVIS hands out the work.", `<div class="state-line"><span class="lamp ${m.jarvis.status === "idle" ? "" : "working"}"></span>${esc(word)}</div>`) + `
     <div class="p-body">
-      <div class="btns"><button class="btn gold" data-ask="">Talk to JARVIS</button><a class="btn" href="/chat">Full chat</a></div>
+      <div class="btns"><button class="btn gold" data-ask="">Talk to JARVIS</button><button class="btn" data-ask="Blake, ">Talk to Blake</button><button class="btn" data-ask="Mark, ">Talk to Mark</button><a class="btn" href="/chat">Full chat</a></div>
+      <p class="quiet">Blake and Mark are method personas (the mentors' playbooks, answered by JARVIS) with their own stock voices, not the real people.</p>
+      <h3>Voices</h3>
+      ${facts([["JARVIS", `${voiceSelect("jarvis", (Feed.hq?.agent_voices || {})["jarvis"])}`], ["Blake", voiceSelect("blake", (Feed.hq?.agent_voices || {})["blake"])], ["Mark", voiceSelect("mark", (Feed.hq?.agent_voices || {})["mark"])]])}
       <h3>Command chat</h3>
       ${msgs.length ? `<div class="chat">${msgs.map((j) => `<div class="msg ${j.role === "owner" ? "owner" : "jarvis"}"><small>${j.role === "owner" ? "You" : "JARVIS"}, ${esc(ago(j.ts))}</small>${esc((j.text || "").slice(0, 600))}</div>`).join("")}</div>` : `<p class="empty">No conversation yet.</p>`}
       <h3>Boardroom: work shared across teams <span class="n">${shared.length || ""}</span></h3>
@@ -616,6 +620,9 @@ document.addEventListener("change", async (e) => {
   if (el.dataset.agentModel) {
     try { await J.post("/api/hq/agent-model", { agent: el.dataset.agentModel, model: el.value }); el.classList.add("saved"); J.refresh(); }
     catch (err) { caption("JARVIS", err.message); }
+  } else if (el.dataset.agentVoice) {
+    try { await J.post("/api/hq/agent-voice", { agent: el.dataset.agentVoice, voice: el.value }); el.classList.add("saved"); await Feed.loadHQ(); J.replyVoice = voiceFor(addressee); }
+    catch (err) { caption("JARVIS", err.message); }
   } else if (el.dataset.taskModel) {
     try { await J.post("/api/hq/task-model", { task: el.dataset.taskModel, model: el.value }); el.classList.add("saved"); Feed.loadHQ(); }
     catch (err) { caption("JARVIS", err.message); }
@@ -668,6 +675,7 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-team], [data-agent], [data-task], [data-ask]");
   if (!el || el.closest(".chip3d")) return;
   if (el.dataset.ask !== undefined) return askTo(el.dataset.ask);
+  if (el.dataset.hear) { const who = el.dataset.hear, sel = el.parentElement.querySelector("select"); const v = sel?.value || (Feed.hq?.agent_voices || {})[who]; if (v) J.say(`${who === "blake" ? "Blake" : who === "mark" ? "Mark" : labelOfAgent(Feed.model, who)} here, sir. Ready when you are.`, "kokoro:" + v); return; }
   if (el.dataset.task) return open(`task:${el.dataset.task}`);
   if (el.dataset.agent) return open(`agent:${el.dataset.agent}`);
   if (el.dataset.team) return open(`team:${el.dataset.team}`);
@@ -711,6 +719,37 @@ function renderChips(m) {
     el.innerHTML = `<span class="ic">${icon(t.ic)}</span><b>${esc(t.name)}</b><small>${t.sub}</small>`;
     el.setAttribute("aria-label", `${t.name}: ${el.querySelector("small").textContent}`);
   }
+  // Approval cards: one per pending approval, shown by the estate at the agent's spot in the owner's office once it
+  // has walked there. The buttons are the same Approve and Reject as the board (the real record).
+  const pending = m.board.ask.approvals;
+  for (const a of pending) {
+    let el = layer.querySelector(`[data-approval="${a.id}"]`);
+    if (!el) { el = document.createElement("div"); el.className = "acard"; el.dataset.approval = String(a.id); el.style.opacity = 0; layer.appendChild(el); }
+    const task = a.task_id ? m.allTasks.find((t) => t.id === a.task_id) : null;
+    const who = task?.agent ? labelOfAgent(m, task.agent) : "JARVIS";
+    el.innerHTML = `<small>${esc(who)} needs your decision</small><div class="t">${esc(a.summary)}</div>
+      <div class="m">${esc(a.kind)}${a.amount != null ? `, ${esc(a.amount)} ${esc(a.currency || "")}` : ""}${task ? `, T${task.id}` : ""}</div>
+      <div class="btns"><button class="btn gold" data-approve="${a.id}">Approve</button><button class="btn" data-reject="${a.id}">Reject</button></div>`;
+  }
+  layer.querySelectorAll(".acard").forEach((el) => { if (!pending.some((a) => String(a.id) === el.dataset.approval)) el.remove(); });
+}
+const labelOfAgent = (m, name) => (m.agents.find((a) => a.name === name) || {}).label || name;
+
+// Voices: every head agent, and the Blake and Mark method personas, speaks with its own Kokoro voice (stock voices and
+// blends, chosen on the server; the owner can change any of them on the agent's profile). Talking to one of them makes
+// the replies come in that voice; talking to JARVIS brings his own back.
+const PERSONAS = { Blake: "blake", Mark: "mark" };
+function voiceFor(label) {
+  if (!label) return null;
+  const name = PERSONAS[label] || (Feed.model?.agents.find((a) => a.label === label || a.name === label) || {}).name;
+  const v = name && (Feed.hq?.agent_voices || {})[name];
+  return v ? "kokoro:" + v : null;
+}
+function voiceSelect(who, current) {
+  const t = J.state?.tts || {};
+  const options = [["", "Stock voice"], ...(t.team_voices || []).map((v) => [v.id, v.name]), ...(t.voices || []).map((v) => [v.id, v.name])];
+  return `<select data-agent-voice="${esc(who)}" class="pick">${options.map(([id, name]) => `<option value="${id}" ${id === (current || "") ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+    <button class="btn" data-hear="${esc(who)}">Hear it</button>`;
 }
 
 // ================================================================== talk bar (chat and voice come from jarvis.js)
@@ -723,6 +762,7 @@ input.placeholder = PLACEHOLDER;
 let addressee = null;
 function address(name) {
   addressee = name || null;
+  J.replyVoice = voiceFor(addressee);   // replies come in that agent's or persona's voice
   $("to").hidden = !addressee;
   $("to").querySelector("b").textContent = addressee || "";
   input.placeholder = addressee ? `Message ${addressee}` : PLACEHOLDER;
