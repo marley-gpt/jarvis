@@ -51,6 +51,18 @@ class DashboardTest(BrainTest):
                 return
         self.fail("runner never finished")
 
+    def test_every_page_carries_the_live_script_and_reports_its_version(self):
+        from jarvis import live
+        for page in ("/", "/chat", "/console"):
+            status, html = self.request("GET", page, token=False)
+            self.assertEqual(status, 200)
+            self.assertIn(b'<script src="/live.js"></script>', html)
+        status, js = self.request("GET", "/live.js", token=False)
+        self.assertEqual(status, 200)
+        self.assertIn(b"/api/live", js)
+        status, raw = self.request("GET", "/api/live", token=False)
+        self.assertEqual(json.loads(raw), {"ui": live.ui_version(), "boot": live.BOOT})
+
     def test_page_and_state(self):
         status, html = self.request("GET", "/", token=False)
         self.assertEqual(status, 200)

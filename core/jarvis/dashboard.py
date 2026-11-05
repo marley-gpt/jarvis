@@ -33,13 +33,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, memory, paths, readiness, records, telegram, tts, wakeword
+from . import brief, db, journal, live, memory, paths, readiness, records, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The office is the main view (owner decision D1); the console and the first version stay available.
 PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
          "/classic": "index.html"}
-ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8")}
+ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
+          "/live.js": ("live.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -631,10 +632,12 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             route, _, query = self.path.partition("?")
             if route in PAGES:
                 html = (STATIC / PAGES[route]).read_text(encoding="utf-8").replace("__JARVIS_TOKEN__", token)
-                return self._send(200, html.encode(), "text/html; charset=utf-8")
+                return self._send(200, live.inject(html).encode(), "text/html; charset=utf-8")
             if route in ASSETS:
                 name, ctype = ASSETS[route]
                 return self._send(200, (STATIC / name).read_bytes(), ctype)
+            if route == "/api/live":
+                return self._json(200, live.state())
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
             if route.startswith("/api/memory/"):
@@ -797,9 +800,18 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 
 
 def serve(port: int = 8765, open_browser: bool = True) -> None:
-    try:
-        server = make_server(port=port)
-    except OSError:
+    restarted = os.environ.pop("JARVIS_RESTARTED", "")
+    for _ in range(30 if restarted else 1):  # after a live restart, wait for the old copy to let go of the port
+        try:
+            server = make_server(port=port)
+            break
+        except OSError:
+            if restarted:
+                time.sleep(0.5)
+    else:
+        if restarted:
+            sys.stderr.write("jarvis: restart couldn't take over the port\n")
+            return
         url = f"http://127.0.0.1:{port}/"
         print(f"JARVIS dashboard is already running at {url}. Opening it.", flush=True)
         if open_browser:
@@ -818,15 +830,26 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         server.wake.start()
     if server.telegram.enabled():
         server.telegram.start()  # the owner's phone: texts, voice notes and photos to JARVIS
-    if open_browser:
+    if open_browser and not restarted:
         webbrowser.open(url)
+    swap = threading.Event()
+    def restart() -> None:
+        swap.set()
+        server.shutdown()
+    watcher = live.Watcher(lambda: server.runner.busy, restart, server.hub.publish)
+    watcher.start()  # new Python code is picked up between replies, without reopening the app
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        watcher.stop()
         server.wake.stop()
         server.telegram.stop()
         server.runner.close()
+    if swap.is_set():
+        server.server_close()
+        live.respawn()
+        os._exit(0)  # leftover threads (open event streams) mustn't keep the old copy alive
         server.tts.stop()
         server.server_close()
