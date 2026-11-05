@@ -20,10 +20,12 @@ export async function startScene(opts) {
       import("three/addons/controls/OrbitControls.js"), import("three/addons/environments/RoomEnvironment.js")]);
     addons = { OrbitControls: oc.OrbitControls, RoomEnvironment: re.RoomEnvironment };
     if (!opts.simple) {
-      const [ec, rp, bp, op] = await Promise.all([
+      const [ec, rp, bp, op, sm, ao, wa] = await Promise.all([
         import("three/addons/postprocessing/EffectComposer.js"), import("three/addons/postprocessing/RenderPass.js"),
-        import("three/addons/postprocessing/UnrealBloomPass.js"), import("three/addons/postprocessing/OutputPass.js")]);
-      Object.assign(addons, { EffectComposer: ec.EffectComposer, RenderPass: rp.RenderPass, UnrealBloomPass: bp.UnrealBloomPass, OutputPass: op.OutputPass });
+        import("three/addons/postprocessing/UnrealBloomPass.js"), import("three/addons/postprocessing/OutputPass.js"),
+        import("three/addons/postprocessing/SMAAPass.js"), import("three/addons/postprocessing/SSAOPass.js"), import("three/addons/objects/Water.js")]);
+      Object.assign(addons, { EffectComposer: ec.EffectComposer, RenderPass: rp.RenderPass, UnrealBloomPass: bp.UnrealBloomPass, OutputPass: op.OutputPass,
+        SMAAPass: sm.SMAAPass, SSAOPass: ao.SSAOPass, Water: wa.Water });
     }
   } catch (e) {
     return opts.fail("The 3D view needs an internet connection the first time, to load three.js. Everything else works.");
@@ -243,10 +245,30 @@ function buildWorld(THREE, addons, renderer, opts) {
   propKind("bollard", new THREE.CylinderGeometry(0.09, 0.11, 0.9, 8).translate(0, 0.45, 0), M.frame);
   propKind("bollardLamp", new THREE.CylinderGeometry(0.11, 0.11, 0.16, 8).translate(0, 0.98, 0), M.lampGlass);
   PROPS.bollardLamp.shadow = false;
-  propKind("visitorBody", new THREE.CapsuleGeometry(0.27, 0.85, 3, 8).translate(0, 0.95, 0), std({ roughness: 0.7 }));
-  propKind("visitorHead", new THREE.SphereGeometry(0.2, 10, 8).translate(0, 1.72, 0), std({ color: 0xd9a07a, roughness: 0.7 }));
-  const SHIRTS = [0xffffff, 0x1f2a44, 0xe9d8c0, 0xd4202f, 0x2f3338, 0xf1c40f, 0x3a7bd5, 0xf2f2f2];
-  const visitor = (parent, x, y, z, ry) => { prop("visitorBody", parent, x, y, z, ry, 1, SHIRTS[(rand() * SHIRTS.length) | 0]); prop("visitorHead", parent, x, y, z, ry); };
+  // Visitors are the same build as the agents, standing easy, drawn as four instanced parts for all of them: the suit (one
+  // colour per person), shoes and hands, the head (a skin tone each) and hair.
+  const fig = (parts) => merge(parts.map(([geo, x, y, z, color]) => ({ geo, color, m: at(x, y, z) })));
+  propKind("visitorBody", fig([
+    [new THREE.CylinderGeometry(0.1, 0.08, 0.44, 7), -0.11, 0.69, 0.02, 0xffffff], [new THREE.CylinderGeometry(0.1, 0.08, 0.44, 7), 0.11, 0.69, -0.02, 0xffffff],
+    [new THREE.CylinderGeometry(0.075, 0.062, 0.42, 7), -0.11, 0.26, 0.03, 0xffffff], [new THREE.CylinderGeometry(0.075, 0.062, 0.42, 7), 0.11, 0.26, -0.03, 0xffffff],
+    [new THREE.BoxGeometry(0.36, 0.17, 0.22), 0, 0.95, 0, 0xffffff], [new THREE.CylinderGeometry(0.25, 0.19, 0.56, 8), 0, 1.31, 0, 0xffffff],
+    [new THREE.CylinderGeometry(0.068, 0.058, 0.3, 7), -0.3, 1.38, 0, 0xffffff], [new THREE.CylinderGeometry(0.068, 0.058, 0.3, 7), 0.3, 1.38, 0, 0xffffff],
+    [new THREE.CylinderGeometry(0.056, 0.048, 0.27, 7), -0.31, 1.1, 0.04, 0xffffff], [new THREE.CylinderGeometry(0.056, 0.048, 0.27, 7), 0.31, 1.1, 0.04, 0xffffff],
+  ]), std({ color: 0xffffff, roughness: 0.65, flatShading: true }));
+  propKind("visitorTrim", fig([
+    [new THREE.BoxGeometry(0.15, 0.08, 0.28), -0.11, 0.04, 0.09, 0x2a1c14], [new THREE.BoxGeometry(0.15, 0.08, 0.28), 0.11, 0.04, 0.03, 0x2a1c14],
+    [new THREE.IcosahedronGeometry(0.058, 0), -0.31, 0.94, 0.06, 0xd9a07a], [new THREE.IcosahedronGeometry(0.058, 0), 0.31, 0.94, 0.06, 0xd9a07a],
+    [new THREE.BoxGeometry(0.12, 0.26, 0.05), 0, 1.45, 0.2, 0xffffff],
+  ]), M.vcol);
+  propKind("visitorHead", fig([[new THREE.CylinderGeometry(0.06, 0.07, 0.14, 8), 0, 1.65, 0, 0xffffff], [new THREE.IcosahedronGeometry(0.19, 1), 0, 1.87, 0, 0xffffff]]), std({ color: 0xffffff, roughness: 0.7, flatShading: true }));
+  propKind("visitorHair", new THREE.SphereGeometry(0.205, 12, 8, 0, Math.PI * 2, 0, 1.35).translate(0, 1.9, -0.02), std({ color: 0xffffff, roughness: 0.8, flatShading: true }));
+  const SHIRTS = [0x1f2a44, 0xe9d8c0, 0xd4202f, 0x2f3338, 0xf1c40f, 0x3a7bd5, 0xf2f2f2, 0x2f8f83, 0xc8b79a, 0x6b3fa0];
+  const VSKIN = [0xf1c7a5, 0xe0ac83, 0xc68a62, 0x8d5a3b, 0xf5d6bf, 0xd9a07a], VHAIR = [0x2b1d14, 0x4a3022, 0x7a5a3a, 0x1b1b1b, 0xb8925c];
+  const visitor = (parent, x, y, z, ry) => {
+    const sc = 1.15 + rand() * 0.15;
+    prop("visitorBody", parent, x, y, z, ry, sc, SHIRTS[(rand() * SHIRTS.length) | 0]); prop("visitorTrim", parent, x, y, z, ry, sc);
+    prop("visitorHead", parent, x, y, z, ry, sc, VSKIN[(rand() * VSKIN.length) | 0]); prop("visitorHair", parent, x, y, z, ry, sc, VHAIR[(rand() * VHAIR.length) | 0]);
+  };
   const FLOWERS = [0xe24b6a, 0xf7f7f7, 0xd94c9c, 0xf29e3b, 0x7b4fbf, 0xffffff, 0xff6b6b];
   const flower = (parent, x, y, z) => prop("flower", parent, x, y, z, rand() * 6.3, 0.55 + rand() * 0.55, FLOWERS[(rand() * FLOWERS.length) | 0]);
   const workstation = (parent, x, y, z, ry, sc = 1) => { prop("workstation", parent, x, y, z, ry, sc); prop("screen", parent, x, y, z, ry, sc); };
@@ -301,6 +323,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const u = sky.material.uniforms;
     u.top.value.copy(mixC(a.sky[0], b.sky[0], t)); u.mid.value.copy(mixC(a.sky[1], b.sky[1], t)); u.low.value.copy(mixC(a.sky[2], b.sky[2], t));
     u.sunGlow.value = L(a.sky[3], b.sky[3]); u.sunDir.value.copy(sun.position).normalize();
+    if (world.water) { world.water.material.uniforms.sunDirection.value.copy(sun.position).normalize(); world.water.material.uniforms.sunColor.value.copy(sun.color); }
     scene3.fog.color.copy(mixC(a.fog[0], b.fog[0], t)); scene3.fog.near = L(a.fog[1], b.fog[1]); scene3.fog.far = L(a.fog[2], b.fog[2]);
     renderer.toneMappingExposure = L(a.exposure, b.exposure);
     const glow = L(a.glow, b.glow);
@@ -344,8 +367,19 @@ function buildWorld(THREE, addons, renderer, opts) {
     const shallow = C(0x3fb2c4), deep = C(0x1b67a8);
     for (let i = 0; i < sp.count; i++) { const z = sp.getZ(i), x = sp.getX(i); const k = Math.min(1, Math.max(0, (-z - 60) / 260 + Math.abs(x) / 1400)); const c = shallow.clone().lerp(deep, k); sc.push(c.r, c.g, c.b); }
     seaGeo.setAttribute("color", new THREE.Float32BufferAttribute(sc, 3));
+    if (addons.Water && !simple) {
+      // Reflecting water (three.js Water): the city, yachts and sky mirror in the bay. Its reflection is a second render of the
+      // scene, so it is drawn at a small size and refreshed every other frame to keep the frame rate.
+      const normals = new THREE.TextureLoader().load("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/textures/waternormals.jpg", (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+      const water = new addons.Water(new THREE.PlaneGeometry(4000, 3000), { textureWidth: 384, textureHeight: 384, waterNormals: normals, sunDirection: new V3(0, 1, 0),
+        sunColor: 0xffffff, waterColor: 0x1f6f9f, distortionScale: 2.2, fog: true });
+      water.rotation.x = -Math.PI / 2; water.position.set(0, SEA, -400);
+      const draw = water.onBeforeRender.bind(water); let tick = 0;
+      water.onBeforeRender = (...a) => { if ((tick++ & 1) === 0) draw(...a); };
+      scene3.add(water); world.water = water;
+    }
     const sea = new THREE.Mesh(seaGeo, std({ vertexColors: true, roughness: 0.15, metalness: 0.1, normalMap: rippleTex, normalScale: new THREE.Vector2(0.35, 0.35), envMap: envTex, envMapIntensity: 0.5 }));
-    sea.position.y = SEA; scene3.add(sea);
+    sea.position.y = world.water ? SEA - 0.6 : SEA; scene3.add(sea);   // under the reflecting water it only tints the shallows
 
     // Mountains far behind the city, softened by the haze.
     const peaks = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 7), std({ color: 0x8f9a7e, roughness: 1, flatShading: true }), 9);
@@ -752,17 +786,17 @@ function buildWorld(THREE, addons, renderer, opts) {
   // Pool with loungers and parasols, the tennis court, the supercar forecourt.
   let turn;
   {
-    box(34, 0.3, 18, M.ivory, -62, 0.15, 48);
+    box(34, 0.3, 18, M.ivory, -80, 0.15, 52);
     const pool = new THREE.Mesh(new THREE.PlaneGeometry(26, 9), std({ color: 0x2fb3cc, roughness: 0.06, metalness: 0.15, normalMap: poolRipple, normalScale: new THREE.Vector2(0.5, 0.5), envMap: envTex, envMapIntensity: 0.8 }));
-    pool.rotation.x = -Math.PI / 2; pool.position.set(-62, 0.33, 46); scene3.add(pool);
-    box(26.6, 0.2, 0.3, M.gold, -62, 0.35, 41.4, scene3, false); box(26.6, 0.2, 0.3, M.gold, -62, 0.35, 50.6, scene3, false);
-    solid.rect(-62, 46, 26.6, 9.6);
+    pool.rotation.x = -Math.PI / 2; pool.position.set(-80, 0.33, 50); scene3.add(pool);
+    box(26.6, 0.2, 0.3, M.gold, -80, 0.35, 45.4, scene3, false); box(26.6, 0.2, 0.3, M.gold, -80, 0.35, 54.6, scene3, false);
+    solid.rect(-80, 50, 26.6, 9.6);
     for (let i = 0; i < 6; i++) {
-      const x = -73 + i * 4.4;
-      box(1.1, 0.35, 2.6, M.white, x, 0.5, 54.2);
-      const umb = new THREE.Mesh(new THREE.ConeGeometry(2, 0.8, 12), M.white); umb.position.set(x + 2.2, 3.1, 54.4); umb.castShadow = !simple; scene3.add(umb);
-      box(0.08, 2.8, 0.08, M.gold, x + 2.2, 1.6, 54.4, scene3, false);
-      solid.circle(x + 2.2, 54.4, 0.2); solid.circle(x, 54.2, 1.0);
+      const x = -91 + i * 4.4;
+      box(1.1, 0.35, 2.6, M.white, x, 0.5, 58.2);
+      const umb = new THREE.Mesh(new THREE.ConeGeometry(2, 0.8, 12), M.white); umb.position.set(x + 2.2, 3.1, 58.4); umb.castShadow = !simple; scene3.add(umb);
+      box(0.08, 2.8, 0.08, M.gold, x + 2.2, 1.6, 58.4, scene3, false);
+      solid.circle(x + 2.2, 58.4, 0.2); solid.circle(x, 58.2, 1.0);
     }
     const courtTex = canvasTex(512, 256, (g, w, h) => {
       g.fillStyle = "#b4664a"; g.fillRect(0, 0, w, h); g.fillStyle = "#2f7d74"; g.fillRect(36, 30, w - 72, h - 60);
@@ -770,9 +804,9 @@ function buildWorld(THREE, addons, renderer, opts) {
       g.beginPath(); g.moveTo(w / 2, 30); g.lineTo(w / 2, h - 30); g.moveTo(140, 52); g.lineTo(140, h - 52); g.moveTo(w - 140, 52); g.lineTo(w - 140, h - 52); g.moveTo(140, h / 2); g.lineTo(w - 140, h / 2); g.stroke();
     });
     const court = new THREE.Mesh(new THREE.PlaneGeometry(30, 15), std({ map: courtTex, roughness: 0.8 }));
-    court.rotation.x = -Math.PI / 2; court.position.set(66, 0.08, 46); court.receiveShadow = !simple; scene3.add(court);
-    box(0.1, 1, 11, M.white, 66, 0.5, 46, scene3, false); solid.seg(66, 40.5, 66, 51.5);
-    for (const [x, z] of [[51, 38.5], [81, 38.5], [51, 53.5], [81, 53.5]]) box(0.15, 3.2, 0.15, M.frame, x, 1.6, z, scene3, false);
+    court.rotation.x = -Math.PI / 2; court.position.set(82, 0.08, 50); court.receiveShadow = !simple; scene3.add(court);
+    box(0.1, 1, 11, M.white, 82, 0.5, 50, scene3, false); solid.seg(82, 44.5, 82, 55.5);
+    for (const [x, z] of [[67, 42.5], [97, 42.5], [67, 57.5], [97, 57.5]]) box(0.15, 3.2, 0.15, M.frame, x, 1.6, z, scene3, false);
     // Forecourt turntable with three supercars.
     turn = new THREE.Group(); turn.position.set(0, 0, 46); scene3.add(turn); solid.circle(0, 46, 11.4);
     const tt = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, 0.4, 72), std({ color: 0x2b2f35, roughness: 0.25, metalness: 0.4 })); tt.position.y = 0.2; tt.receiveShadow = !simple; turn.add(tt);
@@ -822,7 +856,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8; spots.push([PLAZA.x + Math.cos(a) * 24, PLAZA.z + Math.sin(a) * 24]); }
     for (let x = -94; x <= 94; x += 13) spots.push([x, 81]);
     for (let z = -50; z <= 74; z += 14) spots.push([-96, z], [96, z]);
-    [[-82, 46], [-42, 46], [47, 58], [85, 58], [-18, 46], [18, 46], [-18, -12], [18, -12]].forEach((s) => spots.push(s));
+    [[-86, 38], [-30, 70], [30, 70], [86, 38], [-18, 46], [18, 46], [-18, -12], [18, -12],
+     [-47, -14], [-57, 3], [-61, 21], [-58, 38], [-49, 54], [47, -14], [57, 3], [61, 21], [58, 38], [49, 54]].forEach((s) => spots.push(s));
     const FRONDS = simple ? 7 : 10;
     const trunks = new THREE.InstancedMesh(trunk, std({ color: 0x8a6d4e, roughness: 0.9, flatShading: true }), spots.length);
     const fronds = new THREE.InstancedMesh(frond, leafMat, spots.length * FRONDS);
@@ -844,7 +879,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 12, 8), M.lampGlass, lampPos.length);
     lampPos.forEach(([x, z], i) => { lamps.setMatrixAt(i, at(x, 2, z)); bulbs.setMatrixAt(i, at(x, 4.1, z)); solid.circle(x, z, 0.3); });
     scene3.add(lamps, bulbs);
-    const hedges = [[-30, 64, 26, 1.4, 1.6], [30, 64, 26, 1.4, 1.6], [-46, 36, 1.6, 1.4, 12], [46, 36, 1.6, 1.4, 12]];
+    const hedges = [[-16, 74, 22, 1.4, 1.6], [16, 74, 22, 1.4, 1.6]];
     const hm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), M.hedge, hedges.length);
     hedges.forEach(([x, z, w, h, d], i) => { hm.setMatrixAt(i, at(x, h / 2, z, 0, w, h, d)); solid.rect(x, z, w, d); });
     hm.castShadow = !simple; scene3.add(hm);
@@ -856,7 +891,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const x of [-80, -60, 60, 80]) { olive(scene3, x, 0, 82, 1); solid.circle(x, 82, 0.6); }
     if (!simple) {
       for (let i = 0; i < 26; i++) { const a = rand() * Math.PI * 2, r = 11 + rand() * 7; visitor(scene3, PLAZA.x + Math.cos(a) * r, 0, PLAZA.z + Math.sin(a) * r, rand() * 6.3); }
-      for (let i = 0; i < 8; i++) visitor(scene3, -74 + i * 3.6, 0.3, 44 + (i % 2) * 1.2, Math.PI);
+      for (let i = 0; i < 8; i++) visitor(scene3, -92 + i * 3.6, 0.3, 48 + (i % 2) * 1.2, Math.PI);
       for (let i = 0; i < 10; i++) visitor(scene3, -14 + i * 3, 0, 30 + (i % 3), rand() * 6.3);
       for (let i = 0; i < 6; i++) visitor(scene3, 54 + i * 4.5, 0.1, 55.5, Math.PI);
     }
@@ -1073,11 +1108,10 @@ function buildWorld(THREE, addons, renderer, opts) {
 
   // ---------------------------------------------------------------- pavilions: one per team, round the plaza
   // One pavilion per agent, as the old office had one room per agent, placed so each team's agents sit together.
+  // Two curved rows round the plaza, back (by the HQ) to front, as in the rendered estate.
   const SITES = {
-    "product-research": [-36, -14], "market-research": [-70, -30], "creative-research": [-70, -2], "mentor-learning": [-70, 26],
-    "operations": [-36, 28], "accountant": [-30, 64],
-    "meta-ads": [36, -14], "meta-ads-auditor": [70, -30], "shopify": [70, -2], "store-qa": [70, 26],
-    "creative-director": [36, 28], "product-testing": [30, 64],
+    "market-research": [-40, -22], "product-research": [-54, -6], "creative-research": [-60, 12], "operations": [-60, 30], "mentor-learning": [-54, 46], "accountant": [-42, 62],
+    "meta-ads-auditor": [40, -22], "meta-ads": [54, -6], "shopify": [60, 12], "creative-director": [60, 30], "store-qa": [54, 46], "product-testing": [42, 62],
   };
   const PW = 20, PD = 13, PH = 7;
   const pavilions = new Map();
@@ -1215,6 +1249,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     // Outside: a flower bed along the front, cypresses at the back corners, and a lit path to the plaza.
     for (let bx = -PW / 2 - 0.5; bx <= PW / 2 + 0.5; bx += 1.1) if (Math.abs(bx) > 2.6) flower(pav, bx, 0.3, PD / 2 + 2.3);
     for (const cx of [-(PW / 2) - 1.8, PW / 2 + 1.8]) prop("cypress", pav, cx, 0, -PD / 2 - 1.4, 0, 0.85);
+    for (const sx of [-1, 1]) { olive(pav, sx * (PW / 2 + 3.2), 0, 2, 0.8 + rand() * 0.3); for (let k = 0; k < 7; k++) flower(pav, sx * (PW / 2 + 2 + rand() * 2.5), 0.3, -PD / 2 + 1 + rand() * (PD - 2)); }
     box(4.4, 0.05, 10, M.ivory, 0, 0.03, PD / 2 + 7, pav, false);
     for (const bz of [PD / 2 + 4, PD / 2 + 8, PD / 2 + 12]) for (const bx of [-2.7, 2.7]) { prop("bollard", pav, bx, 0, bz); prop("bollardLamp", pav, bx, 0, bz); }
     // Walk mode: the glass walls (a door in the front), columns, furniture and planting are solid; the floor is raised.
@@ -1259,8 +1294,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   // An agent with no live task leaves its desk for the tennis court, the pool, the café terrace or the railing over
   // the circuit; the moment real work arrives it walks back. It is plainly leisure: panels say "idle" and where they are.
   const LEISURE = [
-    ...[[56, 46, Math.PI / 2], [76, 46, -Math.PI / 2]].map(([x, z, f]) => ({ kind: "tennis", label: "on the tennis court", pos: new V3(x, 0.1, z), face: f })),
-    ...Array.from({ length: 6 }, (_, i) => ({ kind: "pool", label: "by the pool", pos: new V3(-73 + i * 4.4, 0.7, 54.2), face: Math.PI, sit: true })),
+    ...[[72, 50, Math.PI / 2], [92, 50, -Math.PI / 2]].map(([x, z, f]) => ({ kind: "tennis", label: "on the tennis court", pos: new V3(x, 0.1, z), face: f })),
+    ...Array.from({ length: 6 }, (_, i) => ({ kind: "pool", label: "by the pool", pos: new V3(-91 + i * 4.4, 0.7, 58.2), face: Math.PI, sit: true })),
     ...Array.from({ length: 6 }, (_, i) => ({ kind: "rail", label: "watching the cars", pos: new V3(-92 + i * 5.5, 0, -62.5), face: Math.PI })),
     ...Array.from({ length: 4 }, (_, i) => ({ kind: "cafe", label: "on the café terrace", pos: new V3(-8 + i * 5.3, 0, 31.5), face: Math.PI })),
   ];
@@ -1736,9 +1771,15 @@ function buildWorld(THREE, addons, renderer, opts) {
   if (!simple && addons.EffectComposer) {
     composer = new addons.EffectComposer(renderer);
     composer.addPass(new addons.RenderPass(scene3, camera));
+    if (opts.ao && addons.SSAOPass) {   // ambient occlusion: contact shadows under eaves, furniture and people (desktops with the cores for it)
+      const ssao = new addons.SSAOPass(scene3, camera, stage.clientWidth, stage.clientHeight);
+      ssao.kernelRadius = 6; ssao.minDistance = 0.0008; ssao.maxDistance = 0.06;
+      composer.addPass(ssao);
+    }
     bloomPass = new addons.UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.5, 1.15);  // only real light sources glow
     composer.addPass(bloomPass);
     composer.addPass(new addons.OutputPass());
+    if (addons.SMAAPass) composer.addPass(new addons.SMAAPass(stage.clientWidth * renderer.getPixelRatio(), stage.clientHeight * renderer.getPixelRatio()));   // smooth edges
   }
   const viewShift = { x: 0 };
   function resize() {
@@ -1941,6 +1982,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     if (!REDUCED) world.jets.forEach((j, i) => { j.scale.y = 1 + 0.08 * Math.sin(time * 5 + i); });
     if (!REDUCED) {
       rippleTex.offset.x += dt * 0.004; rippleTex.offset.y += dt * 0.0025;
+      if (world.water) world.water.material.uniforms.time.value += dt * 0.6;
       poolRipple.offset.x += dt * 0.02;
       turn.rotation.y += dt * 0.08;
       const cs = world.cars;

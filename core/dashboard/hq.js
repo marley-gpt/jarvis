@@ -593,6 +593,7 @@ function panelSettings(m) {
       <label class="switch">Conversation thinking<select data-set="effort">${[["", "Default"], ["low", "Low: answers fastest"], ["medium", "Medium"], ["high", "High: thinks longest"]].map(([v, l]) => `<option value="${v}" ${(Feed.hq?.conversation_effort || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <p class="quiet">Talking to JARVIS and the teams runs on this model and thinking level. Heavy work still goes to the specialists on their own models.</p>
       <label class="switch">Race sounds (the cars, when the view is near the circuit)<input type="checkbox" data-set="sound" ${J.pref("hqSound") !== "0" ? "checked" : ""}></label>
+      <label class="switch">Ambient occlusion (soft contact shadows; needs a capable computer)<input type="checkbox" data-set="ao" ${J.pref("hqAO") === "1" || (J.pref("hqAO") !== "0" && (navigator.hardwareConcurrency || 4) >= 8) ? "checked" : ""}></label>
       <label class="switch">Simplified 3D (for phones and slower computers)<input type="checkbox" data-set="simple" ${simple ? "checked" : ""}></label>
       <label class="switch">Time of day<select data-set="time">${[["live", "Live (follows the clock)"], ["day", "Day"], ["sunset", "Sunset"], ["evening", "Evening"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqTime") || "live") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <h3>Connections</h3>
@@ -702,6 +703,7 @@ document.addEventListener("change", (e) => {
   if (!k) return;
   if (k === "simple") { J.pref("hqSimple", e.target.checked ? "1" : "0"); location.reload(); return; }
   if (k === "sound") { J.pref("hqSound", e.target.checked ? "1" : "0"); scene?.setSound?.(e.target.checked); return; }
+  if (k === "ao") { J.pref("hqAO", e.target.checked ? "1" : "0"); location.reload(); return; }
   if (k === "conversation") { J.post("/api/hq/conversation", { model: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
   if (k === "effort") { J.post("/api/hq/conversation", { effort: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
   if (k === "voice") { J.settings.voice = e.target.value; J.preview(); return; }
@@ -1021,6 +1023,7 @@ function cardRects() {
 const simple = /[?&]simple\b/.test(location.search) || J.pref("hqSimple") === "1" || (J.pref("hqSimple") !== "0" && (isPhone() || (navigator.hardwareConcurrency || 8) <= 4));
 import("/hq-scene.js").then(({ startScene }) => startScene({
   stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), stick: $("stick"), status: STATUS, simple,
+  ao: !simple && (J.pref("hqAO") === "1" || (J.pref("hqAO") !== "0" && (navigator.hardwareConcurrency || 4) >= 8)),   // ambient occlusion where there are the cores for it
   selected: () => pavilionFor(selected),
   avoid: cardRects,
   onPick: (kind, id) => open(kind === "jarvis" ? "jarvis" : kind === "team" ? `agent:${id}` : `${kind}:${id}`),   // a pavilion is an agent's
