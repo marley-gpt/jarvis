@@ -572,6 +572,7 @@ function buildWorld(THREE, addons, renderer, opts) {
 
   // The JARVIS HQ building: podium with grand steps, a glass main block, two wings, the crown sign and the light beam.
   const HQ = new THREE.Group(); HQ.position.set(0, 0, -40); HQ.scale.setScalar(1.15); scene3.add(HQ);
+  let ceoSeat, ceoScreen;   // the owner's chair and the figures on his desk, set up with the penthouse below
   {
     box(64, 3, 30, M.marble, 0, 1.5, 0, HQ);
     for (let i = 0; i < 6; i++) box(26 - i * 0.6, 0.5, 1.2, M.marble, 0, 0.25 + i * 0.5, 15.6 + (5 - i) * 1.2, HQ);
@@ -585,7 +586,7 @@ function buildWorld(THREE, addons, renderer, opts) {
         box(35, 4.3, 11, M.tint, 0, sy + 3.05, -4.4, HQ);                       // the core
         box(34.6, 4.1, 0.2, M.interior, 0, sy + 3.05, 1.2, HQ, false);          // lit back wall of the office
         box(34.6, 0.08, 7.8, M.oak, 0, top + 0.04, 5.2, HQ, false);             // office floor
-        for (let k = -3; k <= 3; k++) if (f || k) workstation(HQ, k * 4.8, top + 0.08, 6.2, Math.PI, 1.15);   // (the ground floor's door is at k = 0)
+        if (f !== 2) for (let k = -3; k <= 3; k++) if (f || k) workstation(HQ, k * 4.8, top + 0.08, 6.2, Math.PI, 1.15);   // (the ground floor's door is at k = 0; floor 2 is JARVIS's office)
         for (const px of [-16.4, 16.4]) { box(0.8, 0.8, 0.8, M.white, px, top + 0.48, 8, HQ, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, top + 1.5, 8); HQ.add(pl); }
         if (f === 0) {
           // The ground floor has a door in the glass, a gap in the rail and steps down to the podium: walk mode goes in.
@@ -620,9 +621,38 @@ function buildWorld(THREE, addons, renderer, opts) {
     // Lanterns along the podium and the grand stairs: they come on in the evening.
     for (let k = -7; k <= 7; k += 2) { const lan = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.6, 0.45), M.lampGlass); lan.position.set(k * 4, 3.4, 14.2); HQ.add(lan); }
     box(62, 0.6, 3.4, M.marble, 0, 9, 12.6, HQ);
-    // Crown: a setback penthouse with the JARVIS sign.
-    box(18, 5, 12, M.tint, 0, 23.6, -1, HQ);
+    // Crown: the setback penthouse is the owner's office: a glass front over the plaza and the sea, tinted sides,
+    // the desk with the business figures, and the owner in his chair. The JARVIS sign stands on the roof above it.
+    box(18, 0.3, 12, M.marble, 0, 21.25, -1, HQ);
+    const pfloor = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 11.4), M.oak); pfloor.rotation.x = -Math.PI / 2; pfloor.position.set(0, 21.42, -1); HQ.add(pfloor);
+    box(18, 4.7, 0.3, M.tint, 0, 23.75, -6.85, HQ);
+    for (const s of [-1, 1]) box(0.3, 4.7, 12, M.tint, s * 8.85, 23.75, -1, HQ);
+    box(17.2, 3.9, 0.1, M.interior, 0, 23.4, -6.62, HQ, false);
+    box(17.4, 4.5, 0.08, M.glass, 0, 23.65, 4.96, HQ, false);
+    for (let k = -2; k <= 2; k++) box(0.18, 4.5, 0.25, M.gold, k * 4.3, 23.65, 5.0, HQ, false);
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 11.4), M.warmLight); ceiling.rotation.x = Math.PI / 2; ceiling.position.set(0, 25.98, -1); HQ.add(ceiling);
     box(19, 0.7, 13, M.marble, 0, 26.4, -1, HQ);
+    const ceoDesk = new THREE.Group(); ceoDesk.position.set(0, 21.42, 1.2); HQ.add(ceoDesk);
+    box(4.4, 0.1, 1.6, M.walnut, 0, 0.78, 0, ceoDesk);
+    for (const sx of [-2.0, 2.0]) box(0.08, 0.74, 1.3, M.gold, sx, 0.37, 0, ceoDesk, false);
+    ceoScreen = screenTexture(1024, 346);
+    const ceoPanel = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.15), new THREE.MeshBasicMaterial({ map: ceoScreen.t, toneMapped: false }));
+    ceoPanel.position.set(0, 1.5, 0.52); ceoPanel.rotation.y = Math.PI; ceoDesk.add(ceoPanel);
+    box(3.5, 1.25, 0.06, M.frame, 0, 1.5, 0.56, ceoDesk, false);
+    box(0.5, 0.06, 0.3, M.frame, 0, 0.86, 0.5, ceoDesk, false);
+    const ceoLamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), M.lampGlass); ceoLamp.position.set(1.7, 1.25, -0.3); ceoDesk.add(ceoLamp);
+    box(0.05, 0.4, 0.05, M.gold, 1.7, 1.0, -0.3, ceoDesk, false);
+    box(0.85, 0.12, 0.8, M.walnut, 0, 0.6, -1.3, ceoDesk, false);                   // the owner's chair, low-backed so he stays in view
+    box(0.85, 0.55, 0.1, M.walnut, 0, 0.9, -1.68, ceoDesk, false);
+    const ceoBase = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.26, 0.55, 12), M.gold); ceoBase.position.set(0, 0.28, -1.3); ceoDesk.add(ceoBase);
+    box(2.8, 0.55, 1.0, M.leather, -6.2, 0.28, -3.5, ceoDesk);                      // sofa
+    box(2.8, 0.7, 0.25, M.leather, -6.2, 0.9, -3.95, ceoDesk, false);
+    box(1.3, 0.06, 0.7, M.walnut, -6.2, 0.5, -1.9, ceoDesk, false);                 // low table
+    box(0.08, 0.5, 0.08, M.gold, -6.2, 0.25, -1.9, ceoDesk, false);
+    box(2.2, 1.2, 0.5, M.walnut, 6.6, 0.6, -5.5, ceoDesk);                          // cabinet
+    for (const [px, pz] of [[-7.6, 4.2], [7.6, 4.2], [7.6, -2.4]]) { box(0.8, 0.8, 0.8, M.white, px, 0.4, pz, ceoDesk, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.3, pz); ceoDesk.add(pl); }
+    HQ.updateWorldMatrix(true, true);
+    ceoSeat = { pos: HQ.localToWorld(new V3(0, 21.42, -0.1)), face: 0 };   // the owner's chair, facing the glass
     const signTex = canvasTex(1024, 512, (g, w, h) => {
       g.fillStyle = "#121c29"; g.fillRect(0, 0, w, h);
       g.strokeStyle = "#c6a46a"; g.lineWidth = 10; g.strokeRect(14, 14, w - 28, h - 28);
@@ -633,7 +663,19 @@ function buildWorld(THREE, addons, renderer, opts) {
     const signMat = std({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.45, roughness: 0.4 });
     glowMats.push([signMat, 0.4]);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(13, 6.5), signMat);
-    sign.position.set(0, 23.6, 5.1); HQ.add(sign);
+    sign.position.set(0, 30.2, 5.2); HQ.add(sign);
+    for (const s of [-1, 1]) box(0.25, 3.6, 0.25, M.gold, s * 5.5, 28.5, 5.2, HQ, false);
+    // JARVIS's own office: floor 2 behind the glass, a dark command desk, a wireframe globe and the sign on the wall.
+    {
+      const top = 3 + 2 * 5.2 + 0.9;
+      box(7.2, 0.12, 1.6, M.walnut, 0, top + 0.86, 5.6, HQ);
+      box(6.6, 0.76, 1.2, M.frame, 0, top + 0.42, 5.6, HQ, false);
+      for (const sx of [-2.3, 0, 2.3]) { const sc = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 1.1), std({ color: 0x0f1b2c, emissive: 0x9fd3ff, emissiveIntensity: 0.35, roughness: 0.3 })); sc.position.set(sx, top + 1.8, 4.9); sc.rotation.y = Math.PI; HQ.add(sc); }
+      const mini = new THREE.Mesh(new THREE.SphereGeometry(0.75, 20, 14), new THREE.MeshBasicMaterial({ color: 0x7fd3ff, wireframe: true, transparent: true, opacity: 0.8 })); mini.position.set(0, top + 2.3, 6.3); HQ.add(mini);
+      const jsign = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), signMat); jsign.position.set(0, top + 2.4, 1.45); HQ.add(jsign);
+      box(1.0, 0.7, 1.0, M.leather, 0, top + 0.43, 7.4, HQ, false);
+      for (const px of [-8, 8]) { box(0.9, 0.9, 0.9, M.white, px, top + 0.53, 7.6, HQ, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8, 0), M.leaf); pl.position.set(px, top + 1.6, 7.6); HQ.add(pl); }
+    }
     // A champagne-gold crown on the penthouse roof, where the beam starts.
     const crown = new THREE.Group(); crown.position.set(0, 26.8, -1);
     const band = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.4, 1.1, 40, 1, true), M.gold); band.position.y = 0.55;
@@ -696,7 +738,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   });
   {
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.8, 420, 24, 1, true), beamMat);
-    beam.position.set(0, 26.8 + 210, -39); scene3.add(beam);
+    beam.position.set(0, 33.5 + 210, -39); scene3.add(beam);   // from the crown up, clear of the owner's office below it
   }
 
   // Pool with loungers and parasols, the tennis court, the supercar forecourt.
@@ -1245,7 +1287,10 @@ function buildWorld(THREE, addons, renderer, opts) {
       });
     }
     jarvisBusy = m.jarvis.status === "idle" ? 0 : m.jarvis.status === "delegating" ? 1 : 0.6;
+    const ck = JSON.stringify([m.week, m.counts]);
+    if (ck !== ceoKey) { ceoKey = ck; drawCeo(m); }
   }
+  let ceoKey = "";
   // Where each agent is right now, for the panels: at the desk, walking, or where it is taking its break.
   function whereabouts() {
     const out = {};
@@ -1256,10 +1301,34 @@ function buildWorld(THREE, addons, renderer, opts) {
     return out;
   }
 
+  // ---------------------------------------------------------------- the owner: at his desk in the penthouse, or out walking
+  const boss = actor(character("owner", 0xc6a46a), ceoSeat.pos, 0);
+  boss.seat = ceoSeat; boss.sitting = true; boss.name = "owner";
+  const bossHome = (home) => { boss.c.root.visible = home; };
+  function drawCeo(m) {
+    const g = ceoScreen.c.getContext("2d"), W = ceoScreen.c.width, H = ceoScreen.c.height, w = m.week || {}, c = m.counts || {};
+    g.fillStyle = "#0f1b2c"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#c6a46a"; g.fillRect(0, 0, W, 6);
+    g.textAlign = "left"; g.fillStyle = "#d8b878"; g.font = "500 40px 'Bodoni Moda', Georgia, serif"; g.fillText("Urban Supplied", 40, 70);
+    g.fillStyle = "#8fa3b8"; g.font = "26px 'Inter', system-ui, sans-serif"; g.fillText("this week", 380, 70);
+    const money = (n) => `${n < 0 ? "-" : ""}A$${Math.abs(Math.round(n || 0)).toLocaleString("en-AU")}`;
+    g.fillStyle = "#ffffff"; g.font = "600 92px 'Bodoni Moda', Georgia, serif"; g.fillText(money(w.profit), 40, 175);
+    g.fillStyle = "#8fa3b8"; g.font = "26px 'Inter', system-ui, sans-serif";
+    g.fillText(w.target ? `profit of the A$${Math.round(w.target)} target, ${w.target ? Math.round(((w.profit || 0) / w.target) * 100) : 0}%` : "profit", 40, 215);
+    // The figures sit on the right of the panel, clear of the owner's head when seen from behind his chair.
+    const cells = [["Sales", money(w.income)], ["Costs", money(w.expenses)], ["Working now", String(c.now ?? 0)], ["Needs you", String(c.ask ?? 0)], ["To do", String(c.todo ?? 0)], ["Agents", String(c.agents ?? 0)]];
+    cells.forEach(([k, v], i) => { const x = 640 + (i % 2) * 190, y = 70 + Math.floor(i / 2) * 92; g.fillStyle = "#8fa3b8"; g.font = "22px 'Inter', system-ui, sans-serif"; g.fillText(k, x, y); g.fillStyle = "#ffffff"; g.font = "600 40px 'Inter', system-ui, sans-serif"; g.fillText(v, x, y + 44); });
+    ceoScreen.t.needsUpdate = true;
+  }
+
   // ---------------------------------------------------------------- camera: home view, flights, view controls
   const sph = new THREE.Spherical();
   let flight = null, lastInput = performance.now(), exploring = false;
   const fromCam = () => { const off = camera.position.clone().sub(controls.target); sph.setFromVector3(off); return { az: sph.theta, pol: sph.phi, r: sph.radius, target: controls.target.clone() }; };
+  // The owner's office view: from behind his chair, over the desk and out across the plaza to the sea.
+  const CEO = () => ({ az: Math.PI, pol: 1.3, r: 8.5, target: HQ.localToWorld(new V3(0, 22.4, 1.2)) });
+  let mode = "ceo";
+  function setMode(m) { mode = m; controls.minDistance = m === "ceo" ? 3 : 30; }
   function flyTo(goal, dur = 1.4) {
     const from = fromCam();
     let daz = goal.az - from.az; daz = Math.atan2(Math.sin(daz), Math.cos(daz));
@@ -1269,7 +1338,8 @@ function buildWorld(THREE, addons, renderer, opts) {
   function focus(id) {
     lastInput = performance.now();
     if (me.on) { if (id) walkTo(id); return; }
-    if (!id) return flyTo(HOME());
+    if (id) setMode("estate");
+    if (!id) return flyTo(mode === "ceo" ? CEO() : HOME());
     if (id === "jarvis") return flyTo({ az: 0, pol: 1.12, r: 105, target: new V3(0, 10, -24) });
     const P = pavilions.get(id);
     if (!P) return;
@@ -1281,8 +1351,10 @@ function buildWorld(THREE, addons, renderer, opts) {
     lastInput = performance.now();
     if (cmd === "walk") { if (me.on) stopWalk(); else { const sel = opts.selected(); startWalk(); if (sel) walkTo(sel); } return me.on; }
     if (cmd === "eye") { me.third = !me.third; you.root.visible = me.on && me.third; tell(); return me.on; }
-    if (cmd === "reset") { stopWalk(); exploring = false; focus(null); return false; }
+    if (cmd === "ceo") { stopWalk(); exploring = false; setMode("ceo"); bossHome(true); flyTo(CEO(), 1.6); return false; }
+    if (cmd === "reset") { stopWalk(); exploring = false; setMode("estate"); focus(null); return false; }
     if (me.on) stopWalk();
+    if (cmd === "explore") setMode("estate");
     if (cmd === "in" || cmd === "out") { const f = fromCam(); flyTo({ ...f, r: Math.max(controls.minDistance, Math.min(controls.maxDistance, f.r * (cmd === "in" ? 0.7 : 1.4))) }, 0.6); return exploring; }
     if (cmd === "explore") { exploring = !exploring; flight = null; return exploring; }
     return exploring;
@@ -1300,7 +1372,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   const youSt = { walk: 0, walkPhase: 0, sit: 0, type: 0, lean: 0, look: 0, tab: 0, swing: 0 };
   const R = 0.55;   // the walker's radius
   const locked = () => document.pointerLockElement === canvas;
-  const walkState = () => ({ on: me.on, third: me.third, near: me.near, locked: locked(), touch: COARSE });
+  const walkState = () => ({ on: me.on, third: me.third, near: me.near, locked: locked(), touch: COARSE, office: me.fromOffice, auto: !!me.auto });
   const tell = () => opts.onWalk?.(walkState());
   function groundAt(x, z) { let y = 0; for (const f of solid.floors) { const h = f(x, z); if (h !== null && h > y) y = h; } return y; }
   function unstick(p) {
@@ -1320,7 +1392,10 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   function startWalk() {
     me.on = true; exploring = false; flight = null; controls.enabled = false; controls.autoRotate = false;
-    me.pos.set(0, 0, 34); me.yaw = Math.PI; me.pitch = -0.04;
+    me.fromOffice = mode === "ceo"; me.auto = null;
+    if (me.fromOffice) { me.pos.set(0, 0, -12); me.yaw = 0; me.third = true; bossHome(false); }   // down the lift to the forecourt
+    else { me.pos.set(0, 0, 34); me.yaw = Math.PI; }
+    me.pitch = -0.04;
     me.vel.set(0, 0, 0); me.keys.clear(); me.stick.x = me.stick.y = 0; me.near = null;
     unstick(me.pos); me.pos.y = groundAt(me.pos.x, me.pos.z);
     you.root.position.copy(me.pos); you.root.rotation.y = me.yaw; you.root.visible = me.third;
@@ -1328,24 +1403,37 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   function stopWalk() {
     if (!me.on) return;
-    me.on = false; controls.enabled = true; you.root.visible = false;
+    me.on = false; controls.enabled = true; you.root.visible = false; me.auto = null;
     if (locked()) document.exitPointerLock();
+    if (me.fromOffice) { me.fromOffice = false; bossHome(true); setMode("ceo"); flyTo(CEO(), 1.6); tell(); return; }   // back up to the office
     // Back to the orbit view, lifting off from behind where you stood.
     place({ az: me.yaw + Math.PI, pol: 1.25, r: 14, target: me.pos.clone().setY(me.pos.y + 1.6) });
     flyTo({ az: me.yaw + Math.PI, pol: 1.05, r: 52, target: me.pos.clone().setY(2) }, 1.2);
     tell();
   }
-  // A chip or a panel while walking: step over to it instead of flying.
+  // A chip or a panel while walking is a destination: the owner walks there, round the plaza rather than through it.
   function walkTo(id) {
-    if (id === "jarvis") { me.pos.set(0, 0, -10); me.yaw = Math.PI; }
+    let to;
+    if (id === "jarvis") to = new V3(0, 0, -10);
     else {
       const P = pavilions.get(id); if (!P) return;
       const out = P.door.clone().sub(P.pav.position).setY(0).normalize();
-      me.pos.copy(P.door).setY(0).addScaledVector(out, 2);
-      me.yaw = Math.atan2(-out.x, -out.z);
+      to = P.door.clone().setY(0).addScaledVector(out, 1.2);
     }
-    me.vel.set(0, 0, 0); unstick(me.pos); me.pos.y = groundAt(me.pos.x, me.pos.z);
-    you.root.position.copy(me.pos); you.root.rotation.y = me.yaw;
+    me.auto = route(me.pos, to); me.third = true; tell();
+  }
+  function route(from, to) {
+    const pts = [], c = PLAZA, ring = 12.5;
+    // Every door faces the plaza, so anything but a short hop goes to the ring, round it, then straight out to the door:
+    // that never crosses the basin or another pavilion.
+    if (Math.hypot(to.x - from.x, to.z - from.z) > 8) {
+      const a0 = Math.atan2(from.z - c.z, from.x - c.x), a1 = Math.atan2(to.z - c.z, to.x - c.x);
+      let da = a1 - a0; da = Math.atan2(Math.sin(da), Math.cos(da));
+      const n = Math.max(1, Math.ceil(Math.abs(da) / 0.4));
+      for (let i = 0; i <= n; i++) { const a = a0 + (da * i) / n; pts.push(new V3(c.x + Math.cos(a) * ring, 0, c.z + Math.sin(a) * ring)); }
+    }
+    pts.push(to.clone());
+    return pts;
   }
   // What you could open from here: an agent at its desk, the office you are in or at the door of, or JARVIS.
   const lp = new V3();
@@ -1359,7 +1447,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     if (best) return best;
     for (const P of pavilions.values()) {
       lp.copy(p).setY(0).applyMatrix4(P.inv);
-      if (Math.abs(lp.x) <= PW / 2 + 1.5 && lp.z >= -PD / 2 - 1.5 && lp.z <= PD / 2 + 4) return { kind: "team", id: P.team.id, label: P.team.name };
+      if (Math.abs(lp.x) <= PW / 2 + 1.5 && lp.z >= -PD / 2 - 1.5 && lp.z <= PD / 2 + 5.5) return { kind: "team", id: P.team.id, label: P.team.name };
     }
     const lx = p.x / 1.15, lz = (p.z + 40) / 1.15;
     if ((Math.abs(lx) <= 18 && lz >= 1.2 && lz <= 14) || (Math.abs(lx) <= 13 && lz > 14 && lz <= 23) || Math.hypot(p.x - PLAZA.x, p.z - PLAZA.z) < 12.5) return { kind: "jarvis", id: "jarvis", label: "JARVIS" };
@@ -1425,6 +1513,12 @@ function buildWorld(THREE, addons, renderer, opts) {
   function stepWalk(dt, time) {
     const k = me.keys;
     let ix = (k.has("r") ? 1 : 0) - (k.has("l") ? 1 : 0) + me.stick.x, iz = (k.has("f") ? 1 : 0) - (k.has("b") ? 1 : 0) - me.stick.y;
+    if (me.auto && (ix || iz)) { me.auto = null; tell(); }   // taking the controls cancels the walk there
+    if (me.auto) {
+      const p = me.auto[0], dx = p.x - me.pos.x, dz = p.z - me.pos.z, dist = Math.hypot(dx, dz);
+      if (dist < 0.7) { me.auto.shift(); if (!me.auto.length) { me.auto = null; tell(); } }
+      else { me.yaw += wrap(Math.atan2(dx, dz) - me.yaw) * (1 - Math.exp(-6 * dt)); me.pitch += (-0.08 - me.pitch) * (1 - Math.exp(-3 * dt)); iz = Math.min(1, dist / 2); }
+    }
     const L = Math.hypot(ix, iz); if (L > 1) { ix /= L; iz /= L; }
     fwd.set(Math.sin(me.yaw), 0, Math.cos(me.yaw)); side.crossVectors(fwd, up);
     const speed = k.has("run") ? 8 : 4.5;
@@ -1507,8 +1601,10 @@ function buildWorld(THREE, addons, renderer, opts) {
   const tmp = new V3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
   let first = true, ringSpin = 0.2, frameCount = 0;
   applyTime();
-  place({ ...HOME(), az: -0.5, r: HOME().r * 1.35, pol: 1.0 });
-  flyTo(HOME(), 3.2);
+  // HQ opens in the owner's office; the 3D View button goes out to the estate.
+  setMode("ceo");
+  place({ ...CEO(), r: 16, pol: 1.05 });
+  flyTo(CEO(), 2.6);
 
   function frame() {
     // Real time, so a slow device keeps pace; capped so a long pause (a hidden tab) does not jump everything.
@@ -1521,13 +1617,13 @@ function buildWorld(THREE, addons, renderer, opts) {
       place({ az: f.az + (g.az - f.az) * k, pol: f.pol + (g.pol - f.pol) * k, r: f.r + (g.r - f.r) * k, target: f.target.clone().lerp(g.target, k) });
       if (flight.t >= 1) flight = null;
     } else {
-      controls.autoRotate = !REDUCED && (exploring || (!opts.selected() && performance.now() - lastInput > 40000));
+      controls.autoRotate = !REDUCED && (exploring || (mode !== "ceo" && !opts.selected() && performance.now() - lastInput > 40000));
       controls.autoRotateSpeed = exploring ? 0.9 : 0.15;
       controls.update();
       // Keep panning on the estate.
       controls.target.x = Math.max(-110, Math.min(110, controls.target.x));
       controls.target.z = Math.max(-120, Math.min(90, controls.target.z));
-      controls.target.y = Math.max(0, Math.min(20, controls.target.y));
+      controls.target.y = Math.max(0, Math.min(32, controls.target.y));
     }
     // A side panel covers the right of the view on a desktop: shift the picture so the subject stays visible.
     const open = document.body.classList.contains("panel-open");
@@ -1651,6 +1747,6 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
-  stage.hq = { camera, controls, actors, frame, me, solid, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  stage.hq = { camera, controls, actors, frame, me, solid, boss, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
   return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on };
 }

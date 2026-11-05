@@ -798,7 +798,8 @@ function renderWalk(s) {
   document.querySelector('[data-view="walk"]').setAttribute("aria-pressed", String(s.on));
   if (s.on) document.querySelector('[data-view="explore"]').setAttribute("aria-pressed", "false");
   $("stick").hidden = !(s.on && s.touch);
-  $("walk-hint").textContent = s.touch ? "Stick to walk, drag to look" : s.locked ? "W A S D to walk, Shift to run, mouse to look, E to open, Esc frees the mouse" : "Click the view to take the mouse, then W A S D";
+  const how = s.touch ? "Stick to walk, drag to look, tap a building to walk there" : s.locked ? "W A S D to walk, Shift to run, mouse to look, E to open, Esc frees the mouse" : "Click the view to take the mouse, or tap a building to walk there";
+  $("walk-hint").textContent = s.auto ? "Walking there…" : s.office && !s.locked ? `Down the lift to the forecourt. ${how}` : how;
   $("walk-eye").textContent = s.third ? "Eye level" : "Over the shoulder";
   $("walk-talk").hidden = !s.near;
   if (s.near) $("walk-talk").textContent = s.near.kind === "agent" ? `Talk to ${s.near.label}` : s.near.kind === "jarvis" ? "Talk to JARVIS" : `Open ${s.near.label}`;
@@ -806,6 +807,7 @@ function renderWalk(s) {
 $("walk-talk").addEventListener("click", () => scene?.interact());
 $("walk-eye").addEventListener("click", () => scene?.view("eye"));
 $("walk-leave").addEventListener("click", () => scene?.view("walk"));
+$("walk-office").addEventListener("click", () => scene?.view("ceo"));
 $("demo").addEventListener("click", () => {
   if (!scene?.demo) return;
   const on = $("demo").getAttribute("aria-pressed") !== "true";
