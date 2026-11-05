@@ -1511,7 +1511,9 @@ function buildWorld(THREE, addons, renderer, opts) {
   // The owner's office view: from behind his chair, over the desk and out across the plaza to the sea.
   const CEO = () => ({ az: Math.PI, pol: 1.3, r: 8.5, target: HQ.localToWorld(new V3(0, 22.4, 1.2)) });
   let mode = "ceo";
-  function setMode(m) { mode = m; controls.minDistance = m === "ceo" ? 2 : 5; }
+  // In the office the view orbits the desk: close enough to read the screen (the owner's figure steps aside when the
+  // view is right behind his head), not above the ceiling, and free to zoom straight out through the glass.
+  function setMode(m) { mode = m; controls.minDistance = m === "ceo" ? 2.2 : 5; controls.minPolarAngle = m === "ceo" ? 0.85 : 0.25; }
   function flyTo(goal, dur = 1.4) {
     const from = fromCam();
     let daz = goal.az - from.az; daz = Math.atan2(Math.sin(daz), Math.cos(daz));
@@ -1910,11 +1912,12 @@ function buildWorld(THREE, addons, renderer, opts) {
       controls.target.y = Math.max(0, Math.min(32, controls.target.y));
       // Close in, the view stops at a wall instead of passing through it, and never goes under a floor.
       const dx = camera.position.x - controls.target.x, dz = camera.position.z - controls.target.z, flat = Math.hypot(dx, dz);
-      if (flat > 0.05 && flat < 12) {
+      if (mode !== "ceo" && flat > 0.05 && flat < 12) {   // (not in the office: its walls are glass, and zooming out must leave the room)
         const free = clearBehind(controls.target.x, controls.target.z, dx / flat, dz / flat, flat, true);
         if (free < flat) { const k = Math.max(0.15, (free - 0.3) / flat); camera.position.set(controls.target.x + dx * k, controls.target.y + (camera.position.y - controls.target.y) * k, controls.target.z + dz * k); }
       }
       camera.position.y = Math.max(camera.position.y, groundAt(camera.position.x, camera.position.z) + 0.7);
+      if (mode === "ceo" && !me.on) boss.c.root.visible = camera.position.distanceTo(boss.c.root.position) > 2.6;   // right behind his head: he steps out of the shot
     }
     // A side panel covers the right of the view on a desktop: shift the picture so the subject stays visible.
     const open = document.body.classList.contains("panel-open");
