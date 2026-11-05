@@ -248,10 +248,14 @@
     }
     return out.map((c) => c.trim()).filter(Boolean);
   }
-  function say(text) {
+  // J.replyVoice: a voice id ("kokoro:voice_shopify") the next replies are spoken in, when the owner is talking to a
+  // team or agent rather than JARVIS; null means JARVIS's own voice. J.say speaks a line now, in any voice.
+  J.replyVoice = null;
+  J.say = (text, voice) => say(text, voice);
+  function say(text, voiceOverride) {
     const all = J.spoken(text);
     if (!J.settings.speak || !all) { J.emit("caption", { text: all, done: true }); return; }
-    const voice = J.currentVoice(), my = gen;
+    const voice = voiceOverride || J.replyVoice || J.currentVoice(), my = gen;
     // The JARVIS voice always, unless it isn't installed. A failed sentence stays silent (the text is on
     // screen) rather than dropping to the browser's robotic voice mid-reply.
     const kokoro = !J.state || kokoroOn();

@@ -45,7 +45,58 @@ VOICE_PRESETS = {
     "jarvis_fx": {"name": "JARVIS (house-AI effect)", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05,
                   "fx": "jarvis"},
 }
+# Each head agent, and the Blake and Mark method personas, speaks with its own voice so the owner can hold a
+# conversation with any of them. Stock Kokoro British voices and blends of them, clearly different from each
+# other; nothing here clones or imitates a real person's voice.
+AGENT_VOICES = {
+    "jarvis": "jarvis",
+    "product-research": {"name": "Product research", "blend": {"bm_lewis": 1.0}, "speed": 1.0},
+    "market-research": {"name": "Market research", "blend": {"bf_emma": 1.0}, "speed": 1.0},
+    "creative-research": {"name": "Creative research", "blend": {"bf_lily": 1.0}, "speed": 1.03},
+    "mentor-learning": {"name": "Mentor learning", "blend": {"bm_daniel": 1.0}, "speed": 0.97},
+    "operations": {"name": "Operations", "blend": {"bf_isabella": 1.0}, "speed": 1.0},
+    "accountant": {"name": "Accountant", "blend": {"bm_daniel": 0.6, "bm_lewis": 0.4}, "speed": 0.95},
+    "meta-ads": {"name": "Meta ads", "blend": {"bm_fable": 1.0}, "speed": 1.02},
+    "meta-ads-auditor": {"name": "Meta ads auditor", "blend": {"bm_lewis": 0.5, "bm_daniel": 0.5}, "speed": 0.98},
+    "shopify": {"name": "Shopify", "blend": {"bf_alice": 1.0}, "speed": 1.0},
+    "store-qa": {"name": "Store QA", "blend": {"bf_emma": 0.5, "bf_alice": 0.5}, "speed": 1.04},
+    "creative-director": {"name": "Creative director", "blend": {"bf_isabella": 0.6, "bf_lily": 0.4}, "speed": 0.98},
+    "product-testing": {"name": "Product testing", "blend": {"bm_george": 0.5, "bm_daniel": 0.5}, "speed": 1.03},
+    "blake": {"name": "Blake (method persona)", "blend": {"bm_lewis": 0.7, "bm_george": 0.3}, "speed": 1.05},
+    "mark": {"name": "Mark (method persona)", "blend": {"bm_daniel": 0.7, "bm_fable": 0.3}, "speed": 1.0},
+}
+for _who, _p in AGENT_VOICES.items():
+    if isinstance(_p, dict):
+        VOICE_PRESETS[f"voice_{_who}"] = {**_p, "agent": _who}
 DEFAULT_VOICE = "jarvis"
+
+
+def agent_voice(who: str) -> str:
+    """The voice id an agent (or Blake / Mark) speaks with: the owner's choice in brain/config.json, else the stock one."""
+    chosen = (paths.config().get("agent_voices") or {}).get(who)
+    if chosen in BRITISH_VOICES or chosen in VOICE_PRESETS:
+        return chosen
+    stock = AGENT_VOICES.get(who)
+    return stock if isinstance(stock, str) else f"voice_{who}" if stock else DEFAULT_VOICE
+
+
+def agent_voices() -> dict:
+    return {who: agent_voice(who) for who in AGENT_VOICES}
+
+
+def set_agent_voice(who: str, voice: str) -> str:
+    """Save the owner's voice choice for an agent (or Blake / Mark); "" goes back to the stock voice."""
+    if who not in AGENT_VOICES:
+        raise ValueError(f"No voice slot for '{who}'.")
+    if voice and voice not in BRITISH_VOICES and voice not in VOICE_PRESETS:
+        raise ValueError("Pick one of the Kokoro voices or presets.")
+    chosen = dict(paths.config().get("agent_voices") or {})
+    if voice:
+        chosen[who] = voice
+    else:
+        chosen.pop(who, None)
+    paths.set_config("agent_voices", chosen)
+    return agent_voice(who)
 MAX_CHARS = 600
 
 
@@ -83,10 +134,12 @@ class Kokoro:
     def info(self) -> dict:
         cfg = paths.config()
         voices = [v for v in BRITISH_VOICES if not self.voices or v in self.voices]
-        presets = [{"id": k, "name": p["name"]} for k, p in VOICE_PRESETS.items()
-                   if not self.voices or all(v in self.voices for v in p["blend"])]
+        usable = lambda p: not self.voices or all(v in self.voices for v in p["blend"])  # noqa: E731
+        presets = [{"id": k, "name": p["name"]} for k, p in VOICE_PRESETS.items() if not p.get("agent") and usable(p)]
+        team = [{"id": k, "name": p["name"], "agent": p["agent"]} for k, p in VOICE_PRESETS.items() if p.get("agent") and usable(p)]
         return {"available": bool(self.command()) and not self.error, "voice": cfg.get("tts_voice", DEFAULT_VOICE),
-                "voices": presets + [{"id": v, "name": BRITISH_VOICES[v]} for v in voices], "error": self.error}
+                "voices": presets + [{"id": v, "name": BRITISH_VOICES[v]} for v in voices], "team_voices": team,
+                "agent_voices": agent_voices(), "error": self.error}
 
     def _start(self) -> None:
         cmd = self.command()

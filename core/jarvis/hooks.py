@@ -4,8 +4,8 @@ session_start  inject the JARVIS brief, initialise the brain, take the daily bac
 prompt         UserPromptSubmit: journal the owner's message and inject relevant memory (auto-recall)
 stop           Stop: journal JARVIS's reply
 guard          PreToolUse: protect brain data and gate consequential external actions
-post_tool      PostToolUse: append consequential MCP calls to the action log
-subagent       SubagentStart/SubagentStop: record which specialist ran
+post_tool      PostToolUse: append consequential MCP calls to the action log, and every tool use to the activity log
+subagent       SubagentStart/SubagentStop: record which specialist ran, in both logs
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import re
 import sys
 import time
 
-from . import backup, brief, cli, db, journal, memory, paths, records
+from . import activity, db, journal, memory, paths, records, skills   # (backup, brief and cli load only at session start: the prompt hook runs on every message)
 
 # MCP tool names whose last segment starts with one of these verbs are read-only.
 READ_VERBS = ("get", "list", "search", "query", "show", "find", "read", "fetch", "validate", "describe",
@@ -184,6 +184,32 @@ def recall(conn, prompt: str, session_id: str | None) -> str:
     return "\n".join([head, *lines, SAVE_NUDGE])
 
 
+def record_activity(conn, kind: str, event: dict) -> None:
+    """Feed the HQ activity log. Best effort: a hook must never fail because of it."""
+    try:
+        agent = event.get("agent_type") or event.get("subagent_type") or "jarvis"
+        session = event.get("session_id")
+        if kind == "subagent":
+            stop = event.get("hook_event_name") == "SubagentStop"
+            activity.add(conn, agent, "finished" if stop else "started", status="done" if stop else "started",
+                         session_id=session, summary=event.get("agent_id"))
+        else:
+            tool = event.get("tool_name") or "?"
+            data = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+            response = event.get("tool_response")
+            failed = isinstance(response, dict) and bool(response.get("is_error") or response.get("error"))
+            if tool in ("Agent", "Task") and data.get("subagent_type"):  # handing work to another agent
+                activity.add(conn, agent, f"working with {data['subagent_type']}", status="collaborating",
+                             tool=tool, with_agent=data["subagent_type"], summary=data.get("description"),
+                             session_id=session)
+                return
+            file, note = activity.tool_target(data)
+            activity.add(conn, agent, f"{tool} failed" if failed else f"used {tool}", tool=tool, file=file,
+                         summary=note, session_id=session, status="error" if failed else "working")
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"jarvis: activity log skipped: {exc}\n")
+
+
 def _summarise(data) -> str:
     text = json.dumps(data, ensure_ascii=False, default=str)
     return text if len(text) <= 400 else text[:400] + "…"
@@ -206,6 +232,7 @@ def main(argv: list[str]) -> int:
     conn = db.connect()
     try:
         if kind == "session_start":
+            from . import backup, brief, cli   # only here: the prompt hook runs on every message and stays light
             if not paths.memory_dir().exists():
                 cli.cmd_init(conn, None)
             try:
@@ -229,10 +256,14 @@ def main(argv: list[str]) -> int:
             tool = event.get("tool_name", "")
             if tool.startswith("mcp__") and not is_read_only_tool(tool):
                 records.log_action(conn, tool, _summarise(event.get("tool_input")), event.get("session_id"))
+            elif tool == "Skill":
+                skills.log_from_hook(conn, event)
+            record_activity(conn, kind, event)
         elif kind == "subagent":
             records.log_agent_run(conn, event.get("agent_type") or event.get("subagent_type"),
                                   event.get("session_id"), event.get("hook_event_name", "subagent"),
                                   event.get("agent_id"))
+            record_activity(conn, kind, event)
         else:
             sys.stderr.write(f"jarvis hook: unknown event '{kind}'\n")
             return 1

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import journal, memory, records
+from . import journal, memory, records, paths
 
 
 def session_brief(conn, max_tasks: int = 8, session_id: str | None = None) -> str:
@@ -69,6 +69,9 @@ def task_line(t) -> str:
     bits.append(t["title"])
     if t["parent_id"]:
         bits.append(f"(sub of T{t['parent_id']})")
+    model = (paths.config().get("task_models") or {}).get(f"T{t['id']}")
+    if model:
+        bits.append(f"(model: {model}: pass it as the Agent tool's model when delegating this task)")
     return " ".join(bits)
 
 

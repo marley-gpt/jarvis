@@ -15,6 +15,17 @@ Skills are playbooks that Claude Code and the JARVIS specialists load on demand 
 | `jarvis-memory` | every agent | How agents read and write the shared brain (`bin/jarvis`). |
 | `jarvis-product-pipeline` | JARVIS | "Start the ads for <product>": gate, research, 15 statics, QC before image spend, PDP, campaign, one review package, launch, daily feedback loop. |
 | `jarvis-feedback-loop` | every agent | Record every verdict on the team's work (owner reviews, test data, QC) as a lesson, and read past feedback before similar work (`bin/jarvis feedback`). |
+| `jarvis-skill-learning` | JARVIS, every agent | The nightly skill-learning runs, teaching each other, the review queue for new skills, and the weekly merge, promote and trim (`bin/jarvis skills`). |
+
+## How the agents keep learning skills
+Every specialist keeps finding and learning skills for its role, on a schedule (owner rule M-261105-75f9). The engine is `core/jarvis/skills.py`, the commands are `bin/jarvis skills ...`, the playbook is the `jarvis-skill-learning` skill.
+
+- **Paced learning runs (every 2 hours):** `bin/jarvis pace` compares real weekly usage (read with `get_usage`, saved with `pace record`) with an even pace to the reset, keeping 10% for urgent owner work, and `skills due` picks that many agents. For each, `skills run start <agent>` writes a brief from its own record: feedback change-notes, bad verdicts and mistakes become gaps, and installed skills it doesn't use yet are ranked against its role and gaps. JARVIS adds hits from the Claude skill and plugin catalogue; the agent reads the best ones as data and writes at most 3 short skill notes (memory entries tagged `skill-note`, `for:<agent>`), tagged for every agent that needs them.
+- **Review queue:** new skills are only ever queued (`skills candidate add`), with source, what it does and cost. Nothing from outside is installed automatically; paid ones need an approved spend request. `skills review`, `skills approve|reject C<n>|P<n> --by jarvis|owner`.
+- **Weekly (Sunday 03:00):** `skills merge` tags recent feedback, lessons and mistakes for the agents they concern, then proposes promotions (helpful notes into `brain/skills/learned/<agent>.md`, skills into the agent's `Learned skills` line below) and trims. Each is a reviewed change, logged with what and why (`skills changes`).
+- **Levels:** uses (a hook counts Skill tool loads per agent; agents log `skills used ... --helped`) and notes give each skill a level from 1 New to 5 Expert. `skills list`, `skills board` (JSON) and `GET /api/skills` on the dashboard.
+- **Sub-agents and hiring (D36):** a lead agent queues help for a hard job with `bin/jarvis team delegate` (JARVIS runs it as a fresh agent; parent, job and result are logged), and can propose a new permanent agent with `team propose`. JARVIS adds free, within-role ones and alerts the owner; new tools, paid services or another role need the owner's approval first. `team remove` undoes a hire. Data: `team board`, `GET /api/team`.
+- **Extend it:** new agents are picked up from `.claude/agents/`; feedback kinds map to agents in `KIND_AGENTS`; caps and thresholds are `skill_*` keys in `brain/config.json`.
 
 ## Marketing skills (52): `.claude/skills/`
 Source: [coreyhaines31/marketingskills](https://github.com/coreyhaines31/marketingskills), MIT. Tool-integration docs they link to are in `.claude/tools/` (docs only; the vendor CLIs were not copied).

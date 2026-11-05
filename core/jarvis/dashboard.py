@@ -1,7 +1,8 @@
 """Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
 
 `bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
-isometric office at `/`, the sidebar console at `/console`, the chat app at
+app at `/`: status board, talk bar and the 3D HQ, see core/dashboard/README.md; the
+isometric office at `/office`, the sidebar console at `/console`, the chat app at
 `/chat`, the first version at `/classic`, all sharing jarvis.js) and streams
 state over Server-Sent Events. Talking to JARVIS runs one headless Claude Code
 process (`claude -p`, stream-json in and out) that stays running between
@@ -33,14 +34,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import brief, db, journal, live, memory, paths, readiness, records, telegram, tts, wakeword
+from . import activity, brief, db, hq, journal, live, memory, paths, readiness, records, skills, team, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
-# The office is the main view (owner decision D1); the console and the first version stay available.
-PAGES = {"/": "office.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
+# The HQ app is the main view (T54 revamp); the office, console and earlier versions stay available.
+PAGES = {"/": "hq.html", "/hq": "hq.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
          "/classic": "index.html"}
 ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
-          "/live.js": ("live.js", "text/javascript; charset=utf-8")}
+          "/live.js": ("live.js", "text/javascript; charset=utf-8"),
+          "/hq.js": ("hq.js", "text/javascript; charset=utf-8"),
+          "/hq-scene.js": ("hq-scene.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -259,6 +262,7 @@ MAX_IMAGES, MAX_IMAGE_BYTES = 4, 5 * 1024 * 1024
 MAX_BODY = MAX_IMAGES * MAX_IMAGE_BYTES * 4 // 3 + 64 * 1024  # base64 images plus the text
 # Where streamed text is cut into sentences to speak: end punctuation followed by a space, or a line break.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
+CLAUSE_END = re.compile(r"(?<=[,;:])\s+")   # the opening clause goes to the voice early, so the first word comes sooner
 
 
 def save_images(images: list) -> tuple[list[dict], list[str]]:
@@ -328,6 +332,19 @@ class Runner:
             conn.close()
         if announce:
             self.hub.publish({"type": "reset"})
+
+    def warm(self) -> None:
+        """Start Claude Code now (resuming the saved conversation) so the first message doesn't pay for its start-up
+        and the session hooks. Best effort, in the background."""
+        def go():
+            try:
+                with self.lock:
+                    claude = find_claude()
+                    if claude and not (self.proc and self.proc.poll() is None) and not self.busy:
+                        self._spawn(claude, self.session())
+            except OSError:
+                pass
+        threading.Thread(target=go, daemon=True).start()
 
     def start(self, text: str, images: list | None = None) -> None:
         with self.lock:
@@ -474,6 +491,10 @@ class Runner:
             *done, self.buf = SENTENCE_END.split(self.buf)
             for sentence in done:  # a short opener ("Very good, sir.") is spoken at once: it's what feels quick
                 self._chunk(sentence)
+            if not self.streamed and len(self.buf) > 24:   # nothing spoken yet and a long first sentence: say its first clause now
+                *lead, self.buf = CLAUSE_END.split(self.buf)
+                for clause in lead:
+                    self._chunk(clause)
         elif e.get("type") == "content_block_stop" and self.buf.strip():
             self._chunk(self.buf)
             self.buf = ""
@@ -640,6 +661,16 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, live.state())
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
+            if route == "/api/hq":
+                conn = db.connect()
+                try:
+                    return self._json(200, hq.data(conn))
+                finally:
+                    conn.close()
+            if route == "/api/hq/file":
+                found = hq.preview((parse_qs(query).get("path") or [""])[0])
+                # A deliverable that moved is normal, not an error the page should log: 204, nothing to show.
+                return self._send(200, *found) if found else self._send(204, b"", "text/plain")
             if route.startswith("/api/memory/"):
                 conn = db.connect()
                 try:
@@ -660,8 +691,25 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 data["wake"] = {**wake.info(), "enabled": wake.enabled()}
                 data["telegram"] = phone.info()
                 return self._json(200, data)
+            if route == "/api/activity":
+                return self._activity(parse_qs(query))
             if self.path == "/api/events":
                 return self._events()
+            if route == "/api/team":  # teams, sub-agents at work, hires, and the usage pacer
+                conn = db.connect()
+                try:
+                    return self._json(200, team.board(conn))
+                finally:
+                    conn.close()
+            if route == "/api/skills":  # per agent: skills and level, recently learned, backlog, review queue
+                conn = db.connect()
+                try:
+                    agent = (parse_qs(query).get("agent") or [None])[0]
+                    return self._json(200, skills.board(conn, agent))
+                except skills.SkillError as exc:
+                    return self._json(404, {"error": str(exc)})
+                finally:
+                    conn.close()
             self._json(404, {"error": "not found"})
 
         def _memory(self, q: dict):
@@ -676,6 +724,21 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             keep = ("id", "title", "category", "product", "provenance", "status", "confidence", "source",
                     "source_ref", "updated", "snippet")
             return self._json(200, [{k: r[k] for k in keep if k in r.keys()} for r in rows])
+
+        def _activity(self, q: dict):
+            # Recent agent events (newest first) and each agent's current state, for the HQ visuals.
+            try:
+                limit = max(1, min(int((q.get("n") or ["50"])[0]), 500))
+                since = int((q.get("since") or ["0"])[0])
+            except ValueError:
+                return self._json(400, {"error": "n and since must be numbers"})
+            conn = db.connect()
+            try:
+                data = {"events": activity.recent(conn, limit, agent=(q.get("agent") or [None])[0], since_id=since),
+                        "agents": activity.current(conn)}
+            finally:
+                conn.close()
+            return self._json(200, data)
 
         def _events(self):
             self.send_response(200)
@@ -772,6 +835,46 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
                 phone.decided(row, via="dashboard")  # approved: JARVIS carries it out now
                 return self._json(200, {"ok": True, "status": row["status"]})
+            if self.path == "/api/hq/connectors":
+                return self._json(202, hq.check_connectors())
+            if self.path == "/api/hq/conversation":
+                # The model the conversation runs on (fast for talking, the strongest for hard work), kept in
+                # brain/config.json; the running Claude Code is closed so the next message uses it.
+                if "model" in body:
+                    model = (body.get("model") or "").strip().lower()
+                    if model not in ("", "haiku", "sonnet", "opus", "fable"):
+                        return self._json(400, {"error": "Pick haiku, sonnet, opus, fable or the default."})
+                    paths.set_config("dashboard_model", hq.MODEL_IDS.get(model, model) or None)
+                if "effort" in body:
+                    effort = (body.get("effort") or "").strip().lower()
+                    if effort not in ("", "low", "medium", "high"):
+                        return self._json(400, {"error": "Pick low, medium, high or the default."})
+                    paths.set_config("dashboard_effort", effort or None)
+                if not runner.busy:
+                    runner.close(); runner.warm()
+                cfg = paths.config()
+                return self._json(200, {"ok": True, "model": cfg.get("dashboard_model"), "effort": cfg.get("dashboard_effort")})
+            if self.path == "/api/hq/agent-voice":
+                # The voice an agent (or Blake / Mark) speaks with in the HQ, kept in brain/config.json.
+                try:
+                    return self._json(200, {"ok": True, "voice": tts.set_agent_voice(body.get("agent") or "", body.get("voice") or "")})
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
+            if self.path in ("/api/hq/task", "/api/hq/agent-model", "/api/hq/task-model"):
+                # Control from HQ: assign a task, pick an agent's model, pick a model for one task.
+                conn = db.connect()
+                try:
+                    if self.path == "/api/hq/task":
+                        tid = hq.add_task(conn, body.get("title"), agent=body.get("agent"), product=body.get("product"),
+                                          description=body.get("description"), model=body.get("model"))
+                        return self._json(201, {"ok": True, "id": tid})
+                    if self.path == "/api/hq/agent-model":
+                        return self._json(200, {"ok": True, "model": hq.set_agent_model(body.get("agent"), body.get("model"))})
+                    return self._json(200, {"ok": True, "task_models": hq.set_task_model(body.get("task"), body.get("model"))})
+                except (ValueError, records.RecordError) as exc:
+                    return self._json(400, {"error": str(exc)})
+                finally:
+                    conn.close()
             if self.path == "/api/stop":
                 runner.stop()
                 return self._json(200, {"ok": True})
@@ -817,6 +920,9 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         if open_browser:
             webbrowser.open(url)
         return
+    # Warm up for the first spoken turn: the voice model loads and Claude Code starts before anyone says a word.
+    threading.Thread(target=server.tts.warm, daemon=True).start()
+    server.runner.warm()
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"JARVIS dashboard running at {url}  (Ctrl+C to stop)", flush=True)
     if not find_claude():

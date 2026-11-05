@@ -7,7 +7,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-from . import paths
+from . import activity, paths
 from .memory import slugify
 
 TASK_STATUSES = ("todo", "in_progress", "blocked", "waiting_approval", "done", "cancelled")
@@ -82,6 +82,7 @@ def task_add(conn, title, *, agent=None, product=None, parent=None, description=
     task_id = cur.lastrowid
     _event(conn, task_id, "created", f"agent={agent or '-'}")
     conn.commit()
+    activity.task_changed(conn, task_id, agent, product, title, "todo")
     return task_id
 
 
@@ -110,6 +111,9 @@ def task_update(conn, task_id, *, status=None, note=None, deliverable=None, summ
     if deliverable:
         _event(conn, tid, "deliverable", deliverable)
     conn.commit()
+    if status:
+        row = conn.execute("SELECT agent, product, title FROM tasks WHERE id = ?", (tid,)).fetchone()
+        activity.task_changed(conn, tid, row["agent"], row["product"], row["title"], status)
 
 
 def task_get(conn, task_id) -> tuple[sqlite3.Row, list, list]:
