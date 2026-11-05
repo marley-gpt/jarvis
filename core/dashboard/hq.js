@@ -580,7 +580,6 @@ function metricsHTML(m) {
 function panelSettings(m) {
   const c = m.connectors || {};
   const voices = J.voiceOptions(), cur = J.currentVoice();
-  const simple = J.pref("hqSimple") === "1";
   return { ref: null, html: head("Preferences", "Settings", "") + `
     <div class="p-body">
       <h3>Voice</h3>
@@ -593,8 +592,7 @@ function panelSettings(m) {
       <label class="switch">Conversation thinking<select data-set="effort">${[["", "Default"], ["low", "Low: answers fastest"], ["medium", "Medium"], ["high", "High: thinks longest"]].map(([v, l]) => `<option value="${v}" ${(Feed.hq?.conversation_effort || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <p class="quiet">Talking to JARVIS and the teams runs on this model and thinking level. Heavy work still goes to the specialists on their own models.</p>
       <label class="switch">Race sounds (the cars, when the view is near the circuit)<input type="checkbox" data-set="sound" ${J.pref("hqSound") !== "0" ? "checked" : ""}></label>
-      <label class="switch">Ambient occlusion (soft contact shadows; needs a capable computer)<input type="checkbox" data-set="ao" ${J.pref("hqAO") === "1" || (J.pref("hqAO") !== "0" && (navigator.hardwareConcurrency || 4) >= 8) ? "checked" : ""}></label>
-      <label class="switch">Simplified 3D (for phones and slower computers)<input type="checkbox" data-set="simple" ${simple ? "checked" : ""}></label>
+      <label class="switch">Graphics<select data-set="quality">${[["auto", `Automatic (${qualityAuto()} on this device)`], ["high", "High: HDRI light, depth of field, 4K shadows, ambient occlusion"], ["medium", "Medium: the full scene, lighter effects"], ["low", "Low: simplified, for phones"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqQuality") || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="switch">Time of day<select data-set="time">${[["live", "Live (follows the clock)"], ["day", "Day"], ["sunset", "Sunset"], ["evening", "Evening"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqTime") || "live") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <h3>Connections</h3>
       <p class="desc">The connectors Claude Code has on this PC, the same ones the desktop app and JARVIS use.</p>
@@ -701,9 +699,8 @@ $("toast").addEventListener("click", () => $("toast").dataset.task && open(`task
 document.addEventListener("change", (e) => {
   const k = e.target.dataset?.set;
   if (!k) return;
-  if (k === "simple") { J.pref("hqSimple", e.target.checked ? "1" : "0"); location.reload(); return; }
+  if (k === "quality") { J.pref("hqQuality", e.target.value); location.reload(); return; }
   if (k === "sound") { J.pref("hqSound", e.target.checked ? "1" : "0"); scene?.setSound?.(e.target.checked); return; }
-  if (k === "ao") { J.pref("hqAO", e.target.checked ? "1" : "0"); location.reload(); return; }
   if (k === "conversation") { J.post("/api/hq/conversation", { model: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
   if (k === "effort") { J.post("/api/hq/conversation", { effort: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
   if (k === "voice") { J.settings.voice = e.target.value; J.preview(); return; }
@@ -1019,11 +1016,21 @@ function cardRects() {
   }
   return rects;
 }
-// Simplified mode: the owner's choice in Settings, ?simple in the address, or automatically on phones and low-power devices.
-const simple = /[?&]simple\b/.test(location.search) || J.pref("hqSimple") === "1" || (J.pref("hqSimple") !== "0" && (isPhone() || (navigator.hardwareConcurrency || 8) <= 4));
+// Graphics: High (HDRI light, depth of field, 4K shadows, ambient occlusion), Medium (the full scene, lighter effects) or
+// Low (simplified: no shadows or post-processing, less scenery). The owner's choice in Settings, ?simple in the address,
+// or automatically by the device: phones and 4-core machines get Low, everything else Medium; High is picked by hand.
+function qualityAuto() { const cores = navigator.hardwareConcurrency || 8; return isPhone() || cores <= 4 ? "low" : "medium"; }   // High is a choice: it needs a real graphics card
+function quality() {
+  if (/[?&]simple\b/.test(location.search)) return "low";
+  const pick = J.pref("hqQuality");
+  if (pick && pick !== "auto") return pick;
+  if (J.pref("hqSimple") === "1") return "low";   // the earlier settings still count
+  return qualityAuto();
+}
+const Q = quality(), simple = Q === "low";
 import("/hq-scene.js").then(({ startScene }) => startScene({
-  stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), stick: $("stick"), status: STATUS, simple,
-  ao: !simple && (J.pref("hqAO") === "1" || (J.pref("hqAO") !== "0" && (navigator.hardwareConcurrency || 4) >= 8)),   // ambient occlusion where there are the cores for it
+  stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), stick: $("stick"), status: STATUS, simple, quality: Q,
+  ao: Q === "high",   // ambient occlusion comes with High
   selected: () => pavilionFor(selected),
   avoid: cardRects,
   onPick: (kind, id) => open(kind === "jarvis" ? "jarvis" : kind === "team" ? `agent:${id}` : `${kind}:${id}`),   // a pavilion is an agent's
