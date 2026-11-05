@@ -232,8 +232,8 @@ def main(argv: list[str]) -> int:
     conn = db.connect()
     try:
         if kind == "session_start":
+            from . import backup, brief, cli   # only here: the prompt hook runs on every message and stays light
             if not paths.memory_dir().exists():
-                from . import backup, brief, cli
                 cli.cmd_init(conn, None)
             try:
                 backup.daily(conn)
