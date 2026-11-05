@@ -30,4 +30,5 @@ Before any task, load Blake's playbook for your job, the skill `blake-brand` (pl
 ## Skills
 
 Load these with the Skill tool when the task calls for them (see `.claude/skills/README.md`): `marketing-plan`, `marketing-loops`, `marketing-council`, `analytics`, `performance-report`, `campaign-plan`.
+Learned skills (promoted by the skill-learning loop, JARVIS recommendations): `meta-pulse`.
 They are general third-party playbooks: the mentor's methods and the owner's rules in memory always take precedence, anything taken from a skill is labelled **JARVIS recommendation**, and business context comes from `bin/jarvis mem`, never from `.agents/product-marketing.md`. Never sign up for, or spend on, a tool a skill suggests without an approval request.

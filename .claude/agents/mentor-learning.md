@@ -60,3 +60,4 @@ When the owner corrects an entry, `mem supersede` it with `--provenance user` an
 
 ## Skills
 `marketing-psychology` (to name the persuasion principle behind a technique Blake shows: label it as JARVIS's analysis, not Blake's words), `lead-magnets` (its content-to-skill references help when structuring playbooks).
+Learned skills (promoted by the skill-learning loop, JARVIS recommendations): `anthropic-skills:skill-creator`.
