@@ -49,6 +49,10 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 #backdrop { position: absolute; left: 0; top: 0; display: block; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; pointer-events: none; }
 #cinema-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 16px; border-radius: 12px; background: rgba(20, 26, 34, .8); color: var(--text); font-size: 13px; }
 #cinema-note[hidden] { display: none; }
+#cinema-bar { position: absolute; z-index: 3; top: 74px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 14px; border-radius: 999px; background: rgba(20, 26, 34, .78); border: 1px solid var(--gold); color: var(--text); font-size: 12.5px; white-space: nowrap; max-width: calc(100% - 32px); }
+#cinema-bar span { overflow: hidden; text-overflow: ellipsis; }
+#cinema-bar button { padding: 6px 12px; border-radius: 999px; background: var(--gold-hi); color: #1a1406; font-weight: 600; font-size: 12.5px; }
+@media (max-width: 860px) { #cinema-bar { top: auto; bottom: 58px; } }
 body.cinema .views button[data-view="explore"], body.cinema .views button[data-view="walk"], body.cinema #demo { opacity: .45; }
 
 /* glass, the one material for every overlay */
@@ -346,7 +350,8 @@ select.pick.saved { border-color: var(--working); }
 
 <div id="stage">
   <canvas id="scene" tabindex="-1" aria-label="3D view of the JARVIS HQ estate: HQ, the globe, and a pavilion for each team"></canvas>
-  <div id="cinema" hidden><img id="backdrop" alt="The estate, rendered"><div id="cinema-note" hidden>The rendered backdrops aren't in brain/files/hq yet.</div></div>
+  <div id="cinema" hidden><img id="backdrop" alt="The estate, rendered"><div id="cinema-note" hidden>The rendered backdrops aren't in brain/files/hq yet.</div>
+    <div id="cinema-bar"><span>Rendered picture: the live estate is paused. Chips and cards are live; nothing else moves here.</span><button type="button" id="cinema-back">Back to the live 3D estate</button></div></div>
   <div id="labels"></div>
   <div id="veil"></div>
   <div id="nogl" hidden></div>

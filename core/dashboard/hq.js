@@ -589,6 +589,10 @@ function panelSettings(m) {
       <label class="switch">Hands-free follow-ups<input type="checkbox" data-set="handsfree" ${J.settings.handsfree ? "checked" : ""}></label>
       <label class="switch">JARVIS's voice<select data-set="voice">${voices.map((o) => `<option value="${esc(o.id)}" ${o.id === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("") || "<option>Default voice</option>"}</select></label>
       <h3>Display</h3>
+      <label class="switch">Conversation model<select data-set="conversation">${[["", "Claude Code's default (what JARVIS uses in the terminal)"], ["haiku", "Haiku: fastest replies"], ["sonnet", "Sonnet: quick and capable"], ["opus", "Opus: strongest, slower"], ["fable", "Fable"]].map(([v, l]) => `<option value="${v}" ${(Feed.hq?.conversation_model || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="switch">Conversation thinking<select data-set="effort">${[["", "Default"], ["low", "Low: answers fastest"], ["medium", "Medium"], ["high", "High: thinks longest"]].map(([v, l]) => `<option value="${v}" ${(Feed.hq?.conversation_effort || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <p class="quiet">Talking to JARVIS and the teams runs on this model and thinking level. Heavy work still goes to the specialists on their own models.</p>
+      <label class="switch">Race sounds (the cars, when the view is near the circuit)<input type="checkbox" data-set="sound" ${J.pref("hqSound") !== "0" ? "checked" : ""}></label>
       <label class="switch">Simplified 3D (for phones and slower computers)<input type="checkbox" data-set="simple" ${simple ? "checked" : ""}></label>
       <label class="switch">Time of day<select data-set="time">${[["live", "Live (follows the clock)"], ["day", "Day"], ["sunset", "Sunset"], ["evening", "Evening"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqTime") || "live") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <h3>Connections</h3>
@@ -697,6 +701,9 @@ document.addEventListener("change", (e) => {
   const k = e.target.dataset?.set;
   if (!k) return;
   if (k === "simple") { J.pref("hqSimple", e.target.checked ? "1" : "0"); location.reload(); return; }
+  if (k === "sound") { J.pref("hqSound", e.target.checked ? "1" : "0"); scene?.setSound?.(e.target.checked); return; }
+  if (k === "conversation") { J.post("/api/hq/conversation", { model: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
+  if (k === "effort") { J.post("/api/hq/conversation", { effort: e.target.value }).then(() => { e.target.classList.add("saved"); Feed.loadHQ(); }).catch((err) => caption("JARVIS", err.message)); return; }
   if (k === "voice") { J.settings.voice = e.target.value; J.preview(); return; }
   if (k === "time") { J.pref("hqTime", e.target.value); scene?.setTime(e.target.value); if (cinema.on) cinemaLoad(); return; }
   J.settings[k] = e.target.checked;
@@ -962,6 +969,8 @@ function cinemaClamp() {
   el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
   addEventListener("resize", () => { cinemaClamp(); placeCinema(); });
   setInterval(() => { if (cinema.on) cinemaLoad(); }, 60000);   // the light follows the clock
+  $("cinema-back").addEventListener("click", () => { setCinema(false); scene?.view("ceo"); });
+  // The live 3D estate is always what HQ opens in; the rendered picture is a toggle for a look, never remembered.
 }
 document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
   const v = b.dataset.view;
@@ -1021,5 +1030,6 @@ import("/hq-scene.js").then(({ startScene }) => startScene({
 })).then((s) => {
   scene = s;
   scene?.setTime(J.pref("hqTime") || "live");
+  scene?.setSound?.(J.pref("hqSound") !== "0");
   if (scene && Feed.model) scene.update(Feed.model);
 }).catch((e) => console.error(e));

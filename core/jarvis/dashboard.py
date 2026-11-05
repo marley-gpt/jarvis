@@ -261,6 +261,7 @@ MAX_IMAGES, MAX_IMAGE_BYTES = 4, 5 * 1024 * 1024
 MAX_BODY = MAX_IMAGES * MAX_IMAGE_BYTES * 4 // 3 + 64 * 1024  # base64 images plus the text
 # Where streamed text is cut into sentences to speak: end punctuation followed by a space, or a line break.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
+CLAUSE_END = re.compile(r"(?<=[,;:])\s+")   # the opening clause goes to the voice early, so the first word comes sooner
 
 
 def save_images(images: list) -> tuple[list[dict], list[str]]:
@@ -330,6 +331,19 @@ class Runner:
             conn.close()
         if announce:
             self.hub.publish({"type": "reset"})
+
+    def warm(self) -> None:
+        """Start Claude Code now (resuming the saved conversation) so the first message doesn't pay for its start-up
+        and the session hooks. Best effort, in the background."""
+        def go():
+            try:
+                with self.lock:
+                    claude = find_claude()
+                    if claude and not (self.proc and self.proc.poll() is None) and not self.busy:
+                        self._spawn(claude, self.session())
+            except OSError:
+                pass
+        threading.Thread(target=go, daemon=True).start()
 
     def start(self, text: str, images: list | None = None) -> None:
         with self.lock:
@@ -476,6 +490,10 @@ class Runner:
             *done, self.buf = SENTENCE_END.split(self.buf)
             for sentence in done:  # a short opener ("Very good, sir.") is spoken at once: it's what feels quick
                 self._chunk(sentence)
+            if not self.streamed and len(self.buf) > 24:   # nothing spoken yet and a long first sentence: say its first clause now
+                *lead, self.buf = CLAUSE_END.split(self.buf)
+                for clause in lead:
+                    self._chunk(clause)
         elif e.get("type") == "content_block_stop" and self.buf.strip():
             self._chunk(self.buf)
             self.buf = ""
@@ -816,6 +834,23 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
+            if self.path == "/api/hq/conversation":
+                # The model the conversation runs on (fast for talking, the strongest for hard work), kept in
+                # brain/config.json; the running Claude Code is closed so the next message uses it.
+                if "model" in body:
+                    model = (body.get("model") or "").strip().lower()
+                    if model not in ("", "haiku", "sonnet", "opus", "fable"):
+                        return self._json(400, {"error": "Pick haiku, sonnet, opus, fable or the default."})
+                    paths.set_config("dashboard_model", hq.MODEL_IDS.get(model, model) or None)
+                if "effort" in body:
+                    effort = (body.get("effort") or "").strip().lower()
+                    if effort not in ("", "low", "medium", "high"):
+                        return self._json(400, {"error": "Pick low, medium, high or the default."})
+                    paths.set_config("dashboard_effort", effort or None)
+                if not runner.busy:
+                    runner.close(); runner.warm()
+                cfg = paths.config()
+                return self._json(200, {"ok": True, "model": cfg.get("dashboard_model"), "effort": cfg.get("dashboard_effort")})
             if self.path == "/api/hq/agent-voice":
                 # The voice an agent (or Blake / Mark) speaks with in the HQ, kept in brain/config.json.
                 try:
@@ -867,6 +902,9 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
 def serve(port: int = 8765, open_browser: bool = True) -> None:
     try:
         server = make_server(port=port)
+        # Warm up for the first spoken turn: the voice model loads and Claude Code starts before anyone says a word.
+        threading.Thread(target=server.tts.warm, daemon=True).start()
+        server.runner.warm()
     except OSError:
         url = f"http://127.0.0.1:{port}/"
         print(f"JARVIS dashboard is already running at {url}. Opening it.", flush=True)

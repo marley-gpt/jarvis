@@ -15,7 +15,7 @@ import re
 import sys
 import time
 
-from . import activity, backup, brief, cli, db, journal, memory, paths, records, skills
+from . import activity, db, journal, memory, paths, records, skills   # (backup, brief and cli load only at session start: the prompt hook runs on every message)
 
 # MCP tool names whose last segment starts with one of these verbs are read-only.
 READ_VERBS = ("get", "list", "search", "query", "show", "find", "read", "fetch", "validate", "describe",
@@ -233,6 +233,7 @@ def main(argv: list[str]) -> int:
     try:
         if kind == "session_start":
             if not paths.memory_dir().exists():
+                from . import backup, brief, cli
                 cli.cmd_init(conn, None)
             try:
                 backup.daily(conn)

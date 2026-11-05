@@ -389,6 +389,8 @@ def data(conn) -> dict:
             "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
             "actions": recent_actions(conn), "metrics": metrics(), "models": MODELS, "task_models": task_models(),
             "agent_voices": _agent_voices(), "recommended": {k: {"model": m, "why": w} for k, (m, w) in RECOMMENDED.items()},
+            "conversation_model": model_alias(cfg.get("dashboard_model")) if cfg.get("dashboard_model") else "",
+            "conversation_effort": cfg.get("dashboard_effort") or "",
             "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),

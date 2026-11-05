@@ -466,12 +466,13 @@ function buildWorld(THREE, addons, renderer, opts) {
     ]);
     carGeo.scale(1.6, 1.6, 1.6);
     const liveries = [0xd0101b, 0x9aa3ab, 0x1b2a55, 0xff8000, 0x0d5c46, 0x1f5fd1, 0xf2f2f2, 0xf1c40f, 0xd0101b, 0x0aa5a0];
-    const cars = new THREE.InstancedMesh(carGeo, M.paint, liveries.length);
-    liveries.forEach((c, i) => cars.setColorAt(i, C(c)));
+    const grid = simple ? liveries.slice(0, 5) : liveries;   // a lighter race on phones
+    const cars = new THREE.InstancedMesh(carGeo, M.paint, grid.length);
+    grid.forEach((c, i) => cars.setColorAt(i, C(c)));
     scene3.add(cars);
     const len = curve.getLength();
     const bend = pts.map((p, i) => { const a = pts[(i + N - 5) % N], b = pts[(i + 5) % N]; return a.clone().sub(p).normalize().dot(b.clone().sub(p).normalize()) + 1; });
-    world.cars = { mesh: cars, len, bend, list: liveries.map((_, i) => ({ u: 1 - i * 0.035, v: 30, top: 60 + ((i * 7) % 9) })) };
+    world.cars = { mesh: cars, len, bend, list: grid.map((_, i) => ({ u: 1 - i * 0.035, v: 30, top: 58 + ((i * 7) % 13), lane: 0, want: 0, passing: null })) };
 
     // The marina: jetties with moored yachts below the estate, superyachts at anchor in the bay.
     const hullShape = new THREE.Shape([[-0.5, -0.17], [0.22, -0.17], [0.5, 0], [0.22, 0.17], [-0.5, 0.17]].map(([x, y]) => new THREE.Vector2(x, y)));
@@ -625,11 +626,12 @@ function buildWorld(THREE, addons, renderer, opts) {
     // the desk with the business figures, and the owner in his chair. The JARVIS sign stands on the roof above it.
     box(18, 0.3, 12, M.marble, 0, 21.25, -1, HQ);
     const pfloor = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 11.4), M.oak); pfloor.rotation.x = -Math.PI / 2; pfloor.position.set(0, 21.42, -1); HQ.add(pfloor);
-    box(18, 4.7, 0.3, M.tint, 0, 23.75, -6.85, HQ);
+    box(18, 1.2, 0.3, M.marble, 0, 22.0, -6.85, HQ);                                 // a low back wall, glass above: the circuit and the city show behind
+    box(17.4, 3.4, 0.08, M.glass, 0, 24.3, -6.85, HQ, false);
+    for (let k = -2; k <= 2; k++) box(0.18, 3.4, 0.25, M.gold, k * 4.3, 24.3, -6.85, HQ, false);
     for (const s of [-1, 1]) box(0.3, 4.7, 12, M.tint, s * 8.85, 23.75, -1, HQ);
     { const S = 1.15, w = (x, z) => [x * S, -40 + z * S];
       solid.camSegs.push([...w(-8.85, -6.85), ...w(8.85, -6.85)], [...w(-8.85, -6.85), ...w(-8.85, 5)], [...w(8.85, -6.85), ...w(8.85, 5)]); }
-    box(17.2, 3.9, 0.1, M.interior, 0, 23.4, -6.62, HQ, false);
     box(17.4, 4.5, 0.08, M.glass, 0, 23.65, 4.96, HQ, false);
     for (let k = -2; k <= 2; k++) box(0.18, 4.5, 0.25, M.gold, k * 4.3, 23.65, 5.0, HQ, false);
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 11.4), M.warmLight); ceiling.rotation.x = Math.PI / 2; ceiling.position.set(0, 25.98, -1); HQ.add(ceiling);
@@ -652,8 +654,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     box(1.3, 0.06, 0.7, M.walnut, -6.2, 0.5, -1.9, ceoDesk, false);                 // low table
     box(0.08, 0.5, 0.08, M.gold, -6.2, 0.25, -1.9, ceoDesk, false);
     box(2.2, 1.2, 0.5, M.walnut, 6.6, 0.6, -5.5, ceoDesk);                          // cabinet
-    box(1.6, 2.6, 0.12, M.gold, -6, 1.3, -7.75, ceoDesk, false);                      // the lift door
-    box(1.9, 0.12, 0.3, M.frame, -6, 2.66, -7.7, ceoDesk, false);
+    box(0.12, 2.6, 1.6, M.gold, -9.95, 1.3, -4.6, ceoDesk, false);                     // the lift door, in the side wall
+    box(0.3, 0.12, 1.9, M.frame, -9.9, 2.66, -4.6, ceoDesk, false);
     for (const [px, pz] of [[-7.6, 4.2], [7.6, 4.2], [7.6, -2.4]]) { box(0.8, 0.8, 0.8, M.white, px, 0.4, pz, ceoDesk, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.3, pz); ceoDesk.add(pl); }
     HQ.updateWorldMatrix(true, true);
     ceoSeat = { pos: HQ.localToWorld(new V3(0, 21.42, -0.1)), face: 0 };   // the owner's chair, facing the glass
@@ -886,12 +888,58 @@ function buildWorld(THREE, addons, renderer, opts) {
   };
   const part = (geo, m, shadow) => { const x = new THREE.Mesh(geo, m); if (shadow && !simple) x.castShadow = true; return x; };
   const hash = (s) => { let h = 2166136261; for (const ch of String(s)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return Math.abs(h); };
-  // A person in a suit, white shirt and a tie in the team colour. Looks are fixed per agent, so each one is recognisable.
+  // Each head agent has a look of its own so the owner can tell who is who at a glance: the suit in its department's
+  // colour, a hairstyle, a build, and a prop for the job in its hand. JARVIS is black with a glowing gold accent; the
+  // owner wears cream; Blake and Mark are casual persona figures (not likenesses of anyone).
+  const LOOKS = {
+    "product-research":  { hair: "short", hairColor: 0x2b1d14, build: [1.0, 1.0], glasses: true, prop: "magnifier" },
+    "market-research":   { hair: "long", hairColor: 0x7a5a3a, build: [0.92, 0.98], prop: "notebook" },
+    "creative-research": { hair: "bun", hairColor: 0x1b1b1b, build: [0.9, 1.02], glasses: true, prop: "camera" },
+    "mentor-learning":   { hair: "bald", build: [1.08, 1.0], glasses: true, prop: "book" },
+    "operations":        { hair: "crop", hairColor: 0x4a3022, build: [1.05, 1.03], prop: "clipboard" },
+    "accountant":        { hair: "short", hairColor: 0xb8925c, build: [0.95, 0.96], glasses: true, prop: "ledger" },
+    "meta-ads":          { hair: "crop", hairColor: 0x1b1b1b, build: [1.02, 1.04], prop: "chart" },
+    "meta-ads-auditor":  { hair: "long", hairColor: 0x2b1d14, build: [0.94, 1.0], glasses: true, prop: "chart" },
+    "shopify":           { hair: "bun", hairColor: 0x7a5a3a, build: [0.95, 1.0], prop: "bag" },
+    "store-qa":          { hair: "short", hairColor: 0x3b2a20, build: [1.0, 0.97], prop: "bag" },
+    "creative-director": { hair: "long", hairColor: 0xb8925c, build: [0.96, 1.05], prop: "camera" },
+    "product-testing":   { hair: "crop", hairColor: 0x4a3022, build: [1.06, 0.98], prop: "beaker" },
+    "jarvis": { suit: 0x101216, tie: 0xffd98a, glow: true, hair: "short", hairColor: 0x1b1b1b, build: [1.0, 1.04] },
+    "owner":  { suit: 0xf1ead9, trousers: 0xf1ead9, tie: 0xc6a46a, hair: "short", hairColor: 0x2b1d14, build: [1.0, 1.0], sunglasses: true },
+    "blake":  { suit: 0x2f8f83, casual: true, hair: "crop", hairColor: 0x7a5a3a, build: [1.06, 1.02], prop: "chart" },
+    "mark":   { suit: 0x3a3f46, casual: true, hair: "bun", hairColor: 0x1b1b1b, build: [1.0, 1.04], prop: "notebook" },
+  };
+  const propGeo = {};
+  function propMesh(kind, teamColor) {
+    const g = new THREE.Group(); g.position.set(0, -0.3, 0.06);
+    const add = (geo, color, x = 0, y = 0, z = 0, emissive) => { const m = new THREE.Mesh(geo, emissive ? std({ color, emissive, emissiveIntensity: 1.1, roughness: 0.4 }) : mat(color)); m.position.set(x, y, z); g.add(m); return m; };
+    propGeo.cam ??= new THREE.BoxGeometry(0.2, 0.13, 0.09); propGeo.lens ??= new THREE.CylinderGeometry(0.045, 0.05, 0.07, 10).rotateX(Math.PI / 2);
+    propGeo.bag ??= new THREE.BoxGeometry(0.2, 0.26, 0.1); propGeo.handle ??= new THREE.TorusGeometry(0.07, 0.012, 6, 14);
+    propGeo.tab ??= new THREE.BoxGeometry(0.24, 0.3, 0.02); propGeo.bar ??= new THREE.BoxGeometry(0.04, 0.1, 0.01);
+    propGeo.book ??= new THREE.BoxGeometry(0.22, 0.3, 0.05); propGeo.spine ??= new THREE.BoxGeometry(0.02, 0.3, 0.052);
+    propGeo.ring ??= new THREE.TorusGeometry(0.08, 0.014, 6, 16); propGeo.stick ??= new THREE.CylinderGeometry(0.012, 0.012, 0.16, 6);
+    propGeo.beaker ??= new THREE.CylinderGeometry(0.05, 0.04, 0.16, 10); propGeo.liquid ??= new THREE.CylinderGeometry(0.046, 0.038, 0.07, 10);
+    propGeo.clip ??= new THREE.BoxGeometry(0.08, 0.03, 0.02);
+    switch (kind) {
+      case "camera": add(propGeo.cam, 0x1a1a1a); add(propGeo.lens, 0x2a2f36, 0.02, 0, 0.08); add(new THREE.SphereGeometry(0.018, 6, 6), 0xf1c40f, -0.07, 0.08, 0); break;
+      case "bag": add(propGeo.bag, teamColor, 0, -0.12, 0); add(propGeo.handle, 0xc6a46a, 0, 0.03, 0); break;
+      case "chart": add(propGeo.tab, 0x16191e); add(propGeo.bar, 0x7fd3ff, -0.07, -0.06, 0.012, 0x7fd3ff); add(propGeo.bar, 0x7fd3ff, 0, -0.03, 0.012, 0x7fd3ff).scale.y = 1.6; add(propGeo.bar, 0x7fd3ff, 0.07, 0, 0.012, 0x7fd3ff).scale.y = 2.2; break;
+      case "ledger": add(propGeo.book, 0x5b3a25); add(propGeo.spine, 0xc6a46a, -0.1, 0, 0); break;
+      case "book": add(propGeo.book, 0x1d3557); add(propGeo.spine, 0xe9e6df, -0.1, 0, 0); break;
+      case "notebook": add(new THREE.BoxGeometry(0.18, 0.24, 0.03), 0xe9e6df); add(propGeo.spine, 0x2f3338, -0.08, 0, 0).scale.y = 0.8; break;
+      case "clipboard": add(new THREE.BoxGeometry(0.2, 0.28, 0.015), 0xc8b79a); add(propGeo.clip, 0x8a8f96, 0, 0.13, 0.012); break;
+      case "magnifier": add(propGeo.ring, 0xc6a46a, 0, 0.06, 0); add(propGeo.stick, 0x5b3a25, 0, -0.08, 0); break;
+      case "beaker": add(propGeo.beaker, 0xdfe8ee); add(propGeo.liquid, 0x2fb3cc, 0, -0.04, 0, 0x1f8fa8); break;
+    }
+    return g;
+  }
   function character(name, teamColor, size = 1) {
-    const h = hash(name);
-    const suit = mat(SUIT[h % SUIT.length]), skin = mat(SKIN[(h >> 3) % SKIN.length]), hair = mat(HAIR[(h >> 6) % HAIR.length]);
-    const trousers = mat(SUIT[(h >> 9) % 2 ? 0 : 1]);
+    const h = hash(name), L = LOOKS[name] || {};
+    const suitHex = L.suit != null ? L.suit : new THREE.Color(teamColor).lerp(new THREE.Color(0x1f2a44), 0.5).getHex();
+    const suit = mat(suitHex), skin = mat(SKIN[(h >> 3) % SKIN.length]), hair = mat(L.hairColor != null ? L.hairColor : HAIR[(h >> 6) % HAIR.length]);
+    const trousers = mat(L.trousers != null ? L.trousers : L.casual ? 0x2f3338 : suitHex);
     const root = new THREE.Group(); root.scale.setScalar(1.25 * size);
+    if (L.build) root.scale.y *= L.build[1];
     const hips = new THREE.Group(); hips.position.y = 0.95; root.add(hips);
     hips.add(part(body.pelvis, trousers));
     const leg = (side) => {
@@ -902,9 +950,24 @@ function buildWorld(THREE, addons, renderer, opts) {
       return { hip, knee };
     };
     const torso = new THREE.Group(); torso.position.y = 0.06; hips.add(torso);
-    torso.add(part(body.torso, suit, true), part(body.shirt, mat(0xffffff)), part(body.tie, mat(C(teamColor).getHex())), part(body.neck, skin));
+    if (L.build) torso.scale.x = L.build[0];
+    torso.add(part(body.torso, suit, true), part(body.neck, skin));
+    if (!L.casual) torso.add(part(body.shirt, mat(0xffffff)), L.glow
+      ? new THREE.Mesh(body.tie, std({ color: L.tie, emissive: L.tie, emissiveIntensity: 1.6, roughness: 0.3 }))
+      : part(body.tie, mat(L.tie != null ? L.tie : C(teamColor).getHex())));
+    if (L.glow) { const pin = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), std({ color: 0xffd98a, emissive: 0xffd98a, emissiveIntensity: 2.2 })); pin.position.set(-0.12, 0.5, 0.2); torso.add(pin);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex("255,217,138"), transparent: true, depthWrite: false, opacity: 0.35 })); halo.scale.setScalar(0.9); halo.position.set(0, 0.4, 0.1); torso.add(halo); }
     const head = new THREE.Group(); head.position.y = 0.86; torso.add(head);
-    head.add(part(body.head, skin, true), part(body.hair, hair));
+    head.add(part(body.head, skin, true));
+    const style = L.hair || "short";
+    if (style !== "bald") { const hm = part(body.hair, hair); if (style === "crop") hm.scale.y = 0.72; head.add(hm); }
+    if (style === "long") { const back = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.34, 0.16), hair); back.position.set(0, -0.12, -0.12); head.add(back); }
+    if (style === "bun") { const bun = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 6), hair); bun.position.set(0, 0.17, -0.12); head.add(bun); }
+    if (L.glasses || L.sunglasses) {
+      const lens = L.sunglasses ? mat(0x111111) : std({ color: 0xffffff, transparent: true, opacity: 0.35, roughness: 0.1 });
+      for (const s of [-1, 1]) { const r = new THREE.Mesh(L.sunglasses ? new THREE.BoxGeometry(0.09, 0.055, 0.02) : new THREE.TorusGeometry(0.045, 0.008, 6, 12), lens); r.position.set(s * 0.075, 0.02, 0.17); head.add(r); }
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.008, 0.008), mat(0x2a2a2a)); bridge.position.set(0, 0.02, 0.175); head.add(bridge);
+    }
     const arm = (side) => {
       const sh = new THREE.Group(); sh.position.set(side * 0.29, 0.52, 0); sh.rotation.z = side * 0.08;
       const el = new THREE.Group(); el.position.y = -0.3;
@@ -914,9 +977,21 @@ function buildWorld(THREE, addons, renderer, opts) {
     };
     const tablet = part(body.tablet, M.frame); tablet.visible = false;
     const racket = part(body.racket, mat(0x222222)); racket.visible = false;
-    const c = { root, hips, legs: [leg(-1), leg(1)], torso, head, arms: [arm(-1), arm(1)], tablet, racket };
+    const c = { root, hips, legs: [leg(-1), leg(1)], torso, head, arms: [arm(-1), arm(1)], tablet, racket, prop: null, look: L };
     c.arms[1].el.add(tablet, racket);
+    if (L.prop) { c.prop = propMesh(L.prop, C(teamColor).getHex()); c.arms[1].el.add(c.prop); }
     return c;
+  }
+  // A floating name over a character's head; fades out when the view is far away (the chips name the buildings then).
+  function nameTag(c, label, color) {
+    const tex = canvasTex(256, 64, (g, w, h) => {
+      g.fillStyle = "rgba(14, 20, 32, 0.78)"; g.beginPath(); g.roundRect(4, 8, w - 8, h - 16, 18); g.fill();
+      g.strokeStyle = color; g.lineWidth = 3; g.stroke();
+      g.fillStyle = "#f3efe6"; g.font = "600 26px 'Inter', system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(label, w / 2, h / 2 + 1);
+    });
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
+    tag.scale.set(1.3, 0.33, 1); tag.position.set(0, 2.05, 0); tag.renderOrder = 5;
+    c.root.add(tag); c.tag = tag;
   }
   const lerp = (a, b, t) => a + (b - a) * t;
   // Pose from blend weights: walk, sit, type (hands on the keys), lean (+ back when relaxed, - slumped when blocked),
@@ -944,6 +1019,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     });
     c.tablet.visible = st.tab > 0.5;
     c.racket.visible = st.swing > 0.5;
+    if (c.prop) c.prop.visible = s < 0.5 && st.tab < 0.5 && st.swing < 0.5;
     c.head.rotation.x = 0.1 * ty + 0.32 * Math.max(0, -st.lean) - 0.12 * st.look + 0.18 * st.tab + Math.sin(ph * 0.6) * 0.03 * calm;
     c.head.rotation.y = Math.sin(ph * 0.31) * (0.06 + 0.25 * Math.max(0, st.lean) * (1 - a) + 0.35 * st.look) * calm;
   }
@@ -1167,6 +1243,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     desks.forEach((d, i) => {
       const A = actor(character(d.name, t.color), door, pav.rotation.y + Math.PI);
       A.name = d.name; A.desk = d; d.actor = A;
+      nameTag(A.c, t.agents.find((x) => x.name === d.name)?.label || d.name, t.color);
       goToDesk(A, P, REDUCED ? 0 : 0.5 + i * 0.6 + rand() * 1.5);
     });
     pavilions.set(t.id, P);
@@ -1312,9 +1389,17 @@ function buildWorld(THREE, addons, renderer, opts) {
   // ---------------------------------------------------------------- the owner: at his desk in the penthouse, or out walking
   const boss = actor(character("owner", 0xc6a46a), ceoSeat.pos, 0);
   boss.seat = ceoSeat; boss.sitting = true; boss.name = "owner";
+  nameTag(boss.c, "You", "#c6a46a");
   // JARVIS at his own desk on floor 2; he walks up with his own approvals.
   const jarvisA = actor(character("jarvis", 0xc6a46a), jarvisSeat.pos, Math.PI);
   jarvisA.seat = jarvisSeat; jarvisA.sitting = true; jarvisA.name = "jarvis";
+  nameTag(jarvisA.c, "JARVIS", "#ffd98a");
+  // Blake and Mark, the method personas, on the first-floor terrace of the HQ (figures of their own, not likenesses).
+  const personas = ["blake", "mark"].map((who, i) => {
+    const P = actor(character(who, who === "blake" ? 0x2f8f83 : 0x3a3f46), HQ.localToWorld(new V3(-5 + i * 10, 9.1, 10.6)), 0);
+    P.name = who; nameTag(P.c, who === "blake" ? "Blake" : "Mark", who === "blake" ? "#2f8f83" : "#9aa3ab");
+    return P;
+  });
 
   // ---------------------------------------------------------------- errands: an agent brings an approval to the owner's office
   // A pending approval sends the agent whose task it is (JARVIS for his own) out of its office, round the plaza, up the
@@ -1322,7 +1407,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   // the card until the approval is decided, then goes back the same way. Driven by the real approval records.
   const errands = new Map();
   const FOOT = new V3(0, 0, -15), STEP_TOP = new V3(0, 3.45, -23), FRONT_DOOR = new V3(0, 4.49, -29.1), LOBBY = new V3(0, 4.49, -31.5);
-  const LIFT_TOP = HQ.localToWorld(new V3(-6, 21.42, -5.4));
+  const LIFT_TOP = HQ.localToWorld(new V3(-7.6, 21.42, -3.4));
   // Where a visitor stands: beside the desk, in the owner's view, not behind his screen; two spots, then they queue.
   const ASK_SPOTS = [[3.0, 2.0], [-3.0, 2.0], [3.6, 4.6], [-3.6, 4.6]].map(([x, z]) => HQ.localToWorld(new V3(x, 21.42, z)));
   const askSpot = () => ASK_SPOTS[[...errands.values()].filter((E) => E.spot != null).length % ASK_SPOTS.length];
@@ -1721,6 +1806,38 @@ function buildWorld(THREE, addons, renderer, opts) {
     }
   }
 
+  // ---------------------------------------------------------------- the race's sound
+  // Engine note from the nearest car, synthesised in the browser (no audio files): louder as the view comes within
+  // 90 m of the track, pitch following the car's speed. Off in Settings, and silent until the page has been touched
+  // (browsers allow sound only after that).
+  let audio = null, soundOn = true;
+  function engineStart() {
+    if (audio || !soundOn) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      const low = ctx.createBiquadFilter(); low.type = "lowpass"; low.frequency.value = 900;
+      const o1 = ctx.createOscillator(); o1.type = "sawtooth"; o1.frequency.value = 70;
+      const o2 = ctx.createOscillator(); o2.type = "square"; o2.frequency.value = 141;
+      const g2 = ctx.createGain(); g2.gain.value = 0.25;
+      o1.connect(low); o2.connect(g2); g2.connect(low); low.connect(gain); gain.connect(ctx.destination);
+      o1.start(); o2.start();
+      audio = { ctx, gain, o1, o2, level: 0 };
+    } catch { audio = null; }
+  }
+  for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, engineStart, { passive: true });
+  function engine(cs, dt) {
+    if (!audio) return;
+    let best = 1e9, car = null;
+    for (const c of cs.list) { if (!c.pos) continue; const d = camera.position.distanceTo(c.pos); if (d < best) { best = d; car = c; } }
+    const target = soundOn && car && best < 90 ? Math.pow(1 - best / 90, 2) * 0.22 : 0;
+    audio.level = damp(audio.level, target, 4, dt);
+    const t = audio.ctx.currentTime;
+    audio.gain.gain.setTargetAtTime(audio.level, t, 0.05);
+    if (car) { const f = 55 + car.v * 2.2; audio.o1.frequency.setTargetAtTime(f, t, 0.08); audio.o2.frequency.setTargetAtTime(f * 2.01, t, 0.08); }
+  }
+  function setSound(on) { soundOn = !!on; if (!on && audio) audio.gain.gain.setTargetAtTime(0, audio.ctx.currentTime, 0.05); }
+
   // ---------------------------------------------------------------- the frame loop
   const damp = (a, b, lambda, dt) => a + (b - a) * (1 - Math.exp(-lambda * dt));
   const clock = new THREE.Clock();
@@ -1801,8 +1918,10 @@ function buildWorld(THREE, addons, renderer, opts) {
       }
       P.helpers = P.helpers.filter((h) => !(h.gone && h.grow < 0.02));
     }
+    const far = camera.position.distanceTo(controls.target) > 90;
     for (let i = actors.length - 1; i >= 0; i--) {
       const A = actors[i];
+      if (A.c.tag) A.c.tag.material.opacity = far ? 0 : Math.max(0, Math.min(1, (70 - camera.position.distanceTo(A.c.root.position)) / 25));
       stepActor(A, dt, time);
       if (A.gone && A.grow < 0.02) { scene3.remove(A.c.root); actors.splice(i, 1); }
     }
@@ -1825,21 +1944,32 @@ function buildWorld(THREE, addons, renderer, opts) {
       poolRipple.offset.x += dt * 0.02;
       turn.rotation.y += dt * 0.08;
       const cs = world.cars;
-      const order = [...cs.list].sort((a, b) => a.u - b.u);
+      const gapTo = (a, b) => ((((b.u - a.u) % 1) + 1) % 1) * cs.len;   // metres from a to b along the lap
       cs.list.forEach((c, i) => {
-        // Look ahead for the next corner, brake for it, and don't drive through the car in front.
+        // Look ahead for the next corner and brake for it; stay behind the car in front in the same lane, or, if
+        // this car is quicker and the other lane is clear, pull out and pass, then tuck back in.
         const idx = Math.floor(((c.u + 12 / cs.len) % 1) * cs.bend.length) % cs.bend.length;
+        const straight = cs.bend[idx] < 0.08;
         let want = c.top * (1 - Math.min(0.68, cs.bend[idx] * 1.9));
-        const k = order.indexOf(c), ahead = order[(k + 1) % order.length];
-        const gap = ((((ahead.u - c.u) % 1) + 1) % 1) * cs.len;
-        if (ahead !== c && gap < 20) want = Math.min(want, ahead.v * (gap < 11 ? 0.85 : 0.99));
+        let ahead = null, gap = 1e9;
+        for (const o of cs.list) { if (o === c) continue; const g = gapTo(c, o); if (g < gap && Math.abs(o.lane - c.lane) < 1.6) { gap = g; ahead = o; } }
+        if (ahead && gap < 20) {
+          const clear = cs.list.every((o) => o === c || Math.abs(o.lane - (c.lane > 0 ? -2.8 : 2.8)) > 1.6 || gapTo(c, o) > 16 && gapTo(o, c) > 10);
+          if (!c.passing && c.top > ahead.top + 2 && straight && clear) { c.passing = ahead; c.want = c.lane > 0 ? -2.8 : 2.8; }
+          else want = Math.min(want, ahead.v * (gap < 11 ? 0.85 : 0.99));
+        }
+        if (c.passing && gapTo(c.passing, c) < cs.len / 2 && gapTo(c.passing, c) > 9) { c.passing = null; c.want = 0; }   // clear ahead: back to the line
+        c.lane = damp(c.lane, c.want, 1.6, dt);
         c.v = damp(c.v, want, want < c.v ? 2.4 : 0.9, dt);
         c.u = (c.u + (c.v * dt) / cs.len) % 1;
         const p = world.curve.getPointAt(c.u), t = world.curve.getTangentAt(c.u);
+        p.x += -t.z * c.lane; p.z += t.x * c.lane;
         q.setFromAxisAngle(up, Math.atan2(-t.z, t.x));
         m4.compose(p, q, one); cs.mesh.setMatrixAt(i, m4);
+        c.pos = p;
       });
       cs.mesh.instanceMatrix.needsUpdate = true;
+      engine(cs, dt);
     }
 
     if (composer) composer.render(); else renderer.render(scene3, camera);
@@ -1881,6 +2011,13 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   renderer.setAnimationLoop(frame);
   // For inspecting the view from the browser console: snap() renders one frame and returns it as an image.
-  stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
-  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on, pause: (on) => { paused = !!on; } };
+  // lineup(): stand everyone in a row on the forecourt for a picture; returns a function that puts them back.
+  function lineup() {
+    const saved = actors.map((A) => ({ A, pos: A.c.root.position.clone(), face: A.face, sitting: A.sitting, path: A.path, wait: A.wait }));
+    const n = actors.length;
+    actors.forEach((A, i) => { A.path = []; A.sitting = false; A.wait = 0; A.c.root.position.set((i - (n - 1) / 2) * 1.5, 0, -4); A.face = 0; A.c.root.rotation.y = 0; });
+    return () => saved.forEach((s) => { s.A.c.root.position.copy(s.pos); s.A.face = s.face; s.A.sitting = s.sitting; s.A.path = s.path; s.A.wait = s.wait; });
+  }
+  stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, lineup, personas, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on, pause: (on) => { paused = !!on; }, setSound };
 }
