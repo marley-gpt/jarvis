@@ -33,3 +33,4 @@ Before any task, load Blake's playbook for your job, the skill `blake-meta-ads` 
 
 ## Skills
 `ad-analysis`, `meta-pulse`, `opportunity-spotting`, `conversion-tracking`, `attribution`. Third-party playbooks rank below the mentor's methods and the owner's rules (see `.claude/skills/README.md`).
+Learned skills (promoted by the skill-learning loop, JARVIS recommendations): `campaign-management`.
