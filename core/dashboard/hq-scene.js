@@ -1613,7 +1613,11 @@ function buildWorld(THREE, addons, renderer, opts) {
   const FOOT = new V3(0, 0, -15), STEP_TOP = new V3(0, 3.45, -23), FRONT_DOOR = new V3(0, 4.49, -29.1), LOBBY = new V3(0, 4.49, -31.5);
   const LIFT_TOP = HQ.localToWorld(new V3(-7.6, 21.42, -3.4));
   // Where a visitor stands: beside the desk, in the owner's view, not behind his screen; two spots, then they queue.
-  const ASK_SPOTS = [[3.0, 2.0], [-3.0, 2.0], [3.6, 4.6], [-3.6, 4.6]].map(([x, z]) => HQ.localToWorld(new V3(x, 21.42, z)));
+  const ASK_LOCAL = [[3.0, 2.0], [-3.0, 2.0], [3.6, 4.6], [-3.6, 4.6]];
+  const ASK_SPOTS = ASK_LOCAL.map(([x, z]) => HQ.localToWorld(new V3(x, 21.42, z)));
+  // From the lift door the visitor goes past the sofa, up the side of the desk and round its front to the spot, never
+  // across the desk or through the owner's chair (and back the same way).
+  const askPath = (spot) => { const [sx, sz] = ASK_LOCAL[ASK_SPOTS.indexOf(spot)]; return [[-3.8, -3.4], [-3.8, 4.2], [sx, 4.2], [sx, sz]].map(([x, z]) => HQ.localToWorld(new V3(x, 21.42, z))); };
   const askSpot = () => ASK_SPOTS[[...errands.values()].filter((E) => E.spot != null).length % ASK_SPOTS.length];
   const JARVIS_LIFT = HQ.localToWorld(new V3(-6, 14.3, 7.4));
   function errandStart(id, agent) {
@@ -1625,7 +1629,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     E.spot = askSpot();
     errands.set(id, E);
     A.errand = E; A.leisure = null; A.away = false; A.activity = null;
-    const lift = (A) => { A.wait = 1.6; A.c.root.position.copy(LIFT_TOP); walk(A, [E.spot], (A) => { A.face = Math.atan2(ceoSeat.pos.x - E.spot.x, ceoSeat.pos.z - E.spot.z); E.stage = "asking"; }); };
+    const lift = (A) => { A.wait = 1.6; A.c.root.position.copy(LIFT_TOP); walk(A, askPath(E.spot), (A) => { A.face = Math.atan2(ceoSeat.pos.x - E.spot.x, ceoSeat.pos.z - E.spot.z); E.stage = "asking"; }); };
     if (home) walk(A, [home.door.clone(), ...route(home.door, FOOT), STEP_TOP, FRONT_DOOR, LOBBY], lift);
     else walk(A, [JARVIS_LIFT], lift);
   }
@@ -1634,7 +1638,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     errands.delete(id);
     const { A, home } = E; E.stage = "back";
     const done = (A) => { A.errand = null; if (home) goToDesk(A, home); else { A.seat = jarvisSeat; A.face = Math.PI; A.sitting = true; } };
-    walk(A, [LIFT_TOP], (A) => {
+    walk(A, [...askPath(E.spot).slice(0, -1).reverse(), LIFT_TOP], (A) => {
       A.wait = 1.6;
       if (home) { A.c.root.position.copy(LOBBY); walk(A, [FRONT_DOOR, STEP_TOP, FOOT, ...route(FOOT, home.door), home.door.clone()], done); }
       else { A.c.root.position.copy(JARVIS_LIFT); walk(A, [jarvisSeat.pos.clone()], done); }
@@ -2022,7 +2026,7 @@ function buildWorld(THREE, addons, renderer, opts) {
         const moved = push(A, b.x, b.z, 1.0, true);
         if (moved) { b.x -= moved[0]; b.z -= moved[1]; }
       }
-      for (const S of actors) if (!S.path.length && S !== A && S.grow > 0.5 && Math.abs(S.c.root.position.y - a.y) < 2) push(A, S.c.root.position.x, S.c.root.position.z, 1.0, false);
+      for (const S of actors) if (!S.path.length && S !== A && S.grow > 0.5 && Math.abs(S.c.root.position.y - a.y) < 2) push(A, S.c.root.position.x, S.c.root.position.z, S === boss ? 1.6 : 1.0, false);
       if (me.on && Math.abs(me.pos.y - a.y) < 2) push(A, me.pos.x, me.pos.z, 1.2, false);
     }
   }
