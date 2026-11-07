@@ -419,8 +419,8 @@ function buildWorld(THREE, addons, renderer, opts) {
         const d = t.image.data, half = d instanceof Uint16Array, F = half ? THREE.DataUtils.fromHalfFloat : (v) => v, G = half ? THREE.DataUtils.toHalfFloat : (v) => v;
         let sum = 0;
         for (let i = 0; i < d.length; i += 4) sum += 0.2126 * F(d[i]) + 0.7152 * F(d[i + 1]) + 0.0722 * F(d[i + 2]);
-        const k = 0.42 / Math.max(1e-4, sum / (d.length / 4));
-        for (let i = 0; i < d.length; i++) if ((i & 3) !== 3) d[i] = G(Math.min(16, F(d[i]) * k));
+        const k = 0.36 / Math.max(1e-4, sum / (d.length / 4));
+        for (let i = 0; i < d.length; i++) if ((i & 3) !== 3) d[i] = G(Math.min(8, F(d[i]) * k));
         t.needsUpdate = true;
         hdrCache[name] = pmrem.fromEquirectangular(t).texture; t.dispose();
         if (hdrWanted === name) scene3.environment = hdrCache[name];
@@ -485,7 +485,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     sun.color.copy(mixC(a.sun[0], b.sun[0], t)); sun.intensity = L(a.sun[1], b.sun[1]);
     sun.position.set(L(a.sun[2], b.sun[2]), L(a.sun[3], b.sun[3]), L(a.sun[4], b.sun[4]));
     sunDir.copy(sun.position).normalize(); shadowExt = 0;   // the shadow frame re-aims at the next frame
-    hemi.color.copy(mixC(a.hemi[0], b.hemi[0], t)); hemi.groundColor.copy(mixC(a.hemi[1], b.hemi[1], t)); hemi.intensity = L(a.hemi[2], b.hemi[2]);
+    hemi.color.copy(mixC(a.hemi[0], b.hemi[0], t)); hemi.groundColor.copy(mixC(a.hemi[1], b.hemi[1], t)); hemi.intensity = L(a.hemi[2], b.hemi[2]) * 0.3;   // the sky's environment map carries most of the ambient light now
     const u = sky.material.uniforms;
     u.top.value.copy(mixC(a.sky[0], b.sky[0], t)); u.mid.value.copy(mixC(a.sky[1], b.sky[1], t)); u.low.value.copy(mixC(a.sky[2], b.sky[2], t));
     u.sunGlow.value = L(a.sky[3], b.sky[3]); u.sunDir.value.copy(sun.position).normalize();
