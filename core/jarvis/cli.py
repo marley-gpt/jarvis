@@ -614,6 +614,26 @@ def cmd_telegram_ring(conn, args):
     out("Calling the owner: " + telegram.ring())
 
 
+def cmd_call_serve(conn, args):
+    from . import call
+    call.serve(port=args.port)
+
+
+def cmd_call_link(conn, args):
+    from . import call
+    out(call.link())
+
+
+def cmd_call_ring(conn, args):
+    from . import call
+    try:
+        call.ring(args.say or "", args.phone)
+    except (RuntimeError, telegram.TelegramError) as exc:
+        out(f"Couldn't ring: {exc}")
+        return 1
+    out("Ringing the owner: the Answer button is on their phone.")
+
+
 PRIVATE_SKILL_PREFIXES = ("blake-",)
 
 
@@ -1228,6 +1248,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--voice", action="store_true", help="also send it as a voice note in JARVIS's voice")
     s.set_defaults(fn=cmd_telegram_send)
     tg.add_parser("ring", help="test call: ring the owner's Telegram (CallMeBot, free)").set_defaults(fn=cmd_telegram_ring)
+    cl = sub.add_parser("call", help="live voice calls with JARVIS from the phone (our own code, no call service)"
+                        ).add_subparsers(dest="sub", required=True)
+    s = cl.add_parser("serve", help="run the call server (the app starts it in the background)")
+    s.add_argument("--port", type=int, default=8770)
+    s.set_defaults(fn=cmd_call_serve)
+    cl.add_parser("link", help="print the call link, starting the server and tunnel if needed").set_defaults(
+        fn=cmd_call_link)
+    s = cl.add_parser("ring", help="JARVIS calls the owner: Telegram message with an Answer button")
+    s.add_argument("--say", help="what JARVIS opens the call with")
+    s.add_argument("--phone", action="store_true", help="also ring their phone through Telegram (CallMeBot)")
+    s.set_defaults(fn=cmd_call_ring)
     s = sub.add_parser("alert", help="push a problem to the owner's phone; --urgent adds a voice note and a call")
     s.add_argument("text")
     s.add_argument("--urgent", action="store_true", help="kill rule hit, store down, money at risk: ring the owner")
