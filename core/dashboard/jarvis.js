@@ -64,13 +64,19 @@
 
   let saidThisTurn = false, failedTurn = false, voiceTurn = false, listeningFor = "request";
   // images: [{ media_type: "image/png", data: "<base64>" , url?: "<object URL for showing it>" }]
-  J.send = async (text, images) => {
+  // files: [{ name: "brief.pdf", data: "<base64>" }], any kind but programs, saved in the brain for JARVIS to read.
+  // While JARVIS is busy the message waits its turn on the server ("queued").
+  J.send = async (text, images, files) => {
     text = (text || "").trim();
-    images = images || [];
-    if (!text && !images.length) return;
+    images = images || []; files = files || [];
+    if (!text && !images.length && !files.length) return;
     saidThisTurn = false; failedTurn = false; voiceTurn = false;
-    J.emit("owner", { text, images });
-    try { await post("/api/chat", { text, images: images.map(({ media_type, data }) => ({ media_type, data })) }); }
+    J.emit("owner", { text, images, files });
+    try {
+      const r = await post("/api/chat", { text, images: images.map(({ media_type, data }) => ({ media_type, data })), files });
+      if (r.queued) J.emit("queued", r);
+      if (r.answered) J.emit("notice", { text: `A${r.answered.approval || ""} ${r.answered.status}` });
+    }
     catch (e) { failedTurn = true; J.emit("error", { text: e.message }); }
   };
   // Read a pasted, dropped or chosen image file into what J.send expects.
@@ -114,9 +120,10 @@
       // Replies stream in a sentence at a time (say_chunk) and are spoken as they arrive;
       // "say" then carries the whole paragraph for display, already spoken if it was streamed.
       case "say_chunk": saidThisTurn = true; J.emit("say_chunk", e); say(e.text); return;
-      case "say": saidThisTurn = true; J.emit("say", e); if (!e.streamed) say(e.text); return;
+      // A slash command's output (/context, /cost …) is shown, not read aloud.
+      case "say": saidThisTurn = true; J.emit("say", e); if (!e.streamed && !e.slash) say(e.text); return;
       case "reply":
-        if (!saidThisTurn && e.text && !e.is_error) { J.emit("say", { text: e.text }); say(e.text); }
+        if (!saidThisTurn && e.text && !e.is_error) { J.emit("say", { text: e.text, slash: e.slash }); if (!e.slash) say(e.text); }
         if (e.is_error) {
           failedTurn = true;
           J.emit("error", { text: e.text || "JARVIS hit an error.", login: !!e.login });
@@ -239,7 +246,7 @@
     setSpeaking(false);
   }
   J.cancelSpeech = cancelSpeech;
-  J.spoken = (t) => t.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+  J.spoken = (t) => t.replace(/\[\[[^\]]*\]\]/g, " ").replace(/```[\s\S]*?```/g, " ").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/[*_#>|]/g, "").replace(/\bT(\d+)\b/g, "task $1").replace(/A\$/g, "A dollars ").replace(/\s+/g, " ").trim();
   function chunks(text) {
     const out = [];
@@ -286,6 +293,7 @@
     return wavPromise.then((url) => new Promise((resolve, reject) => {
       if (my !== gen) { URL.revokeObjectURL(url); return resolve(); }
       const a = audio = new Audio(url);
+      tapLevel(a);
       let raf = 0, settled = false;
       const done = (ok) => {
         if (settled) return; settled = true;
@@ -307,6 +315,48 @@
       a.play().catch(() => done(false));
     }));
   }
+  // The voice's loudness, 0..1, for the orb (T86). Kokoro audio runs through an analyser; the browser's own voice
+  // can't be measured, so J.level() gives a gentle synthetic pulse while it speaks.
+  // Audio routed into a suspended context plays silently, so the context is only started by a tap or key press
+  // (browsers allow nothing else), and a sentence is only routed through it once it is running.
+  let levelCtx = null, analyser = null, levelBuf = null, freqBuf = null, tapped = null;
+  const unlockAudio = () => {
+    try {
+      levelCtx = levelCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (levelCtx.state === "suspended") levelCtx.resume().catch(() => {});
+    } catch (e) { /* no Web Audio */ }
+  };
+  ["pointerdown", "keydown"].forEach((t) => document.addEventListener(t, unlockAudio, { capture: true, passive: true }));
+  function tapLevel(a) {
+    tapped = null;
+    try {
+      if (!levelCtx || levelCtx.state !== "running") return;
+      if (!analyser) {
+        analyser = levelCtx.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
+        analyser.connect(levelCtx.destination);
+        levelBuf = new Uint8Array(analyser.fftSize); freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      }
+      levelCtx.createMediaElementSource(a).connect(analyser);
+      tapped = a;
+    } catch (e) { /* no Web Audio: the orb falls back to the synthetic pulse */ }
+  }
+  // The voice's spectrum (0..255 per band, low to high), or null when it can't be measured.
+  J.spectrum = () => {
+    if (!J.speaking || !audio || audio !== tapped || audio.paused) return null;
+    analyser.getByteFrequencyData(freqBuf);
+    return freqBuf;
+  };
+  J.level = () => {
+    if (!J.speaking) return 0;
+    if (audio && audio === tapped && !audio.paused) {
+      analyser.getByteTimeDomainData(levelBuf);
+      let sum = 0;
+      for (let i = 0; i < levelBuf.length; i++) { const v = (levelBuf[i] - 128) / 128; sum += v * v; }
+      return Math.min(1, Math.sqrt(sum / levelBuf.length) * 4);
+    }
+    const t = performance.now() / 1000;
+    return 0.35 + 0.25 * Math.abs(Math.sin(t * 7.3) * Math.sin(t * 2.1));
+  };
   function playBrowser(clean) {
     return new Promise((resolve) => {
       if (!window.speechSynthesis) return resolve();

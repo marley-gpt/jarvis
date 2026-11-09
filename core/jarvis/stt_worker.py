@@ -27,14 +27,19 @@ def pcm(wav_b64: str):
 def main() -> None:
     from faster_whisper import WhisperModel
 
-    model = WhisperModel(sys.argv[1] if len(sys.argv) > 1 else "small.en", device="cpu", compute_type="int8")
+    import numpy as np
+
+    # base.en: about 0.85 s for a 5 s line on the i5-14400 CPU, against 2.9 s for small.en (T100). The phone's
+    # page already cut the speech out, so Whisper's own VAD pass and timestamps only cost time.
+    model = WhisperModel(sys.argv[1] if len(sys.argv) > 1 else "base.en", device="cpu", compute_type="int8")
+    model.transcribe(np.zeros(16000, dtype="float32"), language="en", beam_size=1)  # first pass is slow: do it now
     out = sys.stdout
     out.write(json.dumps({"ready": True}) + "\n")
     out.flush()
     for line in sys.stdin:
         try:
-            segments, _ = model.transcribe(pcm(json.loads(line)["wav"]), language="en", beam_size=1, vad_filter=True,
-                                           condition_on_previous_text=False)
+            segments, _ = model.transcribe(pcm(json.loads(line)["wav"]), language="en", beam_size=1,
+                                           condition_on_previous_text=False, without_timestamps=True)
             reply = {"ok": True, "text": " ".join(s.text.strip() for s in segments).strip()}
         except Exception as exc:  # report and keep serving
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

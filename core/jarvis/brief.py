@@ -26,6 +26,17 @@ def session_brief(conn, max_tasks: int = 8, session_id: str | None = None) -> st
         out.append("\n## Open tasks")
         out += [task_line(t) for t in tasks]
 
+    try:
+        from . import work
+        resumed = {r["id"] for r in work.resume()}
+        live = [r for r in work.listing(10) if r["status"] in ("running", "failed")]
+    except Exception:  # the brief must never fail because a worker couldn't start
+        resumed, live = set(), []
+    if live:
+        out.append("\n## Workers (`bin/jarvis work list`; they survive restarts)")
+        out += [f"- W{r['id']} [{'resumed' if r['id'] in resumed else r['status']}] {r['task']} {r['agent']}: "
+                f"{r['brief'][:90]}" for r in live]
+
     approvals = conn.execute("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id").fetchall()
     if approvals:
         out.append("\n## Waiting for the user's approval")
@@ -55,6 +66,14 @@ def session_brief(conn, max_tasks: int = 8, session_id: str | None = None) -> st
         + (f", {st['needs_review']} need review" if st["needs_review"] else "")
         + f". Paid AI/API spend this month: A${spent:.2f} of A${budget:.2f}."
     )
+    try:  # T101: what runs while the owner is away, and today's sales
+        from . import routines, sales_watch
+        out.append(routines.status_line(routines.status(check_scheduler=False)) + ".")
+        out.append(sales_watch.status_line(conn) + ".")
+        from . import sync
+        out.append(sync.status_line() + ". One-page digest: brain/ESSENTIALS.md.")
+    except Exception:  # the brief must never fail on a status line
+        pass
     if st["total"] == 0:
         out.append("Brain is empty: run `bin/jarvis init` to create folders and seed business knowledge.")
     return "\n".join(out)

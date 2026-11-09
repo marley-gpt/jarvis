@@ -34,6 +34,47 @@ def create(conn: sqlite3.Connection, label: str = "manual") -> Path:
     return dest
 
 
+# What a machine move leaves behind: venvs, voice models, tools and reel videos are re-downloaded on the
+# new machine (scripts/laptop-setup.ps1), and backups/scratch/logs are local. Secrets go in their own zip.
+BUNDLE_SKIP_DIRS = {"backups", "scratch", "logs", "tools", "secrets", "tts/venv", "tts/clone-venv",
+                    "tts/design-venv", "tts/models", "tts/piper", "tts/out"}
+BUNDLE_SKIP_SUFFIXES = {".mp4", ".part", ".webm", ".mkv", ".mov"}
+BUNDLE_SKIP_FILES = {"jarvis.db", "jarvis.db-wal", "jarvis.db-shm", "STANDBY-LAPTOP.txt"}
+
+
+def bundle(conn, dest_dir: Path, with_secrets: bool = False) -> list[Path]:
+    """The whole brain for another machine (T105): a consistent jarvis.db snapshot plus every file except
+    what BUNDLE_SKIP_* lists. Returns the zip, and a separate secrets zip when asked."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    home = paths.home()
+    dest = dest_dir / f"jarvis-brain-{stamp}.zip"
+    with tempfile.TemporaryDirectory() as tmp:
+        snap = Path(tmp) / "jarvis.db"
+        target = sqlite3.connect(snap)
+        conn.backup(target)
+        target.close()
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(snap, "jarvis.db")
+            for f in sorted(home.rglob("*")):
+                rel = f.relative_to(home).as_posix()
+                if not f.is_file() or f.name in BUNDLE_SKIP_FILES or f.suffix.lower() in BUNDLE_SKIP_SUFFIXES:
+                    continue
+                if any(rel == d or rel.startswith(d + "/") for d in BUNDLE_SKIP_DIRS):
+                    continue
+                zf.write(f, rel)
+    made = [dest]
+    secrets = home / "secrets"
+    if with_secrets and secrets.is_dir():
+        sdest = dest_dir / f"jarvis-secrets-{stamp}.zip"
+        with zipfile.ZipFile(sdest, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in sorted(secrets.rglob("*")):
+                if f.is_file():
+                    zf.write(f, f.relative_to(home).as_posix())
+        made.append(sdest)
+    return made
+
+
 def prune() -> list[Path]:
     keep = int(paths.config()["backup_keep"])
     found = sorted(paths.backups_dir().glob("jarvis-*.zip"))

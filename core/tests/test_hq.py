@@ -137,7 +137,7 @@ class HQRoutesTest(BrainTest):
         status, html = self.get("/hq")
         self.assertEqual(status, 200)
         self.assertIn(self.server.token.encode(), html)
-        self.assertEqual(self.get("/")[1], html)  # the app is the main page
+        self.assertIn(b"/stage.js", self.get("/")[1])  # the speaking stage is the main page (T86)
         status, js = self.get("/hq.js")
         self.assertEqual(status, 200)
         self.assertIn(b"const Feed", js)

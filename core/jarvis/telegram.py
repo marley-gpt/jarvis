@@ -40,7 +40,7 @@ from pathlib import Path
 
 from urllib.parse import urlencode
 
-from . import db, jobs, media, paths, records
+from . import db, jobs, media, memory, paths, records
 
 API = "https://api.telegram.org"
 CALLMEBOT = "https://api.callmebot.com/start.php"
@@ -58,11 +58,11 @@ ACTIONS = {
 HUNT_JOB = ("Product hunt: follow the desktop-jobs procedure in the master-key-tools skill, with Blake's method and the "
             "owner's product rules, then send the best one or two.")
 BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the store": "/store", "➕ New product": "/product",
-           "🔎 Product hunt": "/hunt"}
-KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}], [{"text": "🔎 Product hunt"}]],
+           "🔎 Product hunt": "/hunt", "🔄 Reset JARVIS": "/reset"}
+KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}], [{"text": "🔎 Product hunt"}, {"text": "🔄 Reset JARVIS"}]],
             "resize_keyboard": True, "is_persistent": True}
 COMMANDS = [("today", "Today at a glance"), ("brief", "Brief me now"), ("store", "Check the store"),
-            ("product", "Start a new product"), ("hunt", "Product hunt on the PC"), ("jobs", "Jobs on the PC"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("new", "Fresh conversation")]
+            ("product", "Start a new product"), ("hunt", "Product hunt on the PC"), ("jobs", "Jobs on the PC"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("reset", "JARVIS is stuck: stop and carry on"), ("new", "Fresh conversation")]
 
 
 class TelegramError(Exception):
@@ -154,6 +154,18 @@ def send(text: str, voice: bytes | None = None, chat_id=None, markup: dict | Non
         if markup and n == len(parts) - 1:
             params["reply_markup"] = markup
         call("sendMessage", params)
+
+
+def send_photo(path, caption: str = "", chat_id=None) -> None:
+    """Send the owner a picture (PNG/JPG) with a short caption (Telegram allows 1024 characters)."""
+    chat = chat_id or settings().get("chat_id")
+    if not chat:
+        raise TelegramError("Not paired yet: send the bot the code from `bin/jarvis telegram pair`.")
+    path = Path(path)
+    params = {"chat_id": chat}
+    if caption:
+        params["caption"] = caption[:1024]
+    call("sendPhoto", params, file=("photo", path.name, path.read_bytes()))
 
 
 def buttons(rows: list[list[tuple[str, str]]]) -> dict:
@@ -350,7 +362,8 @@ class Bridge:
         self.store_failures = 0
 
     def enabled(self) -> bool:
-        return bool(settings().get("bot_token"))
+        # A standby machine never polls the bot, or the owner would get two answers (T105).
+        return bool(settings().get("bot_token")) and not paths.standby()
 
     def info(self) -> dict:
         s = settings()
@@ -465,6 +478,9 @@ class Bridge:
         if text == "/stop":
             self.runner.stop()
             return self._reply(chat, "Stopped.")
+        if text == "/reset":  # the button for when he's stuck: end the turn; anything waiting is answered next
+            self.runner.stop()
+            return self._reply(chat, "Reset, sir. Whatever I was stuck on is stopped, and I'm back with you.", KEYBOARD)
         if text == "/new":
             if self.runner.busy:
                 return self._reply(chat, "I'm mid-task, sir. Send /stop first.")
@@ -519,7 +535,8 @@ class Bridge:
 
     def _attachment(self, chat, msg: dict) -> tuple[str, list]:
         """Videos, video messages, GIFs and files: saved to brain/files/telegram/<day>/. A video's speech is
-        transcribed and three frames go to JARVIS as images; an image sent as a file goes as an image."""
+        transcribed and four frames go to JARVIS as images and into <name>-frames/; once its memory entry
+        is saved the video is deleted (owner rule M-261109-7767). An image sent as a file goes as an image."""
         kind = next((k for k in ("video", "video_note", "animation", "document") if msg.get(k)), None)
         if not kind:
             return "", []
@@ -541,8 +558,34 @@ class Bridge:
             heard = media.transcribe(path)
         except media.MediaError:
             heard = ""
-        frames = video_frames(path)
-        return (f"(The owner sent a video, saved at {paths.rel(path)}. Frames attached above. "
+        frames = video_frames(path, count=media.KEEP_FRAMES)
+        kept = path.with_name(path.stem + "-frames")
+        if frames:
+            kept.mkdir(exist_ok=True)
+        for i, frame in enumerate(frames, 1):
+            (kept / f"frame-{i}.jpg").write_bytes(base64.b64decode(frame["data"]))
+        caption = (msg.get("caption") or "").strip()
+        body = "\n\n".join(filter(None, [
+            f"**Sent on Telegram:** {paths.now()[:16]} ({kind}, {path.name})",
+            f"**Owner's caption:** {caption}" if caption else "",
+            f"**Transcript** (local Whisper, may mishear names):\n{heard or '(no speech)'}",
+            f"**Frames:** {paths.rel(kept)} ({len(frames)} key frames; the video itself was deleted)." if frames else "",
+        ]))
+        conn = db.connect()
+        try:
+            entry, _ = memory.remember(conn, title=f"Video from the owner: {(caption or path.stem).splitlines()[0][:70]}",
+                                       body=body + "\n", category="creative-inspiration", provenance="evidence",
+                                       tags=["video", "owner-sent", "telegram"], confidence="confirmed",
+                                       source="owner's Telegram", force=True)
+        except Exception:  # without a memory entry the video is the only record: keep it
+            return (f"(The owner sent a video, saved at {paths.rel(path)}. Frames attached above. "
+                    f"What's said in it: {heard or 'no speech'})"), frames
+        finally:
+            conn.close()
+        path.unlink(missing_ok=True)
+        return (f"(The owner sent a video. Its transcript is saved as {entry.id}"
+                + (f" with {len(frames)} frames in {paths.rel(kept)}" if frames else "")
+                + "; the video was deleted. Frames attached above. "
                 f"What's said in it: {heard or 'no speech'})"), frames
 
     def _ask(self, chat, text: str, images=None, voice=False, shown=None) -> None:

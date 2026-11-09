@@ -34,16 +34,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brief, db, hq, journal, live, memory, paths, readiness, records, skills, team, telegram, tts, wakeword
+from . import activity, brain_graph, brief, control, db, hq, journal, live, memory, paths, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
-# The HQ app is the main view (T54 revamp); the office, console and earlier versions stay available.
-PAGES = {"/": "hq.html", "/hq": "hq.html", "/console": "console.html", "/office": "office.html", "/chat": "chat.html",
-         "/classic": "index.html"}
+# The main view (T97) is the speaking stage (T86: the orb and the cards of what JARVIS is saying) in front of the
+# brain graph (T95); each still has its own page, and the 3D HQ (T54), office, console and earlier versions stay.
+PAGES = {"/": "app.html", "/app": "app.html", "/stage": "stage.html", "/hq": "hq.html", "/console": "console.html",
+         "/office": "office.html", "/chat": "chat.html", "/classic": "index.html", "/brain": "brain.html"}
 ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
+          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+          "/swarm.js": ("swarm.js", "text/javascript; charset=utf-8"),
+          "/control.js": ("control.js", "text/javascript; charset=utf-8"),
           "/live.js": ("live.js", "text/javascript; charset=utf-8"),
           "/hq.js": ("hq.js", "text/javascript; charset=utf-8"),
-          "/hq-scene.js": ("hq-scene.js", "text/javascript; charset=utf-8")}
+          "/hq-scene.js": ("hq-scene.js", "text/javascript; charset=utf-8"),
+          "/stage.js": ("stage.js", "text/javascript; charset=utf-8"),
+          "/brain.js": ("brain.js", "text/javascript; charset=utf-8")}
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -79,7 +85,7 @@ VOICE_PROMPT = (
     "Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
     "no lists, no markdown. Lead with the answer, then the one thing that matters next. "
     "When you hand work to specialists, say plainly who is doing what. Put detail in deliverable files, "
-    "not in the spoken reply. Never invent figures or results. Consequential actions such as spending, "
+    "not in the spoken reply. The screen shows what you mention as you say it: say record ids such as T12, A3 or D7 and real numbers plainly, and you may end a sentence with one silent screen hint in double square brackets, for example [[count 412 applications]], [[list first; second; third]], [[show T12 A3]], [[date Thursday 3pm supplier call]], [[file brain/work/x.md]] or, when you propose taking a job on, [[case the proposal; reason one; reason two]]; hints are shown, never spoken. Never invent figures or results. Consequential actions such as spending, "
     "launching or changing ads, prices or the live store still need the owner's approval first."
 )
 
@@ -259,7 +265,8 @@ def _summary(tool: str, data: dict) -> str:
 
 IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
 MAX_IMAGES, MAX_IMAGE_BYTES = 4, 5 * 1024 * 1024
-MAX_BODY = MAX_IMAGES * MAX_IMAGE_BYTES * 4 // 3 + 64 * 1024  # base64 images plus the text
+# base64 images and attached files, plus the text
+MAX_BODY = (MAX_IMAGES * MAX_IMAGE_BYTES + control.MAX_FILES * control.MAX_FILE_BYTES) * 4 // 3 + 64 * 1024
 # Where streamed text is cut into sentences to speak: end punctuation followed by a space, or a line break.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 CLAUSE_END = re.compile(r"(?<=[,;:])\s+")   # the opening clause goes to the voice early, so the first word comes sooner
@@ -311,6 +318,13 @@ class Runner:
         self.last_output: float | None = None  # when Claude Code last said anything, while a reply is running
         self.hung = False      # the watchdog ended a frozen reply
         self.failed = ""       # Claude Code ended the turn with an error and no answer
+        # The control centre (T98): permission prompts answered on the page, the phone or by voice; messages that
+        # arrive while JARVIS is busy, answered in order; the steps he has run; the commands and skills he has.
+        self.permissions = control.Permissions(hub)
+        self.queue: list[dict] = []
+        self.steps: list[dict] = []
+        self.commands: dict = {"slash": [], "skills": []}
+        self.slash = False     # this turn is a slash command: its output is shown, not spoken
 
     @property
     def busy(self) -> bool:
@@ -346,23 +360,77 @@ class Runner:
                 pass
         threading.Thread(target=go, daemon=True).start()
 
-    def start(self, text: str, images: list | None = None) -> None:
+    def start(self, text: str, images: list | None = None, files: list | None = None, queue: bool = False) -> str:
+        """Send a message. Busy: with `queue` it waits its turn ("queued"), otherwise RuntimeError."""
+        claude = find_claude()
+        if not claude:
+            raise FileNotFoundError(
+                "Claude Code CLI not found. Install it (it uses your existing Claude subscription), "
+                "or set \"claude_command\" in brain/config.json.")
+        with self.lock:
+            if self.busy and not queue:
+                raise RuntimeError("JARVIS is still answering the last message.")
+        blocks, saved = save_images(images or [])
+        if saved:
+            text = (text or "Take a look at this.") + (
+                "\n\n(Image" + ("s" if len(saved) > 1 else "") + " attached above, also saved at "
+                + ", ".join(saved) + ": pass the path to any agent that needs to see it.)")
+        attached = control.save_files(files or [])
+        if attached:
+            text = (text or "Take a look at this.") + (
+                "\n\n(File" + ("s" if len(attached) > 1 else "") + " attached, saved at " + ", ".join(attached)
+                + ": read it from there and pass the path to any agent that needs it.)")
         with self.lock:
             if self.busy:
-                raise RuntimeError("JARVIS is still answering the last message.")
-            claude = find_claude()
-            if not claude:
-                raise FileNotFoundError(
-                    "Claude Code CLI not found. Install it (it uses your existing Claude subscription), "
-                    "or set \"claude_command\" in brain/config.json.")
-            blocks, saved = save_images(images or [])
-            if saved:
-                text = (text or "Take a look at this.") + (
-                    "\n\n(Image" + ("s" if len(saved) > 1 else "") + " attached above, also saved at "
-                    + ", ".join(saved) + ": pass the path to any agent that needs to see it.)")
-            self.live = {"status": "thinking", "request": text, "agents": {}, "activity": {}}
+                if not queue:
+                    raise RuntimeError("JARVIS is still answering the last message.")
+                self.queue.append({"text": text, "blocks": blocks, "at": time.time()})
+                self.hub.publish({"type": "queued", "text": text, "waiting": len(self.queue)})
+                return "queued"
+            self._launch(claude, text, blocks)
+        return "started"
+
+    def _launch(self, claude: list[str], text: str, blocks: list[dict]) -> None:
+        self.live = {"status": "thinking", "request": text, "agents": {}, "activity": {}}
+        self.slash = text.lstrip().startswith("/")
+        self._step("owner", text, "done")
         self.hub.publish({"type": "status", "status": "thinking", "request": text})
         threading.Thread(target=self._turn, args=(claude, text, blocks), daemon=True).start()
+
+    def _next(self) -> None:
+        """The turn ended: answer the next message that was waiting, if any."""
+        with self.lock:
+            if self.busy or not self.queue:
+                return
+            claude = find_claude()
+            if not claude:
+                return
+            msg = self.queue.pop(0)
+            self._launch(claude, msg["text"], msg["blocks"])
+
+    def unqueue(self, index: int) -> None:
+        with self.lock:
+            if not 0 <= index < len(self.queue):
+                raise ValueError("No such waiting message.")
+            self.queue.pop(index)
+
+    def switch(self, sid: str | None) -> None:
+        """Carry on another Claude Code conversation (or a new one): the next message resumes it."""
+        self.close()
+        conn = db.connect()
+        try:
+            db.set_meta(conn, "dashboard_session", sid or "")
+        finally:
+            conn.close()
+        self.steps = []
+        self.hub.publish({"type": "session", "id": sid})
+        self.warm()
+
+    def _step(self, kind: str, text: str, state: str = "running", sid: str | None = None) -> dict:
+        step = {"id": sid, "kind": kind, "text": journal.short(text, 300), "state": state, "ts": paths.now()}
+        self.steps.append(step)
+        del self.steps[:-200]
+        return step
 
     def stop(self) -> None:
         """Interrupt the reply. The process ends; the next message resumes the conversation."""
@@ -380,7 +448,9 @@ class Runner:
     def _spawn(self, claude: list[str], sid: str | None) -> None:
         cfg = paths.config()
         cmd = [*claude, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-               "--include-partial-messages", "--permission-mode", "acceptEdits", "--append-system-prompt", VOICE_PROMPT]
+               "--include-partial-messages", "--permission-mode", "acceptEdits",
+               # Prompts the Claude Code window would show come to the page instead (control.Permissions).
+               "--permission-prompt-tool", "stdio", "--append-system-prompt", VOICE_PROMPT]
         if cfg.get("dashboard_model"):
             cmd += ["--model", cfg["dashboard_model"]]
         if cfg.get("dashboard_effort"):
@@ -428,7 +498,11 @@ class Runner:
             self.hub.publish({"type": "error", "text": f"Could not start Claude Code: {exc}"})
         finally:
             self.live = {"status": "idle", "agents": {}, "activity": self.live.get("activity", {})}
+            for step in self.steps:
+                if step["state"] == "running":
+                    step["state"] = "done"
             self.hub.publish({"type": "status", "status": "idle"})
+            self._next()
 
     def _watchdog(self, proc: subprocess.Popen) -> None:
         """Claude Code can freeze without an error (it once sat silent for 7 hours, with every phone message
@@ -488,6 +562,8 @@ class Runner:
         e = ev.get("event") or {}
         if e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
             self.buf += e["delta"].get("text", "")
+            if self.buf.rfind("[[") > self.buf.rfind("]]"):
+                return  # a screen hint is still arriving: never split it
             *done, self.buf = SENTENCE_END.split(self.buf)
             for sentence in done:  # a short opener ("Very good, sir.") is spoken at once: it's what feels quick
                 self._chunk(sentence)
@@ -500,9 +576,13 @@ class Runner:
             self.buf = ""
 
     def _chunk(self, text: str) -> None:
+        if visuals.strip_markers(text) == "" and visuals.MARKER.search(text):  # a hint on its own: shown, not spoken
+            self.streamed = True
+            self.hub.publish({"type": "say_chunk", "text": "", "raw": text.strip()})
+            return
         if text.strip() and not LOGIN_PROBLEM.search(text):
             self.streamed = True
-            self.hub.publish({"type": "say_chunk", "text": text.strip()})
+            self.hub.publish({"type": "say_chunk", "text": visuals.strip_markers(text), "raw": text.strip()})
 
     def _login_needed(self, needed: bool) -> None:
         conn = db.connect()
@@ -512,8 +592,28 @@ class Runner:
         finally:
             conn.close()
 
+    def _permit(self, proc: subprocess.Popen, ev: dict) -> None:
+        """Answer one control request from Claude Code. A permission prompt waits for the owner; the watchdog
+        is held off meanwhile, since silence here is the owner thinking, not Claude Code frozen."""
+        rid, req = ev.get("request_id"), ev.get("request") or {}
+        if req.get("subtype") != "can_use_tool":
+            reply = {"subtype": "error", "request_id": rid, "error": f"unsupported: {req.get('subtype')}"}
+        else:
+            def alive():
+                if self.last_output:
+                    self.last_output = time.time()
+                return self.proc is proc and proc.poll() is None
+            reply = {"subtype": "success", "request_id": rid, "response": self.permissions.ask(rid, req, alive)}
+        self._send(proc, json.dumps({"type": "control_response", "response": reply}) + "\n")
+
     def _handle(self, ev: dict, dispatched: dict) -> bool:
         kind = ev.get("type")
+        if kind == "control_request":
+            threading.Thread(target=self._permit, args=(self.proc, ev), daemon=True).start()
+            return False
+        if kind == "system" and ev.get("subtype") == "init" and isinstance(ev.get("slash_commands"), list):
+            self.commands = {"slash": sorted(str(c) for c in ev["slash_commands"]),
+                             "skills": sorted(str(c) for c in ev.get("skills") or [])}
         if kind == "stream_event":
             if not ev.get("parent_tool_use_id"):
                 self._stream(ev)
@@ -553,7 +653,8 @@ class Runner:
                     if parent and parent in dispatched:
                         self._agent_line(dispatched[parent], journal.short(block["text"], 110))
                     elif not parent:
-                        self.hub.publish({"type": "say", "text": block["text"], "streamed": self.streamed})
+                        self.hub.publish({"type": "say", "text": visuals.strip_markers(block["text"]), "raw": block["text"],
+                                          "streamed": self.streamed, "slash": self.slash})
                         self.streamed = False
                 elif block.get("type") == "tool_use":
                     name, data = block.get("name", ""), block.get("input") or {}
@@ -562,30 +663,50 @@ class Runner:
                         dispatched[block.get("id")] = agent
                         self.live["agents"][agent] = {"description": data.get("description")}
                         self.live["status"] = "delegating"
+                        self._step("agent", f"{agent}: {data.get('description') or ''}", sid=block.get("id"))
+                        swarm.note(agent, f"Took on: {data.get('description') or 'a job'}", "start")
                         self.hub.publish({"type": "dispatch", "agent": agent, "description": data.get("description"),
                                           "id": block.get("id")})
                     elif parent and parent in dispatched:
                         self._agent_line(dispatched[parent], _summary(name, data))
                     elif not parent:
-                        self.hub.publish({"type": "jarvis_tool", "summary": _summary(name, data)})
+                        self._step("tool", control.describe(name, data), sid=block.get("id"))
+                        self.hub.publish({"type": "jarvis_tool", "summary": _summary(name, data), "id": block.get("id"), "tool": name})
         elif kind == "user" and isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
+                    if not parent:
+                        self._step_done(block)
                     agent = dispatched.pop(block.get("tool_use_id"), None)
                     if agent:
                         self.live["agents"].pop(agent, None)
                         if not self.live["agents"]:
                             self.live["status"] = "thinking"
+                        swarm.note(agent, "Finished and handed back", "done")
                         self.hub.publish({"type": "agent_done", "agent": agent, "id": block.get("tool_use_id")})
         elif kind == "result":
             self.hub.publish({"type": "reply", "text": ev.get("result") or "", "is_error": bool(ev.get("is_error")),
-                              "cost_usd": ev.get("total_cost_usd")})
+                              "cost_usd": ev.get("total_cost_usd"), "slash": self.slash})
             return True
         return False
+
+    def _step_done(self, block: dict) -> None:
+        """A top-level tool (or a hand-off) finished: mark its step with the outcome and a short look at the output."""
+        tid = block.get("tool_use_id")
+        step = next((x for x in reversed(self.steps) if x["id"] and x["id"] == tid), None)
+        if not step:
+            return
+        out = block.get("content")
+        if isinstance(out, list):
+            out = " ".join(b.get("text", "") for b in out if isinstance(b, dict))
+        step["state"] = "error" if block.get("is_error") else "done"
+        step["out"] = journal.short(str(out or "").strip(), 400)
+        self.hub.publish({"type": "jarvis_tool_done", "id": tid, "ok": step["state"] == "done", "out": step["out"]})
 
     def _agent_line(self, agent: str, line: str) -> None:
         self.live["activity"].setdefault(agent, []).append(line)
         self.live["activity"][agent] = self.live["activity"][agent][-6:]
+        swarm.note(agent, line)
         self.hub.publish({"type": "agent_activity", "agent": agent, "line": line})
 
 
@@ -615,14 +736,20 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
         if not text:
             return
         hub.publish({"type": "owner", "text": text, "via": "voice"})
+        answered = runner.permissions.voice(text)  # "yes" / "no" while JARVIS waits for a permission
+        if answered:
+            hub.publish({"type": "notice", "text": f"A{answered['approval']} {answered['status']}"})
+            return
         try:
-            runner.start(text)
+            runner.start(text, queue=True)
         except (RuntimeError, FileNotFoundError, ValueError) as exc:
             hub.publish({"type": "error", "text": str(exc)})
 
     wake = wakeword.WakeWord(lambda line: hub.publish({"type": "wake", "detail": line}), heard,
                              lambda state: hub.publish({"type": "ears", "state": state}))
     phone = telegram.Bridge(hub, runner, kokoro)
+    # Permission prompts also go to the phone with Approve / Reject buttons, when Telegram is set up.
+    runner.permissions.push = lambda row: telegram.push_approval(row) if phone.enabled() else None
     token = page_token()
 
     class Handler(BaseHTTPRequestHandler):
@@ -657,8 +784,27 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             if route in ASSETS:
                 name, ctype = ASSETS[route]
                 return self._send(200, (STATIC / name).read_bytes(), ctype)
+            if route.startswith("/api/control/"):  # the control centre (T98)
+                found = control.handle_get(route, parse_qs(query), self.server)
+                if found:
+                    code, data, kind = found
+                    return self._json(code, data) if kind == "json" else self._send(code, data, kind)
+            if route.startswith("/api/ops/"):  # projects, sales, social, routines (T101)
+                from . import ops
+                found = ops.handle_get(route)
+                if found:
+                    return self._json(*found)
             if route == "/api/live":
                 return self._json(200, live.state())
+            if route == "/api/swarm":  # the Live view (T106): every agent at work, from their real logs
+                conn = db.connect()
+                try:
+                    return self._json(200, swarm.state(conn, runner.live))
+                finally:
+                    conn.close()
+            if route == "/api/swarm/file":
+                found = swarm.image((parse_qs(query).get("path") or [""])[0])
+                return self._send(200, *found) if found else self._send(204, b"", "text/plain")
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
             if route == "/api/hq":
@@ -693,6 +839,8 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, data)
             if route == "/api/activity":
                 return self._activity(parse_qs(query))
+            if route.startswith("/api/brain/"):  # the Brain page (T95): graph, one node, and the live panel
+                return self._brain(route.rsplit("/", 1)[1], parse_qs(query))
             if self.path == "/api/events":
                 return self._events()
             if route == "/api/team":  # teams, sub-agents at work, hires, and the usage pacer
@@ -724,6 +872,21 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             keep = ("id", "title", "category", "product", "provenance", "status", "confidence", "source",
                     "source_ref", "updated", "snippet")
             return self._json(200, [{k: r[k] for k in keep if k in r.keys()} for r in rows])
+
+        def _brain(self, what: str, q: dict):
+            conn = db.connect()
+            try:
+                if what == "graph":
+                    return self._json(200, brain_graph.graph(conn, [a["name"] for a in agent_roster()]))
+                if what == "now":
+                    return self._json(200, brain_graph.now(conn, runner.live))
+                if what == "node":
+                    found = brain_graph.detail(conn, (q.get("id") or [""])[0],
+                                               {a["name"]: a for a in agent_roster()})
+                    return self._json(200, found) if found else self._json(404, {"error": "no such node"})
+                return self._json(404, {"error": "not found"})
+            finally:
+                conn.close()
 
         def _activity(self, q: dict):
             # Recent agent events (newest first) and each agent's current state, for the HQ visuals.
@@ -790,17 +953,23 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             if self.path == "/api/chat":
                 text = (body.get("text") or "").strip()
                 images = body.get("images") or []
-                if not text and not images:
+                files = body.get("files") or []
+                if not text and not images and not files:
                     return self._json(400, {"error": "empty message"})
+                if text and not images and not files:
+                    answered = runner.permissions.voice(text)  # a typed "yes" / "no" answers a waiting prompt
+                    if answered:
+                        return self._json(200, {"ok": True, "answered": answered})
                 try:
-                    runner.start(text, images if isinstance(images, list) else [])
+                    how = runner.start(text, images if isinstance(images, list) else [], files if isinstance(files, list) else [],
+                                       queue=body.get("queue", True) is not False)
                 except RuntimeError as exc:
                     return self._json(409, {"error": str(exc)})
                 except ValueError as exc:
                     return self._json(400, {"error": str(exc)})
                 except FileNotFoundError as exc:
                     return self._json(503, {"error": str(exc)})
-                return self._json(202, {"ok": True})
+                return self._json(202, {"ok": True, "queued": how == "queued", "waiting": len(runner.queue)})
             if self.path == "/api/tts":
                 try:
                     wav = kokoro.speak(body.get("text") or "", body.get("voice"), body.get("speed"))
@@ -835,6 +1004,12 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
                 phone.decided(row, via="dashboard")  # approved: JARVIS carries it out now
                 return self._json(200, {"ok": True, "status": row["status"]})
+            if self.path == "/api/visuals":  # the cards for a spoken sentence (T86 speaking visuals)
+                conn = db.connect()
+                try:
+                    return self._json(200, {"cards": visuals.cards(conn, str(body.get("text") or "")[:2000])})
+                finally:
+                    conn.close()
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
             if self.path == "/api/hq/conversation":
@@ -875,6 +1050,10 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     return self._json(400, {"error": str(exc)})
                 finally:
                     conn.close()
+            if self.path.startswith("/api/control/"):
+                found = control.handle_post(self.path, body, self.server)
+                if found:
+                    return self._json(*found)
             if self.path == "/api/stop":
                 runner.stop()
                 return self._json(200, {"ok": True})

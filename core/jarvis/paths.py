@@ -112,6 +112,41 @@ def scratch_dir() -> Path:
     return home() / "scratch"
 
 
+# ---------------------------------------------------------------- machine role (T105)
+# Only one machine answers the phone: the primary runs the Telegram bridge, the routines tick and the
+# call server; a standby (the laptop) keeps a copied brain and stays quiet until it takes over.
+# The role is kept per machine, outside brain/, because brain/ is copied between machines.
+
+ROLES = ("primary", "standby")
+
+
+def role_file() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share") / "JARVIS" / "role"
+
+
+def machine_role() -> str:
+    role = (os.environ.get("JARVIS_ROLE") or "").strip().lower()
+    if not role:
+        try:
+            role = role_file().read_text(encoding="utf-8").strip().lower()
+        except OSError:
+            role = ""
+    return role if role in ROLES else "primary"
+
+
+def set_machine_role(role: str) -> Path:
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    path = role_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(role + "\n", encoding="utf-8")
+    return path
+
+
+def standby() -> bool:
+    return machine_role() == "standby"
+
+
 def config() -> dict:
     cfg = dict(DEFAULT_CONFIG)
     path = home() / "config.json"

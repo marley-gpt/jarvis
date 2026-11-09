@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import activity, backup, dicloak, feedback, jobs, brief, db, journal, media, memory, pace, paths, records, skills, team, telegram
+from . import activity, backup, dicloak, feedback, jobs, brief, db, journal, media, memory, pace, paths, records, skills, team, telegram, work
 
 SEED_DIR = paths.CORE_DIR / "seed"
 
@@ -220,7 +220,18 @@ def cmd_task_path(conn, args):
     out(paths.rel(records.task_workpath(conn, args.id)))
 
 
+DECIDE_LIST_WORDS = {"list", "ls", "show", "recent", "get"}
+
+
 def cmd_decide(conn, args):
+    # `bin/jarvis decide list` used to record a decision called "list" (M-261106-a9cb). A bare
+    # command word now lists the recent decisions instead of recording one.
+    if args.decision.strip().lower() in DECIDE_LIST_WORDS and not args.why:
+        for d in records.decision_list(conn):
+            prod = f" <{d['product']}>" if d["product"] else ""
+            why = f" -- {d['rationale']}" if d["rationale"] else ""
+            out(f"D{d['id']} {d['ts'][:16]}{prod} {d['decision']}{why}")
+        return
     did = records.decision_add(conn, args.decision, rationale=args.why, product=args.product, task=args.task,
                                decided_by=args.by)
     out(f"D{did}")
@@ -369,6 +380,13 @@ def cmd_money_test(conn, args):
         out("  Not enough data for a verdict yet.")
 
 
+def cmd_money_unit(conn, args):
+    from . import unit_economics
+    c = unit_economics.calc(args.name, args.price, args.landed, args.shipping, args.spend_aud, args.orders,
+                            fee_pct=args.fee_pct, fee_fixed=args.fee_fixed, usd_aud=args.usd_aud)
+    out(json.dumps(c, indent=2) if args.json else "\n".join(unit_economics.lines(c)))
+
+
 def cmd_cost_summary(conn, args):
     rows = conn.execute(
         "SELECT substr(ts,1,7) month, service, SUM(amount_aud) total, COUNT(*) n FROM costs "
@@ -482,12 +500,34 @@ def cmd_watch(conn, args):
     if args.setup:
         out(f"Video tools ready in {media.setup()}")
         return
+    if args.retry:
+        rep = media.retry_pending(conn)
+        for w in rep["watched"]:
+            out(f"Watched {w['url']}: saved {w['entry']} ({w['title']})")
+        out(f"{len(rep['watched'])} watched, {rep['waiting']} still waiting" +
+            (f", worker W{rep['worker']} is telling the owner" if rep["worker"] else ""))
+        return
+    if args.pending:
+        items = media.load_pending()
+        for i in items:
+            out(f"{i['url']}  added {i['added'][:16]}, {i.get('tries', 0)} retries" +
+                (f", last: {i['error'][:120]}" if i.get("error") else f", {i.get('reason', '')}"))
+        out(f"{len(items)} reel(s) waiting in {paths.rel(media.pending_path())}" if items else "No reels waiting.")
+        return
     if not args.urls:
         raise media.MediaError("Give one or more links, e.g. bin/jarvis watch https://www.instagram.com/reel/...")
+    failed = []
     for url in args.urls:
         out(f"Watching {url} ...")
-        entry, folder = media.watch(conn, url, note=args.note or "", category=args.category, product=args.product)
+        try:
+            entry, folder = media.watch(conn, url, note=args.note or "", category=args.category, product=args.product)
+        except media.DownloadFailed as exc:  # queued: carry on with the other links
+            out(str(exc))
+            failed.append(url)
+            continue
         out(f"Saved {entry.id}: {entry.title}\n  files: {paths.rel(folder)}")
+    if failed:
+        return 3
 
 
 def cmd_job_add(conn, args):
@@ -505,6 +545,11 @@ def cmd_job_list(conn, args):
         out(f"J{r['id']} [{r['status']}] {r['text'][:90]}" + (f" -> {r['summary'][:90]}" if r["summary"] else ""))
 
 
+def cmd_job_cancel(conn, args):
+    row = jobs.cancel(conn, args.id)
+    out(f"J{row['id']} cancelled.")
+
+
 def cmd_job_wait(conn, args):
     job = jobs.wait(conn, args.timeout)
     out(f"J{job['id']} from {job['source']}: {job['text']}" if job else "No job yet: run this again to keep waiting.")
@@ -518,6 +563,36 @@ def cmd_job_finish(ok):
             telegram.send(("" if ok else "Sir, that job failed. ") + args.summary)
             out("Sent to the owner's phone.")
     return run
+
+
+def cmd_work_start(conn, args):
+    text = Path(args.brief_file).read_text(encoding="utf-8") if args.brief_file else args.brief
+    run = work.start(text, task=args.task or "", agent=args.agent or "")
+    out(f"W{run['id']} started (pid {run['pid']}): it survives session restarts. Log: {paths.rel(Path(run['log']))}")
+
+
+def cmd_work_list(conn, args):
+    rows = work.listing(args.n)
+    if not rows:
+        out("No workers yet.")
+    for r in rows:
+        out(f"W{r['id']} [{r['status']}] {r['task']} {r['agent']}: {r['brief'][:80]}")
+
+
+def cmd_work_stop(conn, args):
+    run = work.stop(args.id)
+    out(f"W{run['id']} stopped. It won't be resumed automatically; `jarvis work resume W{run['id']}` is refused too, so start a new one if needed.")
+
+
+def cmd_work_log(conn, args):
+    t = work.tail(args.id, args.n)
+    out(f"W{t['id']} [{t['status']}] {t['task'] or ''} {t['agent'] or ''}".rstrip())
+    out("\n".join(t["lines"]) or "Nothing logged yet.")
+
+
+def cmd_work_resume(conn, args):
+    resumed = work.resume(args.id)
+    out("\n".join(f"W{r['id']} resumed (attempt {r['attempts']})" for r in resumed) or "Nothing to resume.")
 
 
 def cmd_metrics(conn, args):
@@ -586,10 +661,41 @@ def cmd_telegram_status(conn, args):
         out(f"Bot: @{bot.get('username')} ({bot.get('first_name')})")
 
 
+def cmd_machine(conn, args):
+    if args.role:
+        where = paths.set_machine_role(args.role)
+        out(f"This machine is now the JARVIS {args.role} ({where}).")
+    role = paths.machine_role()
+    out(f"Role: {role}. " + ("Telegram bridge, routines and calls run here." if role == "primary" else
+        "Telegram bridge, routines tick and call server stay off here; the other machine answers."))
+
+
+def cmd_sync(conn, args):
+    from . import essentials, sync
+    if args.action == "push":
+        out(f"ESSENTIALS → {paths.rel(essentials.write(conn))}")
+        out(sync.push(conn, force=args.force)["note"])
+    elif args.action == "pull":
+        out(sync.pull(conn, force=args.force)["note"])
+    out(sync.status_line())
+
+
+def cmd_essentials(conn, args):
+    from . import essentials
+    path = essentials.write(conn)
+    out(path.read_text(encoding="utf-8") if args.print else f"Essentials → {paths.rel(path)}")
+
+
 def cmd_telegram_send(conn, args):
     from . import tts
+    if getattr(args, "photo", None):
+        telegram.send_photo(args.photo, args.text)
+        out("Sent the picture to the owner's phone.")
+        return
     voice = None
-    if args.voice:
+    if args.file:
+        voice = Path(args.file).read_bytes()
+    elif args.voice:
         kokoro = tts.Kokoro()
         try:
             voice = telegram.speak(kokoro, args.text)
@@ -627,11 +733,78 @@ def cmd_call_link(conn, args):
 def cmd_call_ring(conn, args):
     from . import call
     try:
-        call.ring(args.say or "", args.phone)
+        result = call.ring(args.say or "", args.phone)
     except (RuntimeError, telegram.TelegramError) as exc:
         out(f"Couldn't ring: {exc}")
         return 1
-    out("Ringing the owner: the Answer button is on their phone.")
+    if result.startswith("sip:"):
+        out("The owner picked up the phone line: JARVIS is on the call.")
+    else:
+        out("Ringing the owner: the Answer button is on their phone.")
+
+
+def cmd_call_latency(conn, args):
+    from . import call
+    out(call.latency_report(args.last))
+
+
+def cmd_call_sip(conn, args):
+    from . import call, sip
+    if args.off:
+        paths.set_config("sip_bind", "")
+        out("Phone line off (restart the call server to close it).")
+        return
+    if args.show_password:
+        out(sip.password())
+        return
+    if args.new_password:
+        sip.new_password()
+        out("New SIP password made. Restart the call server, then put the new one in the phone app "
+            "(bin/jarvis call sip --show-password).\n")
+        return
+    if args.from_linphone:
+        acct = sip.import_linphone()
+        args.provider_user = args.provider_user or acct["user"]
+        args.callee = args.callee or f"{acct['user']}@{acct['realm'] or 'sip.linphone.org'}"
+        out(f"Copied {acct['user']}'s {acct['algorithm']} key from Linphone into brain/secrets/sip_provider_ha1.\n")
+    if args.provider_user or args.callee:
+        prov = dict(paths.config().get("sip_provider") or {})
+        prov.setdefault("server", "sip.linphone.org")
+        prov.setdefault("port", 5060)
+        if args.from_linphone:  # TLS, as the Linphone apps use: a phone's 200 OK is too big for one UDP packet
+            prov.update(transport="tls", port=5061)
+        if args.provider_user:
+            prov["user"] = args.provider_user.split("@")[0].removeprefix("sip:")
+        if args.callee:
+            callee = args.callee if args.callee.startswith("sip:") else f"sip:{args.callee}"
+            prov["callee"] = callee if "@" in callee else f"{callee}@{prov['server']}"
+        paths.set_config("sip_provider", prov)
+        out(f"Provider ringing set: JARVIS signs in as {prov.get('user', '?')} at {prov['server']} and rings "
+            f"{prov.get('callee', '?')}." + ("" if sip.provider_password() or sip.provider_ha1() else
+            " Put JARVIS's account password in brain/secrets/sip_provider_password.") + "\n")
+    if args.line or args.line_off:
+        prov = dict(paths.config().get("sip_provider") or {})
+        if args.line and not (prov.get("user") and prov.get("server")):
+            raise SystemExit("Set up provider ringing first (bin/jarvis call sip --from-linphone).")
+        prov["line"] = bool(args.line)
+        if args.line:  # kept for good: the owner's "JARVIS" contact holds the address made from it
+            import uuid
+            prov.setdefault("instance", f"urn:uuid:{uuid.uuid4()}")
+        paths.set_config("sip_provider", prov)
+        out(f"JARVIS's own line {'on' if args.line else 'off'}. The call server picks it up on the next "
+            f"routines tick (within 15 minutes; now: bin/jarvis routines run phone-line)." + (f" The owner dials: {sip.line_address(prov)}" if args.line
+                                                         else "") + "\n")
+    if args.bind:
+        paths.set_config("sip_bind", args.bind)
+        sip.password()
+        out(f"Phone line set to listen on {args.bind}. Restart the call server to open it.\n")
+    status = call.sip_request({}) if call.running() else {"enabled": False}
+    if status.get("enabled"):
+        out(f"Phone line open on {status['address']}; phone registered: {'yes' if status['registered'] else 'no'}.\n")
+        line = (status.get("provider") or {}).get("line")
+        if line:
+            out(f"JARVIS's line: {'signed in' if line['on'] else 'NOT signed in'}, address {line['address']}.\n")
+    out(sip.setup_text(paths.config().get("sip_bind") or ""))
 
 
 PRIVATE_SKILL_PREFIXES = ("blake-",)
@@ -895,6 +1068,10 @@ def cmd_team_board(conn, args):
 
 
 def cmd_backup(conn, args):
+    if args.bundle:
+        for z in backup.bundle(conn, Path(args.bundle), with_secrets=args.secrets):
+            out(f"Bundle → {z} ({z.stat().st_size / 1e6:.0f} MB)")
+        return
     out(f"Backup → {paths.rel(backup.create(conn, args.label))}")
 
 
@@ -1116,6 +1293,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_money_test)
+    s = money.add_parser("unit", help="unit-economics calculator with green/red KPI flags (prices in USD)")
+    s.add_argument("name")
+    s.add_argument("--price", type=float, required=True, help="price per bundle, USD")
+    s.add_argument("--landed", type=float, required=True, help="supplier landed cost per order, USD")
+    s.add_argument("--shipping", type=float, default=0.0, help="extra shipping per order on top of landed, USD")
+    s.add_argument("--spend-aud", type=float, help="real Meta ad spend, AUD")
+    s.add_argument("--orders", type=int, default=0)
+    s.add_argument("--fee-pct", type=float, default=2.9)
+    s.add_argument("--fee-fixed", type=float, default=0.30)
+    s.add_argument("--usd-aud", type=float, help="override the config rate")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_money_unit)
 
     s = sub.add_parser("recall", help="search earlier conversations (the journal)")
     s.add_argument("query")
@@ -1188,7 +1377,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--note", help="what the owner wants taken from it")
     s.add_argument("-c", "--category", default="creative-inspiration", choices=paths.CATEGORIES)
     s.add_argument("-p", "--product")
-    s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper)")
+    s.add_argument("--setup", action="store_true", help="install the free video tools (yt-dlp, faster-whisper, instaloader)")
+    s.add_argument("--pending", action="store_true", help="list links that couldn't be downloaded yet")
+    s.add_argument("--retry", action="store_true", help="retry the pending links now (the routine does it every tick)")
     s.set_defaults(fn=cmd_watch)
 
     jb = sub.add_parser("job", help="desktop jobs: screen work queued from the phone or a schedule").add_subparsers(
@@ -1200,6 +1391,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = jb.add_parser("list")
     s.add_argument("-n", type=int, default=15)
     s.set_defaults(fn=cmd_job_list)
+    s = jb.add_parser("cancel", help="take a queued job off the queue")
+    s.add_argument("id")
+    s.set_defaults(fn=cmd_job_cancel)
     s = jb.add_parser("wait", help="the runner blocks here until a job arrives, and claims it")
     s.add_argument("--timeout", type=float, default=3000, help="seconds before giving up (run it again to keep waiting)")
     s.set_defaults(fn=cmd_job_wait)
@@ -1209,6 +1403,28 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--summary", required=True)
         s.add_argument("--quiet", action="store_true", help="don't message the phone")
         s.set_defaults(fn=cmd_job_finish(ok))
+
+    wk = sub.add_parser("work", help="durable workers: delegated jobs that survive session restarts").add_subparsers(
+        dest="sub", required=True)
+    s = wk.add_parser("start", help="start a detached worker on a brief")
+    s.add_argument("--brief")
+    s.add_argument("--brief-file")
+    s.add_argument("--task")
+    s.add_argument("--agent", help="a .claude/agents name, e.g. product-research")
+    s.set_defaults(fn=cmd_work_start)
+    s = wk.add_parser("list")
+    s.add_argument("-n", type=int, default=15)
+    s.set_defaults(fn=cmd_work_list)
+    s = wk.add_parser("stop", help="end a running worker on purpose (it is marked cancelled, not resumed)")
+    s.add_argument("id")
+    s.set_defaults(fn=cmd_work_stop)
+    s = wk.add_parser("log", help="what a worker has said and done so far, as readable lines")
+    s.add_argument("id")
+    s.add_argument("-n", type=int, default=60)
+    s.set_defaults(fn=cmd_work_log)
+    s = wk.add_parser("resume", help="restart stopped workers where they left off")
+    s.add_argument("id", nargs="?")
+    s.set_defaults(fn=cmd_work_resume)
 
     mt = sub.add_parser("metrics", help="the live Shopify and Meta figures the HQ shows (a read-only snapshot JARVIS pulls)").add_subparsers(
         dest="sub", required=True)
@@ -1239,6 +1455,18 @@ def build_parser() -> argparse.ArgumentParser:
     dc.add_argument("who", nargs="?", default="jarvis", help="who is using the screen (lock/unlock)")
     dc.set_defaults(fn=cmd_dicloak)
 
+    s = sub.add_parser("machine", help="this machine's role: primary answers the phone, standby stays quiet")
+    s.add_argument("role", nargs="?", choices=paths.ROLES)
+    s.set_defaults(fn=cmd_machine)
+
+    s = sub.add_parser("sync", help="the lean brain shared through OneDrive: the primary pushes, the standby pulls")
+    s.add_argument("action", nargs="?", choices=("status", "push", "pull"), default="status")
+    s.add_argument("--force", action="store_true", help="push even if unchanged or from a standby; pull on a primary")
+    s.set_defaults(fn=cmd_sync)
+    s = sub.add_parser("essentials", help="rewrite brain/ESSENTIALS.md, the one-page digest of what matters now")
+    s.add_argument("--print", action="store_true", help="also print it")
+    s.set_defaults(fn=cmd_essentials)
+
     tg = sub.add_parser("telegram", help="the owner's phone: pair the bot, check it, send a message").add_subparsers(
         dest="sub", required=True)
     tg.add_parser("pair", help="print the code the owner sends the bot to pair").set_defaults(fn=cmd_telegram_pair)
@@ -1246,6 +1474,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = tg.add_parser("send", help="message the owner's phone (briefs, approvals, alerts)")
     s.add_argument("text")
     s.add_argument("--voice", action="store_true", help="also send it as a voice note in JARVIS's voice")
+    s.add_argument("--file", help="send this OGG/Opus file as the voice note instead (e.g. voice samples)")
+    s.add_argument("--photo", help="send this PNG/JPG as a picture, with the text as its caption")
     s.set_defaults(fn=cmd_telegram_send)
     tg.add_parser("ring", help="test call: ring the owner's Telegram (CallMeBot, free)").set_defaults(fn=cmd_telegram_ring)
     cl = sub.add_parser("call", help="live voice calls with JARVIS from the phone (our own code, no call service)"
@@ -1255,10 +1485,28 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_call_serve)
     cl.add_parser("link", help="print the call link, starting the server and tunnel if needed").set_defaults(
         fn=cmd_call_link)
-    s = cl.add_parser("ring", help="JARVIS calls the owner: Telegram message with an Answer button")
+    s = cl.add_parser("ring", help="JARVIS calls the owner: rings the SIP phone if set up, else a Telegram Answer link")
     s.add_argument("--say", help="what JARVIS opens the call with")
     s.add_argument("--phone", action="store_true", help="also ring their phone through Telegram (CallMeBot)")
     s.set_defaults(fn=cmd_call_ring)
+    s = cl.add_parser("latency", help="how fast the last call turns answered, stage by stage")
+    s.add_argument("--last", type=int, default=10)
+    s.set_defaults(fn=cmd_call_latency)
+    s = cl.add_parser("sip", help="the SIP phone line: JARVIS rings a free softphone app like a real call")
+    s.add_argument("--bind", help="address to listen on (this PC's Tailscale IP, 100.x.y.z)")
+    s.add_argument("--show-password", action="store_true", help="print the SIP account password for the phone app")
+    s.add_argument("--new-password", action="store_true", help="replace the SIP account password (if it leaked)")
+    s.add_argument("--off", action="store_true", help="turn the phone line off")
+    s.add_argument("--provider-user", help="JARVIS's own free sip.linphone.org account (push ringing for an iPhone)")
+    s.add_argument("--callee", help="the owner's sip.linphone.org account, which JARVIS rings")
+    s.add_argument("--from-linphone", action="store_true",
+                   help="use the account the Linphone desktop app here is signed in to (its HA1, no password) "
+                        "and ring that same account, which the iPhone is signed in to")
+    s.add_argument("--line", action="store_true",
+                   help="let the owner ring JARVIS: he signs in as his own device on the account and answers calls "
+                        "to its address")
+    s.add_argument("--line-off", action="store_true", help="stop answering calls to JARVIS's own line")
+    s.set_defaults(fn=cmd_call_sip)
     s = sub.add_parser("alert", help="push a problem to the owner's phone; --urgent adds a voice note and a call")
     s.add_argument("text")
     s.add_argument("--urgent", action="store_true", help="kill rule hit, store down, money at risk: ring the owner")
@@ -1431,11 +1679,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("backup")
     s.add_argument("--label", default="manual")
+    s.add_argument("--bundle", metavar="DIR", help="the whole brain for another machine, minus venvs, models "
+                   "and reel videos (T105)")
+    s.add_argument("--secrets", action="store_true", help="with --bundle: also zip brain/secrets separately")
     s.set_defaults(fn=cmd_backup)
     for name, fn in (("agents", cmd_agents), ("log", cmd_log)):
         s = sub.add_parser(name)
         s.add_argument("-n", "--limit", type=int, default=20)
         s.set_defaults(fn=fn)
+    from . import ops  # sales, social, projects, routines (T101)
+    ops.register(sub)
     return p
 
 
@@ -1450,7 +1703,7 @@ def main(argv=None) -> int:
         return args.fn(conn, args) or 0
     except (memory.MemoryError, records.RecordError, feedback.FeedbackError, media.MediaError,
             telegram.TelegramError, dicloak.DICloakError, jobs.JobError, activity.ActivityError, skills.SkillError,
-            team.TeamError) as exc:
+            team.TeamError, work.WorkError) as exc:
         sys.stderr.write(f"jarvis: {exc}\n")
         return 2
     finally:

@@ -149,6 +149,15 @@ def task_workpath(conn, task_id):
 
 # ---------------------------------------------------------------- decisions and approvals
 
+def decision_list(conn, limit: int = 15) -> list:
+    """Most recent decisions, newest first."""
+    rows = conn.execute(
+        "SELECT id, ts, product, task_id, decision, rationale, decided_by FROM decisions ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def decision_add(conn, decision, *, rationale=None, product=None, task=None, decided_by="user") -> int:
     require_product(conn, product)
     cur = conn.execute(

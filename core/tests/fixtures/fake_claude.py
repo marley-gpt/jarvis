@@ -9,6 +9,8 @@ the --fake-marker file is how a retry knows it isn't the first),
 --fake-lost-session (resuming ends the turn with an error and no text, as the real CLI does),
 --fake-deaf (the first process never reads stdin; --fake-marker as above), --fake-chatty (after a reply it writes more than
 the pipe holds, and reads nothing more until that output has been read).
+A message containing PERMIT asks for permission to use a tool (a `can_use_tool` control request, as with
+`--permission-prompt-tool stdio`) and reports the answer; one containing STEP runs a top-level tool with a result.
 """
 import json
 import os
@@ -40,6 +42,8 @@ if "--fake-deaf" in sys.argv and first_process():
 
 turn = 0
 for line in sys.stdin:
+    if json.loads(line).get("type") != "user":
+        continue  # a stray control response
     msg = json.loads(line)["message"]
     texts = [b["text"] for b in msg["content"] if b["type"] == "text"]
     images = sum(1 for b in msg["content"] if b["type"] == "image")
@@ -50,7 +54,24 @@ for line in sys.stdin:
         emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": "lost-999",
               "errors": [f"No conversation found with session ID: {sid}"]})
         continue
-    emit({"type": "system", "subtype": "init", "session_id": sid})
+    emit({"type": "system", "subtype": "init", "session_id": sid, "slash_commands": ["compact", "context", "blake-testing"],
+          "skills": ["blake-testing"]})
+    if any("PERMIT" in t for t in texts):
+        tool = "AskUserQuestion" if any("ASK" in t for t in texts) else "mcp__Shopify__update-product"
+        data = ({"questions": [{"question": "Which colour?", "options": [{"label": "Red"}, {"label": "Blue"}]}]}
+                if tool == "AskUserQuestion" else {"id": "gid://shopify/Product/1", "title": "New title"})
+        emit({"type": "control_request", "request_id": f"req-{turn}",
+              "request": {"subtype": "can_use_tool", "tool_name": tool, "input": data, "tool_use_id": "tu9"}})
+        answer = json.loads(sys.stdin.readline())["response"]
+        decided = answer["response"]
+        said = decided["behavior"] + (" " + json.dumps(decided["updatedInput"].get("answers")) if decided.get("updatedInput", {}).get("answers") else "")
+        emit({"type": "assistant", "parent_tool_use_id": None, "message": {"content": [{"type": "text", "text": f"Permission: {said}"}]}})
+        emit({"type": "result", "subtype": "success", "result": f"Permission: {said}", "session_id": sid})
+        continue
+    if any("STEP" in t for t in texts):
+        emit({"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "tool_use", "id": "tb1", "name": "Bash", "input": {"command": "bin/jarvis task list", "description": "List tasks"}}]}})
+        emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tb1", "content": "T1 [todo] hello", "is_error": False}]}})
     if "--fake-logged-out" in sys.argv:
         emit({"type": "assistant", "parent_tool_use_id": None,
               "message": {"content": [{"type": "text", "text": "Not logged in · Please run /login"}]}})

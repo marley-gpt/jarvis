@@ -71,6 +71,17 @@ def finish(conn, job_id, summary: str, ok: bool = True):
     return get(conn, row["id"])
 
 
+def cancel(conn, job_id):
+    """Take a job off the queue before the runner picks it up."""
+    row = get(conn, job_id)
+    if row["status"] != "queued":
+        raise JobError(f"J{row['id']} is {row['status']}; only a queued job can be cancelled.")
+    conn.execute("UPDATE jobs SET status = 'cancelled', finished = ?, summary = ? WHERE id = ?",
+                 (paths.now(), "Cancelled before it started.", row["id"]))
+    conn.commit()
+    return get(conn, row["id"])
+
+
 def listing(conn, limit: int = 15):
     return conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -42,8 +43,16 @@ VOICE_PRESETS = {
     "jarvis": {"name": "JARVIS", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.0},
     "jarvis_warm": {"name": "JARVIS (warmer)", "blend": {"bm_george": 0.6, "bm_lewis": 0.4}, "speed": 0.97},
     "jarvis_crisp": {"name": "JARVIS (crisp)", "blend": {"bm_daniel": 0.6, "bm_george": 0.4}, "speed": 1.0},
+    # T87 sample B, the owner's pick (2026-11-09): drier and crisper. The sample had a -0.5 semitone shift,
+    # which the worker doesn't do; at that size it's barely audible.
+    "jarvis_b": {"name": "JARVIS (dry and crisp)", "blend": {"bm_daniel": 0.5, "bm_george": 0.5}, "speed": 1.0,
+                 "fx": "polish"},
     "jarvis_fx": {"name": "JARVIS (house-AI effect)", "blend": {"bm_george": 0.8, "bm_fable": 0.2}, "speed": 1.05,
                   "fx": "jarvis"},
+    # T91: Chatterbox (local, MIT) cloning an ORIGINAL reference voice designed from a text description with
+    # Parler-TTS (Apache-2.0); no actor, reel or real person. Licence: brain/files/voices/T91/LICENCE.md.
+    "jarvis-clone": {"name": "JARVIS (cloned butler)", "clone": "files/voices/T91/reference.wav", "speed": 1.0,
+                     "exaggeration": 0.35, "cfg": 0.45, "fx": "polish"},
 }
 # Each head agent, and the Blake and Mark method personas, speaks with its own voice so the owner can hold a
 # conversation with any of them. Stock Kokoro British voices and blends of them, clearly different from each
@@ -100,6 +109,18 @@ def set_agent_voice(who: str, voice: str) -> str:
 MAX_CHARS = 600
 
 
+_LIVE_AFTER = re.compile(r"\b(go|goes|going|went|gone|is|are|was|were|be|been|it's|now|stays?|still|currently) live\b", re.I)
+_LIVE_BEFORE = re.compile(r"\b(live)(?= (?:now|on|store|stores|ads?|data|feed|tile|call|calls|campaigns?|tests?|figures?"
+                          r"|numbers?|voice|site|page|chat|version|server|line|sales|stream)\b)", re.I)
+
+
+def say_live(text: str) -> str:
+    """Kokoro reads "live" as the verb ("liv"). Where it means on air ("the store is live", "live sales"),
+    spell it the way it sounds (owner, 2026-11-09)."""
+    text = _LIVE_AFTER.sub(lambda m: m.group(1) + " lyve", text)
+    return _LIVE_BEFORE.sub(lambda m: "Lyve" if m.group(1)[0].isupper() else "lyve", text)
+
+
 class TTSError(Exception):
     pass
 
@@ -117,12 +138,24 @@ def default_command() -> list[str] | None:
     return [str(py), str(Path(__file__).with_name("tts_worker.py")), "--model", str(model), "--voices", str(voices)]
 
 
+def clone_command() -> list[str] | None:
+    """The Chatterbox clone worker in brain/tts/clone-venv, if installed."""
+    py = tts_dir() / "clone-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return [str(py), str(Path(__file__).with_name("clone_worker.py"))] if py.exists() else None
+
+
+def clone_ref(preset: dict) -> Path | None:
+    ref = paths.home() / preset["clone"] if preset.get("clone") else None
+    return ref if ref and ref.exists() else None
+
+
 class Kokoro:
     def __init__(self):
         self.proc: subprocess.Popen | None = None
         self.lock = threading.Lock()
         self.voices: list[str] = []
         self.error: str | None = None
+        self.cloner: Cloner | None = None
 
     @staticmethod
     def command() -> list[str] | None:
@@ -131,10 +164,15 @@ class Kokoro:
             return cfg if isinstance(cfg, list) else [cfg]
         return default_command()
 
+    def usable(self, preset: dict) -> bool:
+        if preset.get("clone"):
+            return bool(clone_ref(preset) and Cloner.command())
+        return not self.voices or all(v in self.voices for v in preset["blend"])
+
     def info(self) -> dict:
         cfg = paths.config()
         voices = [v for v in BRITISH_VOICES if not self.voices or v in self.voices]
-        usable = lambda p: not self.voices or all(v in self.voices for v in p["blend"])  # noqa: E731
+        usable = self.usable
         presets = [{"id": k, "name": p["name"]} for k, p in VOICE_PRESETS.items() if not p.get("agent") and usable(p)]
         team = [{"id": k, "name": p["name"], "agent": p["agent"]} for k, p in VOICE_PRESETS.items() if p.get("agent") and usable(p)]
         return {"available": bool(self.command()) and not self.error, "voice": cfg.get("tts_voice", DEFAULT_VOICE),
@@ -169,18 +207,29 @@ class Kokoro:
             pass
 
     def speak(self, text: str, voice: str | None = None, speed: float | None = None) -> bytes:
-        text = " ".join((text or "").split())[:MAX_CHARS]
+        text = say_live(" ".join((text or "").split())[:MAX_CHARS])
         if not text:
             raise TTSError("Nothing to say.")
         cfg = paths.config()
         if voice not in BRITISH_VOICES and voice not in VOICE_PRESETS:
             voice = cfg.get("tts_voice", DEFAULT_VOICE)
         preset = VOICE_PRESETS.get(voice)
+        if preset and preset.get("clone"):
+            ref = clone_ref(preset)
+            if not (ref and Cloner.command()):  # clone not installed here: fall back to the stock JARVIS voice
+                return self.speak(text, DEFAULT_VOICE, speed)
+            self.cloner = self.cloner or Cloner()
+            return self.cloner.ask({"text": text, "clone": str(ref), "exaggeration": preset.get("exaggeration"),
+                                    "cfg": preset.get("cfg"), "fx": preset.get("fx")})
         if preset:
             req = {"text": text, "voice": next(iter(preset["blend"])), "blend": preset["blend"],
                    "speed": speed or preset["speed"], "fx": preset.get("fx")}
         else:
             req = {"text": text, "voice": voice, "speed": speed or cfg.get("tts_speed", 1.0)}
+        return self.ask(req)
+
+    def ask(self, req: dict) -> bytes:
+        """Send one request to the worker (starting it if needed) and return the WAV."""
         with self.lock:
             for attempt in (1, 2):  # restart once if the worker died
                 if not (self.proc and self.proc.poll() is None):
@@ -202,6 +251,8 @@ class Kokoro:
         return base64.b64decode(reply["wav"])
 
     def stop(self) -> None:
+        if self.cloner:
+            self.cloner.stop()
         if self.proc:
             try:
                 self.proc.kill()
@@ -214,3 +265,11 @@ class Kokoro:
                 except OSError:
                     pass
             self.proc = None
+
+
+class Cloner(Kokoro):
+    """The Chatterbox clone worker (clone_worker.py), for presets with a "clone" reference voice."""
+
+    @staticmethod
+    def command() -> list[str] | None:
+        return clone_command()

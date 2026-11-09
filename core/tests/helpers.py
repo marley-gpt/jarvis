@@ -21,6 +21,13 @@ class BrainTest(unittest.TestCase):
         self.home = Path(tempfile.mkdtemp(prefix="jarvis-test-"))
         self._old = os.environ.get("JARVIS_HOME")
         os.environ["JARVIS_HOME"] = str(self.home)
+        # The sales watch's connector pull never starts a real Claude run in a test (T103).
+        os.environ["JARVIS_SALES_FEED_COMMAND"] = str(CORE / "tests" / "fixtures" / "fake_sales_feed.py")
+        # Tests behave the same on the standby laptop as on the primary PC (T105).
+        os.environ["JARVIS_ROLE"] = "primary"
+        # Brain sync never touches the owner's real OneDrive folder from a test.
+        self.sync_dir = Path(tempfile.mkdtemp(prefix="jarvis-sync-"))
+        os.environ["JARVIS_SYNC_DIR"] = str(self.sync_dir)
         self.conn = db.connect()
 
     def tearDown(self):
@@ -30,6 +37,7 @@ class BrainTest(unittest.TestCase):
         else:
             os.environ["JARVIS_HOME"] = self._old
         shutil.rmtree(self.home, ignore_errors=True)
+        shutil.rmtree(self.sync_dir, ignore_errors=True)
 
     def init(self):
         cli.cmd_init(self.conn, None)

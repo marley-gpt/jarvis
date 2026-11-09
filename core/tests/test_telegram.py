@@ -1,11 +1,13 @@
+import base64
 import json
 import threading
 import time
+from unittest import mock
 
 from helpers import BrainTest
 from test_dashboard import FAKE
 
-from jarvis import dashboard, telegram
+from jarvis import dashboard, db, memory, telegram
 
 
 class BridgeCase(BrainTest):
@@ -161,6 +163,25 @@ class PhoneControlTest(BridgeCase):
         self.assertTrue(sent[-1].startswith("no call"))
         self.assertIn("URGENT", self.texts(222)[-1])
 
+    def test_send_a_voice_sample_file_with_its_label(self):
+        import argparse
+        from jarvis import cli
+        telegram.save(chat_id=222)
+        ogg = self.home / "sample.ogg"
+        ogg.write_bytes(b"OggS fake")
+        cli.cmd_telegram_send(self.conn, argparse.Namespace(text="Voice A", voice=False, file=str(ogg)))
+        self.assertEqual([m for m, _ in self.sent], ["sendVoice", "sendMessage"])
+        self.assertEqual(self.texts(222), ["Voice A"])
+
+    def test_send_a_photo_with_its_caption(self):
+        import argparse
+        from jarvis import cli
+        telegram.save(chat_id=222)
+        png = self.home / "room.png"
+        png.write_bytes(b"\x89PNG fake")
+        cli.cmd_telegram_send(self.conn, argparse.Namespace(text="Option A", voice=False, file=None, photo=str(png)))
+        self.assertEqual(self.sent, [("sendPhoto", {"chat_id": 222, "caption": "Option A"})])
+
     def test_owner_username_is_saved_for_calls(self):
         self.bridge._message({"chat": {"id": 222}, "from": {"username": "marley"}, "text": "/today"})
         self.assertEqual(telegram.settings()["call_user"], "marley")
@@ -242,6 +263,23 @@ class PhoneMediaTest(BridgeCase):
                               "video": {"file_id": "v1", "mime_type": "video/mp4", "file_size": 13}})
         self.assertTrue(self.server.runner.busy)
         self.assertIn("sent a video", self.server.runner.live["request"])
+
+    def test_a_video_is_saved_to_memory_then_deleted(self):
+        frame = {"media_type": "image/jpeg", "data": base64.b64encode(b"jpeg").decode()}
+        with mock.patch.object(telegram, "video_frames", return_value=[frame] * 4), \
+                mock.patch.object(telegram.media, "transcribe", return_value="use the bundle offer"):
+            self.bridge._message({"chat": {"id": 222}, "message_id": 9, "caption": "look at this hook",
+                                  "video": {"file_id": "v3", "mime_type": "video/mp4", "file_size": 13}})
+        self.assertIn("the video was deleted", self.server.runner.live["request"])
+        folder = self.home / "files" / "telegram"
+        self.assertEqual(list(folder.rglob("*.mp4")), [])
+        self.assertEqual(len(list(folder.rglob("*-frames/*.jpg"))), 4)
+        conn = db.connect()
+        try:
+            hits = memory.search(conn, "bundle offer")
+        finally:
+            conn.close()
+        self.assertTrue(any("look at this hook" in h["title"] for h in hits))
 
     def test_too_big_files_get_a_reply(self):
         self.bridge._message({"chat": {"id": 222}, "video": {"file_id": "v2", "file_size": 50 * 1024 * 1024}})

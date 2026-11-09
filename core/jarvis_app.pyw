@@ -40,7 +40,20 @@ def running() -> bool:
         return False
 
 
+def pull_brain() -> None:
+    """On the standby laptop: fetch the brain the PC last pushed to OneDrive before anything opens it (T105)."""
+    sys.path.insert(0, str(CORE))
+    from jarvis import paths
+    if paths.standby():
+        try:
+            subprocess.run([sys.executable, str(CORE / "jarvis_cli.py"), "sync", "pull"], cwd=REPO, timeout=300,
+                           capture_output=True, creationflags=NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # the routines tick tries again in 15 minutes
+
+
 def start_server() -> None:
+    pull_brain()
     pyw = Path(sys.executable).with_name("pythonw.exe")
     exe = str(pyw if pyw.exists() else sys.executable)
     log = REPO / "brain" / "scratch" / "dashboard.log"
@@ -73,6 +86,39 @@ def launch(page: str = "") -> None:
             if running():
                 break
     open_window(page)
+
+
+def reset() -> None:
+    """The Reset JARVIS shortcut, for when he's stuck: stop whatever he's doing (he picks the conversation up
+    again with the next message). If the app itself isn't answering, restart it. Says what happened in a box."""
+    import ctypes
+    import json
+
+    def tell(text: str) -> None:
+        ctypes.windll.user32.MessageBoxW(0, text, "JARVIS", 0x40 | 0x10000)  # information icon, on top
+
+    token = (REPO / "brain" / "secrets" / "dashboard_token")
+    try:
+        req = urllib.request.Request(URL + "api/stop", b"{}", method="POST", headers={
+            "Content-Type": "application/json", "X-Jarvis-Token": token.read_text(encoding="utf-8").strip()})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            if json.loads(r.read() or b"{}").get("ok"):
+                return tell("JARVIS has been reset, sir. Whatever he was stuck on is stopped, and any messages "
+                            "you sent meanwhile are being answered now.")
+    except (OSError, ValueError):
+        pass
+    # The app isn't answering: end it and start it again.
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Where-Object { $_.CommandLine -match "
+          "'jarvis_cli.py.? dashboard' -and $_.CommandLine -notmatch '--port' } | "
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, creationflags=NO_WINDOW)
+    time.sleep(2)
+    start_server()
+    for _ in range(60):
+        time.sleep(0.5)
+        if running():
+            return tell("JARVIS wasn't answering, sir, so I've restarted him. He's back up now.")
+    tell("JARVIS didn't come back up, sir. The details are in brain/scratch/dashboard.log.")
 
 
 # ---------------------------------------------------------------- icon and shortcuts
@@ -108,7 +154,8 @@ def install() -> None:
     target = str(pyw if pyw.exists() else sys.executable)
     script = str(Path(__file__).resolve())
     # Ask Windows for the real folders: the Desktop is often redirected into OneDrive.
-    shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"), ("JARVIS Chat", " --chat", "Chat with JARVIS"))
+    shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"), ("JARVIS Chat", " --chat", "Chat with JARVIS"),
+                 ("Reset JARVIS", " --reset", "JARVIS stuck? Stops what he is doing, or restarts him if frozen"))
     places = [(folder, s) for folder in ("Desktop", "Programs") for s in shortcuts]
     places.append(("Startup", ("JARVIS background", " --server", "Starts JARVIS and the phone bridge at sign-in")))
     for folder, (name, extra, about) in places:
@@ -125,6 +172,8 @@ def install() -> None:
 if __name__ == "__main__":
     if "--install" in sys.argv:
         install()
+    elif "--reset" in sys.argv:
+        reset()
     elif "--server" in sys.argv:
         if not running():
             start_server()
