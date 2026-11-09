@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brain_graph, brief, control, db, hq, journal, live, memory, paths, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
+from . import activity, brain_graph, brief, control, db, hq, hq_assets, journal, live, memory, paths, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The main view (T97) is the speaking stage (T86: the orb and the cards of what JARVIS is saying) in front of the
@@ -805,6 +805,11 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             if route == "/api/swarm/file":
                 found = swarm.image((parse_qs(query).get("path") or [""])[0])
                 return self._send(200, *found) if found else self._send(204, b"", "text/plain")
+            if route.startswith("/hq-assets/"):   # the CC0 packs in brain/files/hq/assets (models, textures), nothing else
+                found = hq_assets.serve(route[len("/hq-assets/"):])
+                return self._send(200, *found) if found else self._json(404, {"error": "no such asset"})
+            if route == "/api/hq/assets":
+                return self._json(200, hq_assets.status())
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
             if route == "/api/hq":
@@ -1012,6 +1017,9 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
+            if self.path == "/api/hq/assets/fetch":   # the owner's button: fetch the CC0 packs this machine is missing
+                started = hq_assets.fetch_in_background(body.get("only") or None)
+                return self._json(202, {"ok": True, "started": started, **hq_assets.status()})
             if self.path == "/api/hq/conversation":
                 # The model the conversation runs on (fast for talking, the strongest for hard work), kept in
                 # brain/config.json; the running Claude Code is closed so the next message uses it.

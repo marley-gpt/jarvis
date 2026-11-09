@@ -286,10 +286,53 @@ function buildWorld(THREE, addons, renderer, opts) {
     parent.add(m); return m;
   };
 
+  // ---------------------------------------------------------------- real models: the CC0 packs, when this machine has them
+  // Everything is drawn by hand first; where a pack is installed (Settings, or `bin/jarvis hq assets fetch`) the real model
+  // arrives afterwards and takes the drawing's place: people from Quaternius, furniture and planting from Poly Haven and
+  // Kenney. Loading never blocks the scene, and a model that fails to load leaves the drawing in place.
+  const ASSETS = (!simple && opts.assets) || { packs: [], polyhaven: [] };
+  const ABASE = ASSETS.base || "/hq-assets/";
+  const hasPack = (id) => (ASSETS.packs || []).includes(id);
+  const PHM = (id) => ((ASSETS.polyhaven || []).includes(id) ? `${ABASE}polyhaven/${id}/${id}_1k.gltf` : null);
+  const KEN = (id) => (hasPack("kenney-nature") ? `${ABASE}kenney-nature/${id}.glb` : null);
+  const QCH = (id) => (hasPack("quaternius-characters") ? `${ABASE}quaternius-characters/${id}.fbx` : null);
+  let loaders = null;
+  const getLoaders = () => (loaders ??= Promise.all([import("three/addons/loaders/GLTFLoader.js"), import("three/addons/loaders/FBXLoader.js"), import("three/addons/utils/SkeletonUtils.js")])
+    .then(([g, f, s]) => ({ gltf: new g.GLTFLoader(), fbx: new f.FBXLoader(), cloneSkinned: s.clone })));
+  const modelCache = new Map();
+  function loadModel(url) {   // one download per file; callers instance or clone the shared object
+    if (!modelCache.has(url)) modelCache.set(url, getLoaders().then((L) => url.endsWith(".fbx") ? L.fbx.loadAsync(url)
+      : L.gltf.loadAsync(url).then((g) => { g.scene.animations = g.animations; return g.scene; })).then((obj) => {
+        obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; for (const m of [].concat(o.material)) if ("envMapIntensity" in m) m.envMapIntensity = 0.45; } });
+        obj.updateMatrixWorld(true); return obj;
+      }).catch((e) => { console.warn("HQ: a model did not load, the drawing stays:", url, e?.message || e); return null; }));
+    return modelCache.get(url);
+  }
+  // Draw a loaded model many times: one InstancedMesh per part, each instance = place × fit × the part's own transform.
+  function instanceModel(obj, places, fit = {}, parent = scene3) {
+    const fitM = at(fit.x || 0, fit.y || 0, fit.z || 0, fit.ry || 0, fit.s || 1, fit.s || 1, fit.s || 1), m = new THREE.Matrix4(), out = [];
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      const im = new THREE.InstancedMesh(o.geometry, o.material, places.length);
+      places.forEach((p, i) => { m.copy(p).multiply(fitM).multiply(o.matrixWorld); im.setMatrixAt(i, m); });
+      im.castShadow = im.receiveShadow = true; parent.add(im); out.push(im);
+    });
+    return out;
+  }
+  // One copy of a model in a frame, replacing drawn stand-ins once it is in.
+  function placeModel(url, parent, x, y, z, ry = 0, s = 1, standIns = []) {
+    if (!url) return;
+    loadModel(url).then((obj) => {
+      if (!obj) return;
+      const copy = obj.clone(); copy.position.set(x, y, z); copy.rotation.y = ry; copy.scale.setScalar(s);
+      parent.add(copy); standIns.forEach((o) => { o.visible = false; });
+    });
+  }
+
   // Scenery props (furniture, planting, visitors) placed in a pavilion's frame or the estate's, drawn as one
   // instanced mesh per kind once everything is built. None of them is an agent or an agent's desk.
   const PROPS = {};
-  const propKind = (kind, geo, mat) => { PROPS[kind] = { geo, mat, list: [] }; };
+  const propKind = (kind, geo, mat, models) => { PROPS[kind] = { geo, mat, list: [], models: (models || []).filter((x) => x.url) }; };   // models: real versions [{url, fit}]
   const prop = (kind, parent, x, y, z, ry = 0, sc = 1, color = null) => PROPS[kind].list.push([parent, x, y, z, ry, sc, color]);
   function buildProps() {
     const m = new THREE.Matrix4();
@@ -302,6 +345,14 @@ function buildWorld(THREE, addons, renderer, opts) {
         if (color != null) im.setColorAt(i, C(color));
       });
       im.castShadow = !simple && k.shadow !== false; k.mesh = im; scene3.add(im);
+      if (k.models.length) {   // the real models take the drawing's place when they arrive
+        const places = k.list.map(([parent, x, y, z, ry, sc]) => { parent.updateWorldMatrix(true, false); return at(x, y, z, ry, sc, sc, sc).premultiply(parent.matrixWorld); });
+        Promise.all(k.models.map((x) => loadModel(x.url))).then((objs) => {
+          if (!objs.every(Boolean)) return;
+          objs.forEach((obj, i) => instanceModel(obj, places, k.models[i].fit));
+          scene3.remove(im);
+        });
+      }
     }
   }
   propKind("workstation", merge([
@@ -312,10 +363,16 @@ function buildWorld(THREE, addons, renderer, opts) {
     { geo: new THREE.BoxGeometry(0.7, 0.12, 0.65), color: 0xf1ede6, m: at(0, 0.5, 0.85) },
     { geo: new THREE.BoxGeometry(0.7, 0.75, 0.1), color: 0xf1ede6, m: at(0, 0.95, 1.2) },
     { geo: new THREE.CylinderGeometry(0.04, 0.25, 0.45, 10), color: 0xc6a46a, m: at(0, 0.22, 0.85) },
-  ]), M.vcol);
+  ]), M.vcol, [{ url: PHM("metal_office_desk"), fit: { s: 1.1 } }, { url: PHM("modern_arm_chair_01"), fit: { z: 0.95, ry: Math.PI, s: 1.05 } }]);
   propKind("screen", new THREE.PlaneGeometry(1.22, 0.72).translate(0, 1.3, -0.27), M.screenGlow);
   PROPS.screen.shadow = false;
   propKind("flower", new THREE.IcosahedronGeometry(0.5, 0), std({ roughness: 0.9, flatShading: true }));
+  for (const [k, f] of [["flowerR", "flower_redA"], ["flowerP", "flower_purpleB"], ["flowerY", "flower_yellowC"]]) propKind(k, PROPS.flower.geo, PROPS.flower.mat, [{ url: KEN(f), fit: { s: 2.4 } }]);
+  // An armchair: a leather cube, or Poly Haven's armchair.
+  propKind("armchair", new THREE.BoxGeometry(0.55, 0.5, 0.55).translate(0, 0.25, 0), M.leather, [{ url: PHM("ArmChair_01"), fit: { s: 1.1 } }]);
+  // A planter: a white cube with a shrub, or Poly Haven's potted plant.
+  propKind("planter", merge([{ geo: new THREE.BoxGeometry(0.8, 0.8, 0.8), color: 0xffffff, m: at(0, 0.4, 0) }, { geo: new THREE.IcosahedronGeometry(0.7, 0), color: 0x55743d, m: at(0, 1.3, 0) }]), M.vcol,
+    [{ url: PHM("potted_plant_04"), fit: { s: 3.6 } }]);
   propKind("cypress", new THREE.ConeGeometry(0.9, 7.5, 7).translate(0, 3.75, 0), std({ color: 0x2f4d2a, roughness: 0.95, flatShading: true }));
   propKind("oliveTrunk", new THREE.CylinderGeometry(0.16, 0.26, 2.6, 7).translate(0, 1.3, 0), std({ color: 0x6b5340, roughness: 0.9 }));
   propKind("oliveCanopy", new THREE.IcosahedronGeometry(2.1, 1).translate(0, 3.6, 0), std({ color: 0x7c9a66, roughness: 0.9, flatShading: true }));
@@ -324,7 +381,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     { geo: new THREE.BoxGeometry(1.9, 0.4, 0.06), color: 0x5b3a25, m: at(0, 0.75, -0.26) },
     { geo: new THREE.BoxGeometry(0.06, 0.48, 0.5), color: 0xc6a46a, m: at(-0.85, 0.24, 0) },
     { geo: new THREE.BoxGeometry(0.06, 0.48, 0.5), color: 0xc6a46a, m: at(0.85, 0.24, 0) },
-  ]), M.vcol);
+  ]), M.vcol, [{ url: PHM("modular_street_seating"), fit: { s: 0.45 } }]);
   propKind("bollard", new THREE.CylinderGeometry(0.09, 0.11, 0.9, 8).translate(0, 0.45, 0), M.frame);
   propKind("bollardLamp", new THREE.CylinderGeometry(0.11, 0.11, 0.16, 8).translate(0, 0.98, 0), M.lampGlass);
   PROPS.bollardLamp.shadow = false;
@@ -347,13 +404,15 @@ function buildWorld(THREE, addons, renderer, opts) {
   propKind("visitorHair", new THREE.SphereGeometry(0.205, 12, 8, 0, Math.PI * 2, 0, 1.35).translate(0, 1.9, -0.02), std({ color: 0xffffff, roughness: 0.8, flatShading: true }));
   const SHIRTS = [0x1f2a44, 0xe9d8c0, 0xd4202f, 0x2f3338, 0xf1c40f, 0x3a7bd5, 0xf2f2f2, 0x2f8f83, 0xc8b79a, 0x6b3fa0];
   const VSKIN = [0xf1c7a5, 0xe0ac83, 0xc68a62, 0x8d5a3b, 0xf5d6bf, 0xd9a07a], VHAIR = [0x2b1d14, 0x4a3022, 0x7a5a3a, 0x1b1b1b, 0xb8925c];
+  const extras = [];   // visitors waiting to become real people (the character pack): [parent, x, y, z, ry]
   const visitor = (parent, x, y, z, ry) => {
+    if (hasPack("quaternius-characters")) { extras.push([parent, x, y, z, ry]); return; }
     const sc = 1.15 + rand() * 0.15;
     prop("visitorBody", parent, x, y, z, ry, sc, SHIRTS[(rand() * SHIRTS.length) | 0]); prop("visitorTrim", parent, x, y, z, ry, sc);
     prop("visitorHead", parent, x, y, z, ry, sc, VSKIN[(rand() * VSKIN.length) | 0]); prop("visitorHair", parent, x, y, z, ry, sc, VHAIR[(rand() * VHAIR.length) | 0]);
   };
   const FLOWERS = [0xe24b6a, 0xf7f7f7, 0xd94c9c, 0xf29e3b, 0x7b4fbf, 0xffffff, 0xff6b6b];
-  const flower = (parent, x, y, z) => prop("flower", parent, x, y, z, rand() * 6.3, 0.55 + rand() * 0.55, FLOWERS[(rand() * FLOWERS.length) | 0]);
+  const flower = (parent, x, y, z) => prop(PROPS.flowerR.models.length ? ["flowerR", "flowerP", "flowerY"][(rand() * 3) | 0] : "flower", parent, x, y, z, rand() * 6.3, 0.55 + rand() * 0.55, FLOWERS[(rand() * FLOWERS.length) | 0]);
   const workstation = (parent, x, y, z, ry, sc = 1) => { prop("workstation", parent, x, y, z, ry, sc); prop("screen", parent, x, y, z, ry, sc); };
   const olive = (parent, x, y, z, sc = 1) => { prop("oliveTrunk", parent, x, y, z, 0, sc); prop("oliveCanopy", parent, x, y, z, rand() * 6.3, sc); };
 
@@ -849,17 +908,21 @@ function buildWorld(THREE, addons, renderer, opts) {
     box(0.5, 0.06, 0.3, M.frame, 0, 0.86, 0.5, ceoDesk, false);
     const ceoLamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), M.lampGlass); ceoLamp.position.set(1.7, 1.25, -0.3); ceoDesk.add(ceoLamp);
     box(0.05, 0.4, 0.05, M.gold, 1.7, 1.0, -0.3, ceoDesk, false);
-    box(0.85, 0.12, 0.8, M.walnut, 0, 0.6, -1.3, ceoDesk, false);                   // the owner's chair, low-backed so he stays in view
-    box(0.85, 0.55, 0.1, M.walnut, 0, 0.9, -1.68, ceoDesk, false);
-    const ceoBase = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.26, 0.55, 12), M.gold); ceoBase.position.set(0, 0.28, -1.3); ceoDesk.add(ceoBase);
-    box(2.8, 0.55, 1.0, M.leather, -6.2, 0.28, -3.5, ceoDesk);                      // sofa
-    box(2.8, 0.7, 0.25, M.leather, -6.2, 0.9, -3.95, ceoDesk, false);
-    box(1.3, 0.06, 0.7, M.walnut, -6.2, 0.5, -1.9, ceoDesk, false);                 // low table
-    box(0.08, 0.5, 0.08, M.gold, -6.2, 0.25, -1.9, ceoDesk, false);
+    const ownerChair = [box(0.85, 0.12, 0.8, M.walnut, 0, 0.6, -1.3, ceoDesk, false)];   // the owner's chair, low-backed so he stays in view
+    placeModel(PHM("ArmChair_01"), ceoDesk, 0, 0, -1.35, 0, 1.15, ownerChair);
+    ownerChair.push(box(0.85, 0.55, 0.1, M.walnut, 0, 0.9, -1.68, ceoDesk, false));
+    const ceoBase = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.26, 0.55, 12), M.gold); ceoBase.position.set(0, 0.28, -1.3); ceoDesk.add(ceoBase); ownerChair.push(ceoBase);
+    const sofaA = box(2.8, 0.55, 1.0, M.leather, -6.2, 0.28, -3.5, ceoDesk);         // sofa (drawn, then Poly Haven's)
+    const sofaB = box(2.8, 0.7, 0.25, M.leather, -6.2, 0.9, -3.95, ceoDesk, false);
+    placeModel(PHM("Sofa_01"), ceoDesk, -6.2, 0, -3.6, 0, 1.7, [sofaA, sofaB]);
+    for (const ax of [-7.8, -4.6]) prop("armchair", ceoDesk, ax, 0, -0.3, Math.PI);   // two armchairs across the table from the sofa
+    const tableA = box(1.3, 0.06, 0.7, M.walnut, -6.2, 0.5, -1.9, ceoDesk, false);  // low table
+    const tableB = box(0.08, 0.5, 0.08, M.gold, -6.2, 0.25, -1.9, ceoDesk, false);
+    placeModel(PHM("modern_coffee_table_01"), ceoDesk, -6.2, 0, -1.9, Math.PI / 2, 1.1, [tableA, tableB]);
     box(2.2, 1.2, 0.5, M.walnut, 6.6, 0.6, -5.5, ceoDesk);                          // cabinet
     box(0.12, 2.6, 1.6, M.gold, -9.95, 1.3, -4.6, ceoDesk, false);                     // the lift door, in the side wall
     box(0.3, 0.12, 1.9, M.frame, -9.9, 2.66, -4.6, ceoDesk, false);
-    for (const [px, pz] of [[-7.6, 4.2], [7.6, 4.2], [7.6, -2.4]]) { box(0.8, 0.8, 0.8, M.white, px, 0.4, pz, ceoDesk, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.3, pz); ceoDesk.add(pl); }
+    for (const [px, pz] of [[-7.6, 4.2], [7.6, 4.2], [7.6, -2.4]]) prop("planter", ceoDesk, px, 0, pz, rand() * 6.3);
     HQ.updateWorldMatrix(true, true);
     ceoSeat = { pos: HQ.localToWorld(new V3(0, 21.42, -0.1)), face: 0 };   // the owner's chair, facing the glass
     const signTex = canvasTex(1024, 512, (g, w, h) => {
@@ -1108,11 +1171,84 @@ function buildWorld(THREE, addons, renderer, opts) {
     "store-qa":          { hair: "short", hairColor: 0x3b2a20, build: [1.0, 0.97], prop: "bag" },
     "creative-director": { hair: "long", hairColor: 0xb8925c, build: [0.96, 1.05], prop: "camera" },
     "product-testing":   { hair: "crop", hairColor: 0x4a3022, build: [1.06, 0.98], prop: "beaker" },
-    "jarvis": { suit: 0x101216, tie: 0xffd98a, glow: true, hair: "short", hairColor: 0x1b1b1b, build: [1.0, 1.04] },
-    "owner":  { suit: 0xf1ead9, trousers: 0xf1ead9, tie: 0xc6a46a, hair: "short", hairColor: 0x2b1d14, build: [1.0, 1.0], sunglasses: true },
-    "blake":  { suit: 0x2f8f83, casual: true, hair: "crop", hairColor: 0x7a5a3a, build: [1.06, 1.02], prop: "chart" },
-    "mark":   { suit: 0x3a3f46, casual: true, hair: "bun", hairColor: 0x1b1b1b, build: [1.0, 1.04], prop: "notebook" },
+    "jarvis": { suit: 0x101216, tie: 0xffd98a, glow: true, hair: "short", hairColor: 0x1b1b1b, build: [1.0, 1.04], fbx: "Suit_Male" },
+    "owner":  { suit: 0xf1ead9, trousers: 0xf1ead9, tie: 0xc6a46a, hair: "short", hairColor: 0x2b1d14, build: [1.0, 1.0], sunglasses: true, fbx: "Suit_Male" },
+    "blake":  { suit: 0x2f8f83, casual: true, hair: "crop", hairColor: 0x7a5a3a, build: [1.06, 1.02], prop: "chart", fbx: "Casual_Male" },
+    "mark":   { suit: 0x3a3f46, casual: true, hair: "bun", hairColor: 0x1b1b1b, build: [1.0, 1.04], prop: "notebook", fbx: "Casual2_Male" },
   };
+  // Which Quaternius model each person is (the drawn look's colours are painted onto it), and the pool for the rest.
+  Object.assign(LOOKS["product-research"], { fbx: "Suit_Male" }); Object.assign(LOOKS["market-research"], { fbx: "Suit_Female" });
+  Object.assign(LOOKS["creative-research"], { fbx: "Casual_Female" }); Object.assign(LOOKS["mentor-learning"], { fbx: "OldClassy_Male" });
+  Object.assign(LOOKS["operations"], { fbx: "Casual3_Male" }); Object.assign(LOOKS["accountant"], { fbx: "Suit_Female" });
+  Object.assign(LOOKS["meta-ads"], { fbx: "Casual_Male" }); Object.assign(LOOKS["meta-ads-auditor"], { fbx: "OldClassy_Female" });
+  Object.assign(LOOKS["shopify"], { fbx: "Casual2_Female" }); Object.assign(LOOKS["store-qa"], { fbx: "Casual3_Female" });
+  Object.assign(LOOKS["creative-director"], { fbx: "Casual2_Male" }); Object.assign(LOOKS["product-testing"], { fbx: "Worker_Male" });
+  const FBX_POOL = ["Casual_Male", "Casual_Female", "Casual2_Male", "Casual2_Female", "Suit_Male", "Suit_Female"];
+  const BODY = 2.3 / 328;   // the models are 328 units tall; people here stand about 2.3 m, the estate's scale
+  // The model's material names → this person's colours (the files' own colours don't survive the FBX import).
+  function palette(L, teamColor, h) {
+    const suit = L.suit != null ? L.suit : new THREE.Color(teamColor).lerp(new THREE.Color(0x1f2a44), 0.5).getHex();
+    return { Skin: SKIN[(h >> 3) % SKIN.length], Face: 0x2a1c14, Hair: L.hairColor != null ? L.hairColor : HAIR[(h >> 6) % HAIR.length],
+      Black: suit, Shirt: L.casual ? C(teamColor).getHex() : 0xf4f4f4, Pants: L.trousers != null ? L.trousers : L.casual ? 0x2f3338 : suit,
+      Belt: 0x2a2a2a, Details: L.tie != null ? L.tie : C(teamColor).getHex(), Shoes: 0x1a1a1a };
+  }
+  function paint(obj, pal, glow) {
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false;
+      const many = Array.isArray(o.material);
+      const mats = [].concat(o.material).map((m) => {
+        const hex = pal[m.name] ?? (m.color.getHex() < 0x202020 ? 0x6b6b6b : m.color.getHex());
+        const lit = glow && m.name === "Details";
+        return std({ color: hex, roughness: m.name === "Skin" ? 0.6 : 0.8, name: m.name, emissive: lit ? hex : 0x000000, emissiveIntensity: lit ? 1.4 : 0 });
+      });
+      o.material = many ? mats : mats[0];
+    });
+  }
+  // The visitors about the estate: real people in varied clothes, standing easy (the Idle clip, each at its own moment).
+  const extraMixers = [];
+  function buildExtras() {
+    if (!extras.length) return;
+    const files = FBX_POOL.concat(["Worker_Female", "OldClassy_Male", "Casual3_Female", "Casual3_Male"]), q = new THREE.Quaternion(), pos = new V3();
+    Promise.all(files.map((f) => loadModel(QCH(f)))).then(async (tpls) => {
+      const L = await getLoaders();
+      extras.slice(0, 48).forEach(([parent, x, y, z, ry], i) => {
+        const tpl = tpls[i % tpls.length]; if (!tpl) return;
+        const h = hash("extra" + i), obj = L.cloneSkinned(tpl);
+        paint(obj, palette({ casual: true, hairColor: VHAIR[h % VHAIR.length], trousers: [0x2f3338, 0x5b4636, 0x1f2a44, 0xc8b79a][(h >> 2) % 4] }, SHIRTS[(h >> 4) % SHIRTS.length], h), false);
+        const g = new THREE.Group(); g.scale.setScalar(BODY * (0.92 + (h % 5) * 0.03)); g.add(obj);
+        parent.updateWorldMatrix(true, false);
+        g.position.copy(parent.localToWorld(pos.set(x, y, z)));
+        g.quaternion.copy(parent.getWorldQuaternion(q)).multiply(new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), ry));
+        scene3.add(g);
+        const idle = tpl.animations.find((a) => a.name.endsWith("|Idle")); if (!idle) return;
+        const mixer = new THREE.AnimationMixer(obj), act = mixer.clipAction(idle); act.play(); act.time = (h % 40) / 10;
+        mixer.update(0); extraMixers.push(mixer);
+      });
+    });
+  }
+  function upgrade(c, name, teamColor) {
+    const file = QCH(c.look.fbx || FBX_POOL[hash(name) % FBX_POOL.length]);
+    if (!file) return;
+    loadModel(file).then(async (tpl) => {
+      if (!tpl || !c.root.parent) return;
+      const L = await getLoaders(), obj = L.cloneSkinned(tpl);
+      paint(obj, palette(c.look, teamColor, hash(name)), c.look.glow);
+      const body = new THREE.Group(); body.scale.setScalar(BODY / 1.25); body.add(obj);
+      const mixer = new THREE.AnimationMixer(obj);
+      const clip = (n) => tpl.animations.find((a) => a.name.endsWith("|" + n)) || tpl.animations.find((a) => a.name.includes(n));
+      const act = (n, hold) => { const k = clip(n); if (!k) return null; const a = mixer.clipAction(k); a.play(); a.setEffectiveWeight(0);
+        if (hold) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.time = k.duration - 0.001; a.paused = true; } return a; };
+      const actions = { idle: act("Idle"), walk: act("Walk"), sit: act("SitDown", true), cheer: act("Victory") };
+      if (!actions.idle || !actions.walk) return;
+      actions.idle.time = Math.random() * 4;
+      const bones = {}; obj.traverse((o) => { if (o.isBone) bones[o.name] = o; });
+      if (c.prop && bones.FistR) { c.prop.position.set(0, 0, 0); c.prop.rotation.set(0, 0, 0); c.prop.visible = false; bones.FistR.add(c.prop); }   // sized on its first frame (see pose)
+      else if (c.prop) c.prop.visible = false;
+      c.fallback.forEach((x) => c.root.remove(x)); c.root.add(body);
+      Object.assign(c, { kind: "fbx", body, obj, mixer, actions, bones });
+    });
+  }
   const propGeo = {};
   function propMesh(kind, teamColor) {
     const g = new THREE.Group(); g.position.set(0, -0.3, 0.06);
@@ -1181,9 +1317,10 @@ function buildWorld(THREE, addons, renderer, opts) {
     };
     const tablet = part(body.tablet, M.frame); tablet.visible = false;
     const racket = part(body.racket, mat(0x222222)); racket.visible = false;
-    const c = { root, hips, legs: [leg(-1), leg(1)], torso, head, arms: [arm(-1), arm(1)], tablet, racket, prop: null, look: L };
+    const c = { root, hips, legs: [leg(-1), leg(1)], torso, head, arms: [arm(-1), arm(1)], tablet, racket, prop: null, look: L, fallback: [hips], kind: "drawn" };
     c.arms[1].el.add(tablet, racket);
     if (L.prop) { c.prop = propMesh(L.prop, C(teamColor).getHex()); c.arms[1].el.add(c.prop); }
+    upgrade(c, name, teamColor);
     return c;
   }
   // A floating name over a character's head; fades out when the view is far away (the chips name the buildings then).
@@ -1198,10 +1335,25 @@ function buildWorld(THREE, addons, renderer, opts) {
     c.root.add(tag); c.tag = tag;
   }
   const lerp = (a, b, t) => a + (b - a) * t;
+  const tmpA = new V3(), tmpB = new V3();
   // Pose from blend weights: walk, sit, type (hands on the keys), lean (+ back when relaxed, - slumped when blocked),
   // look (waiting: watching for the hand-off), tab (tablet), swing (tennis).
   function pose(c, st, ph) {
     const a = st.walk, s = st.sit, ty = st.type, w = st.walkPhase, calm = REDUCED ? 0 : 1;
+    if (c.kind === "fbx") {   // the real model: blend its clips, then nudge the bones for typing and looking
+      const A = c.actions, b = c.bones, sit = s * (1 - a);
+      A.walk.setEffectiveWeight(a); A.sit?.setEffectiveWeight(sit); A.idle.setEffectiveWeight(Math.max(0, 1 - a - sit));
+      A.walk.setEffectiveTimeScale(0.9 + 0.5 * a);
+      const tap = (Math.sin(ph * 11) * 0.5 + Math.sin(ph * 17.3) * 0.5) * 0.06 * calm;
+      if (b.UpperArmL && b.LowerArmL) { b.UpperArmL.rotation.x -= 0.5 * ty; b.UpperArmR.rotation.x -= 0.5 * ty; b.LowerArmL.rotation.x -= (0.6 + tap) * ty; b.LowerArmR.rotation.x -= (0.6 - tap) * ty; }
+      if (b.Head) { b.Head.rotation.x += 0.15 * ty + 0.3 * Math.max(0, -st.lean) - 0.1 * st.look; b.Head.rotation.y += Math.sin(ph * 0.31) * (0.08 + 0.3 * st.look) * calm; }
+      if (c.prop && !c.propFit && c.bones.FistR) {   // the armature carries its own scale: size the held prop from the hand's real scale, once
+        const r = c.root.getWorldScale(tmpA).x, f = c.bones.FistR.getWorldScale(tmpB).x;
+        if (r > 0.01 && f > 0) { c.prop.scale.setScalar(0.8 * r / f); c.propFit = true; }
+      }
+      if (c.prop) c.prop.visible = !!c.propFit && s < 0.5 && st.tab < 0.5;
+      return;
+    }
     const swing = Math.sin(w) * 0.55 * a;
     c.legs[0].hip.rotation.x = lerp(swing, -1.5, s);
     c.legs[1].hip.rotation.x = lerp(-swing, -1.5, s);
@@ -1272,6 +1424,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     st.look = damp(st.look, atDesk && A.status === "waiting" ? 1 : 0, 2.5, dt);
     st.tab = damp(st.tab, A.helper && !moving && !A.gone ? 1 : 0, 4, dt);
     st.swing = damp(st.swing, !moving && A.activity === "tennis" ? 1 : 0, 4, dt);
+    if (A.c.mixer) A.c.mixer.update(dt);
     pose(A.c, st, A.phase + time);
   }
 
@@ -1331,7 +1484,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     const grp = new THREE.Group(); grp.position.set(x, 0.6, z); pav.add(grp);
     grp.scale.setScalar(1.25);
     const top = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.09, 1.15), M.walnut); top.position.y = 0.8; top.castShadow = !simple; grp.add(top);
-    for (const sx of [-1.1, 1.1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.72, 0.9), M.gold); leg.position.set(sx, 0.37, 0); grp.add(leg); }
+    const legs = [-1.1, 1.1].map((sx) => { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.72, 0.9), M.gold); leg.position.set(sx, 0.37, 0); grp.add(leg); return leg; });
+    placeModel(PHM("metal_office_desk"), grp, 0, 0, 0, 0, 1, [top, ...legs]);   // the real desk, when the pack is in
     const sc = screenTexture();
     const mon = new THREE.Group(); mon.position.set(0, 1.3, -0.3);
     const bezel = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.98, 0.05), M.frame);
@@ -1344,6 +1498,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.85, 0.12), M.leather); back.position.set(0, 1.0, 0.36);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.3, 0.5, 12), M.gold); base.position.y = 0.25;
     chair.add(cushion, back, base); grp.add(chair);
+    placeModel(PHM("modern_arm_chair_01"), grp, 0, 0, 0.95, Math.PI, 0.95, [cushion, back, base]);
     const bulbMat = std({ color: 0xffffff, emissive: 0x9aa6b5, emissiveIntensity: 1.2 });
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 12), bulbMat); bulb.position.set(1.0, 1.44, -0.35);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlow, color: 0x9aa6b5, transparent: true, depthWrite: false, opacity: 0.6 }));
@@ -1412,8 +1567,8 @@ function buildWorld(THREE, addons, renderer, opts) {
     for (const [wx, wz, wr] of [[8.6, 2.2, -Math.PI / 2], [8.6, 5.0, -Math.PI / 2], [-8.6, 2.4, Math.PI / 2]]) workstation(pav, wx, 0.62, wz, wr, 1.1);
     const table = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.08, 24), M.walnut); table.position.set(-6.6, 1.4, 5.6); pav.add(table);
     box(0.12, 0.75, 0.12, M.gold, -6.6, 1.0, 5.6, pav, false);
-    for (let k = 0; k < 4; k++) { const a = (k / 4) * Math.PI * 2 + 0.4; box(0.55, 0.5, 0.55, M.leather, -6.6 + Math.cos(a) * 1.7, 0.88, 5.6 + Math.sin(a) * 1.7, pav, false); }
-    for (const [px, pz] of [[-9, -5.6], [9, -5.6], [9.2, 6.2], [-9.3, 2.0]]) { box(0.8, 0.8, 0.8, M.white, px, 1.0, pz, pav, false); const pl = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 0), M.leaf); pl.position.set(px, 1.9, pz); pav.add(pl); }
+    for (let k = 0; k < 4; k++) { const a = (k / 4) * Math.PI * 2 + 0.4; prop("armchair", pav, -6.6 + Math.cos(a) * 1.9, 0.62, 5.6 + Math.sin(a) * 1.9, Math.atan2(-Math.cos(a), -Math.sin(a))); }
+    for (const [px, pz] of [[-9, -5.6], [9, -5.6], [9.2, 6.2], [-9.3, 2.0]]) prop("planter", pav, px, 0.62, pz, rand() * 6.3);
     for (const ux of [-3.2, 3.2]) workstation(pav, ux, uy + 0.02, uz + 0.6, 0, 1.05);   // the upper floor
     // Outside: a flower bed along the front, cypresses at the back corners, and a lit path to the plaza.
     for (let bx = -PW / 2 - 0.5; bx <= PW / 2 + 0.5; bx += 1.1) if (Math.abs(bx) > 2.6) flower(pav, bx, 0.3, PD / 2 + 2.3);
@@ -1554,7 +1709,7 @@ function buildWorld(THREE, addons, renderer, opts) {
   let built = false, coreKick = 0, jarvisBusy = 0;
   function update(m) {
     const sites = m.departments || m.teams;
-    if (!built) { sites.forEach(buildPavilion); buildProps(); built = true; }
+    if (!built) { sites.forEach(buildPavilion); buildProps(); buildExtras(); built = true; }
     for (const t of sites) {
       const P = pavilions.get(t.id);
       if (!P) continue;
@@ -2078,6 +2233,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     // Real time, so a slow device keeps pace; capped so a long pause (a hidden tab) does not jump everything.
     const dt = Math.min(clock.getDelta(), 0.25), time = clock.elapsedTime;
     if (!first && (!onScreen() || paused)) return;
+    if (extraMixers.length) { const near = camera.position.distanceTo(controls.target) < 60; if (near || frameCount % 2 === 0) for (const mx of extraMixers) mx.update(near ? dt : dt * 2); }
     if (me.on) stepWalk(dt, time);
     else if (flight) {
       flight.t = Math.min(1, (performance.now() - flight.start) / (flight.dur * 1000));

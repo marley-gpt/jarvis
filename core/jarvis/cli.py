@@ -420,6 +420,26 @@ def cmd_journal(conn, args):
         out(fmt_journal(r, n=args.width))
 
 
+def cmd_hq_assets(conn, args):
+    from . import hq_assets
+    if args.action == "fetch":
+        try:
+            st = hq_assets.fetch(args.only or None, log=out)
+        except Exception as exc:
+            raise SystemExit(f"Asset fetch stopped: {exc}")
+    else:
+        st = hq_assets.status()
+    if args.json:
+        out(json.dumps(st, indent=1)); return
+    for k, p in st["packs"].items():
+        out(f"{'ready  ' if p['ready'] else 'missing'}  {k:24} {p['title']} ({p['size_mb']} MB, {p['licence']})")
+    ph = st["polyhaven"]
+    out(f"{'ready  ' if all(ph.values()) else 'missing'}  polyhaven                {sum(ph.values())} of {len(ph)} Poly Haven models (CC0)")
+    out("Folder: " + st["root"])
+    if not st["ready"] and args.action != "fetch":
+        out("Fetch what is missing with: bin/jarvis hq assets fetch")
+
+
 def cmd_dashboard(conn, args):
     from . import dashboard
     conn.close()  # the server opens its own connections per request
@@ -1318,6 +1338,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-w", "--width", type=int, default=300)
     s.set_defaults(fn=cmd_journal)
 
+    s = sub.add_parser("hq", help="the 3D HQ: its free asset packs")
+    hs = s.add_subparsers(dest="sub", required=True)
+    a = hs.add_parser("assets", help="status of the CC0 3D packs (people, trees, furniture), or fetch the missing ones")
+    a.add_argument("action", nargs="?", choices=["status", "fetch"], default="status")
+    a.add_argument("--only", action="append", help="just this pack or Poly Haven model id (repeatable)")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_hq_assets)
     s = sub.add_parser("dashboard", help="live dashboard: watch the agents and talk to JARVIS")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--no-open", action="store_true", help="don't open the browser")

@@ -593,6 +593,8 @@ function panelSettings(m) {
       <p class="quiet">Talking to JARVIS and the teams runs on this model and thinking level. Heavy work still goes to the specialists on their own models.</p>
       <label class="switch">Race sounds (the cars, when the view is near the circuit)<input type="checkbox" data-set="sound" ${J.pref("hqSound") !== "0" ? "checked" : ""}></label>
       <label class="switch">Graphics<select data-set="quality">${[["auto", `Automatic (${qualityAuto()} on this device)`], ["high", "High: HDRI light, depth of field, 4K shadows, ambient occlusion"], ["medium", "Medium: the full scene, lighter effects"], ["low", "Low: simplified, for phones"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqQuality") || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="switch">Real 3D models: people, furniture, plants (free CC0 packs, about 120 MB, kept out of OneDrive)<button type="button" class="btn small" data-act="assets">${(Feed.hq?.assets?.packs || []).length >= 2 ? "Installed" : "Download"}</button></label>
+      <p class="quiet" id="assets-note">${(Feed.hq?.assets?.packs || []).length >= 2 ? "Quaternius people, Kenney planting and Poly Haven furniture are in. Reload the page if you don't see them." : "Without them the HQ draws its own figures and furniture."}</p>
       <label class="switch">Time of day<select data-set="time">${[["live", "Live (follows the clock)"], ["day", "Day"], ["sunset", "Sunset"], ["evening", "Evening"]].map(([v, l]) => `<option value="${v}" ${(J.pref("hqTime") || "live") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <h3>Connections</h3>
       <p class="desc">The connectors Claude Code has on this PC, the same ones the desktop app and JARVIS use.</p>
@@ -696,6 +698,18 @@ document.addEventListener("click", (e) => {
 });
 $("toast").addEventListener("click", () => $("toast").dataset.task && open(`task:${$("toast").dataset.task}`));
 // Settings: every switch drives the real setting in jarvis.js (or this page's own display preference).
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-act='assets']"); if (!b) return;
+  b.disabled = true; b.textContent = "Downloading…";
+  const note = $("assets-note");
+  J.post("/api/hq/assets/fetch", {}).then(() => {
+    const poll = setInterval(async () => {
+      const st = await fetch("/api/hq/assets", { cache: "no-store" }).then((r) => r.json()).catch(() => null); if (!st) return;
+      if (note) note.textContent = st.progress?.log?.slice(-1)[0] || "Downloading…";
+      if (!st.progress?.running) { clearInterval(poll); b.textContent = st.ready ? "Installed" : "Try again"; b.disabled = false; if (note) note.textContent = st.ready ? "Done. Reloading…" : (st.progress?.error || "Something stopped the download."); if (st.ready) setTimeout(() => location.reload(), 1200); }
+    }, 1500);
+  }).catch((err) => { b.disabled = false; b.textContent = "Download"; if (note) note.textContent = err.message; });
+});
 document.addEventListener("change", (e) => {
   const k = e.target.dataset?.set;
   if (!k) return;
@@ -1028,8 +1042,9 @@ function quality() {
   return qualityAuto();
 }
 const Q = quality(), simple = Q === "low";
-import("/hq-scene.js").then(({ startScene }) => startScene({
+Promise.all([import("/hq-scene.js"), fetch("/api/hq", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null)]).then(([{ startScene }, hqFirst]) => startScene({
   stage: $("stage"), canvas: $("scene"), labels: $("labels"), veil: $("veil"), stick: $("stick"), status: STATUS, simple, quality: Q,
+  assets: (hqFirst || Feed.hq)?.assets,   // which CC0 model packs this machine has
   ao: Q === "high",   // ambient occlusion comes with High
   selected: () => pavilionFor(selected),
   avoid: cardRects,

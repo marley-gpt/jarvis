@@ -19,7 +19,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import memory, paths, records
+from . import hq_assets, memory, paths, records
 
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 SKILLS_DIR = paths.REPO_ROOT / ".claude" / "skills"
@@ -391,6 +391,7 @@ def data(conn) -> dict:
             "agent_voices": _agent_voices(), "recommended": {k: {"model": m, "why": w} for k, (m, w) in RECOMMENDED.items()},
             "conversation_model": model_alias(cfg.get("dashboard_model")) if cfg.get("dashboard_model") else "",
             "conversation_effort": cfg.get("dashboard_effort") or "",
+            "assets": hq_assets.ready(),   # the CC0 model packs this machine has (the scene draws stand-ins for the rest)
             "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
             # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
             "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
