@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brief, db, hq, journal, live, memory, paths, readiness, records, skills, team, telegram, tts, wakeword
+from . import activity, brief, db, hq, hq_assets, journal, live, memory, paths, readiness, records, skills, team, telegram, tts, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The HQ app is the main view (T54 revamp); the office, console and earlier versions stay available.
@@ -659,6 +659,11 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._send(200, (STATIC / name).read_bytes(), ctype)
             if route == "/api/live":
                 return self._json(200, live.state())
+            if route.startswith("/hq-assets/"):   # the CC0 packs in brain/files/hq/assets (models, textures), nothing else
+                found = hq_assets.serve(route[len("/hq-assets/"):])
+                return self._send(200, *found) if found else self._json(404, {"error": "no such asset"})
+            if route == "/api/hq/assets":
+                return self._json(200, hq_assets.status())
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
             if route == "/api/hq":
@@ -837,6 +842,9 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 return self._json(200, {"ok": True, "status": row["status"]})
             if self.path == "/api/hq/connectors":
                 return self._json(202, hq.check_connectors())
+            if self.path == "/api/hq/assets/fetch":   # the owner's button: fetch the CC0 packs this machine is missing
+                started = hq_assets.fetch_in_background(body.get("only") or None)
+                return self._json(202, {"ok": True, "started": started, **hq_assets.status()})
             if self.path == "/api/hq/conversation":
                 # The model the conversation runs on (fast for talking, the strongest for hard work), kept in
                 # brain/config.json; the running Claude Code is closed so the next message uses it.
