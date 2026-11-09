@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#05080d">
+<title>JARVIS</title>
+<style>
+  :root { --bg: #05080d; --ink: #e8f1f8; --dim: #7f93a6; --glow: #38bdf8; --red: #ef4444; --green: #22c55e; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    padding: max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom)); overflow: hidden; }
+  header { text-align: center; }
+  h1 { margin: 0; font-size: 30px; font-weight: 600; letter-spacing: .32em; padding-left: .32em; }
+  #state { margin-top: 6px; color: var(--dim); font-size: 15px; min-height: 21px; }
+  #timer { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 14px; min-height: 20px; }
+  .orb { width: 210px; height: 210px; border-radius: 50%; position: relative; flex: none;
+    background: radial-gradient(circle at 38% 32%, #e0f6ff 0%, #7dd3fc 14%, #0284c7 46%, #0b2742 78%, #05080d 100%);
+    box-shadow: 0 0 60px 6px rgba(56,189,248,.35), inset 0 0 40px rgba(255,255,255,.08);
+    transition: transform .12s ease-out, box-shadow .3s; }
+  .orb::after { content: ""; position: absolute; inset: -18px; border-radius: 50%;
+    border: 1px solid rgba(56,189,248,.25); animation: ring 3.2s ease-out infinite; opacity: 0; }
+  body.speaking .orb { box-shadow: 0 0 90px 16px rgba(56,189,248,.55), inset 0 0 40px rgba(255,255,255,.12); }
+  body.speaking .orb::after, body.ringing .orb::after { opacity: 1; }
+  body.thinking .orb { animation: think 1.6s ease-in-out infinite; }
+  @keyframes ring { from { transform: scale(.92); opacity: .8; } to { transform: scale(1.35); opacity: 0; } }
+  @keyframes think { 50% { box-shadow: 0 0 40px 2px rgba(56,189,248,.2); filter: brightness(.8); } }
+  #captions { width: 100%; max-width: 520px; min-height: 120px; text-align: center; }
+  #captions p { margin: 8px 0; }
+  #you { color: var(--dim); font-size: 15px; }
+  #him { font-size: 19px; }
+  .buttons { display: flex; gap: 56px; justify-content: center; }
+  button { width: 74px; height: 74px; border-radius: 50%; border: 0; color: #fff; font-size: 30px; cursor: pointer; }
+  button:active { transform: scale(.94); }
+  #answer { background: var(--green); }
+  #hangup { background: var(--red); display: none; }
+  #mute { background: #1f2937; display: none; font-size: 26px; }
+  #mute.on { background: #f8fafc; color: #05080d; }
+  .label { text-align: center; color: var(--dim); font-size: 13px; margin-top: 8px; }
+  body.oncall #answer { display: none; }
+  body.oncall #hangup, body.oncall #mute { display: inline-block; }
+</style>
+</head>
+<body class="ringing">
+  <header>
+    <h1>JARVIS</h1>
+    <div id="state">Tap to answer</div>
+    <div id="timer"></div>
+  </header>
+  <div class="orb" id="orb"></div>
+  <div id="captions"><p id="you"></p><p id="him"></p></div>
+  <div>
+    <div class="buttons">
+      <button id="mute" aria-label="Mute">🎙</button>
+      <button id="answer" aria-label="Answer">📞</button>
+      <button id="hangup" aria-label="Hang up">✕</button>
+    </div>
+    <div class="label" id="hint">Speak naturally. Talk over me to interrupt.</div>
+  </div>
+<script>
+// The phone side of a JARVIS call (core/jarvis/call.py): listen on the mic, notice when the owner stops
+// talking, send that speech as a 16 kHz WAV, and play JARVIS's sentences as they arrive.
+(() => {
+  const KEY = new URLSearchParams(location.search).get("k") || "";
+  const $ = (id) => document.getElementById(id);
+  const RATE = 16000;
+  let ctx, stream, source, proc, es, wakeLock, startedAt = 0, timerId = 0, muted = false;
+  let status = "idle", thinking = false;
+  // what JARVIS is saying
+  const queue = []; let current = null;
+  // voice activity detection
+  let floor = 0.006, loud = 0, quietMs = 0, capturing = false, frames = [], pre = [], heardMs = 0;
+  // a person's little reactions: "mm", "right" the moment the owner stops, "mm-hm" mid-flow, a filler if it's slow
+  const clips = {}, lastClip = {}; let clipNode = null, lastHmm = 0, fillerTimer = 0;
+
+  const post = (path, body, type = "application/json") =>
+    fetch(path, { method: "POST", headers: { "Content-Type": type, "X-Call-Key": KEY }, body });
+
+  function show() {
+    const speaking = !!current;
+    document.body.classList.toggle("speaking", speaking);
+    document.body.classList.toggle("thinking", !speaking && thinking);
+    $("state").textContent = muted ? "Muted" : speaking ? "Speaking" : capturing ? "Listening…"
+      : thinking ? "Thinking" : "Listening";
+  }
+
+  // ---- playback
+  function b64ToBuf(b64) {
+    const s = atob(b64), out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out.buffer;
+  }
+  async function playNext() {
+    if (current || clipNode || !queue.length || !ctx) return;
+    const item = queue.shift();
+    try {
+      const buf = await ctx.decodeAudioData(b64ToBuf(item.wav));
+      const node = ctx.createBufferSource();
+      node.buffer = buf; node.connect(ctx.destination);
+      current = node; $("him").textContent = item.text; show();
+      node.onended = () => { if (current === node) { current = null; show(); playNext(); } };
+      node.start();
+    } catch (_) { current = null; playNext(); }
+  }
+  async function loadClips(all) {
+    for (const [kind, list] of Object.entries(all)) {
+      clips[kind] = [];
+      for (const c of list) { try { clips[kind].push(await ctx.decodeAudioData(b64ToBuf(c.wav))); } catch (_) {} }
+    }
+  }
+  function playClip(kind, gain = 1) {
+    const list = clips[kind];
+    if (!ctx || !list?.length || current || clipNode) return false;
+    let i = Math.floor(Math.random() * list.length);
+    if (list.length > 1 && i === lastClip[kind]) i = (i + 1) % list.length;  // never the same one twice running
+    lastClip[kind] = i;
+    const node = ctx.createBufferSource(), g = ctx.createGain();
+    g.gain.value = gain; node.buffer = list[i]; node.connect(g); g.connect(ctx.destination);
+    clipNode = node; node.onended = () => { if (clipNode === node) clipNode = null; playNext(); };
+    node.start();
+    return true;
+  }
+  function stopTalking() {
+    queue.length = 0; clearTimeout(fillerTimer);
+    if (clipNode) { const n = clipNode; clipNode = null; try { n.stop(); } catch (_) {} }
+    if (current) { const n = current; current = null; try { n.stop(); } catch (_) {} }
+    post("/api/call/hush", "{}").catch(() => {});
+    show();
+  }
+
+  // ---- listening
+  function toWav(chunks) {
+    const n = chunks.reduce((a, c) => a + c.length, 0), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+    let o = 44;
+    for (const c of chunks) for (let i = 0; i < c.length; i++, o += 2) {
+      const s = Math.max(-1, Math.min(1, c[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+  function downsample(input, from) {
+    const ratio = from / RATE, out = new Float32Array(Math.floor(input.length / ratio));
+    for (let i = 0; i < out.length; i++) {
+      const a = Math.floor(i * ratio), b = Math.min(input.length, Math.floor((i + 1) * ratio));
+      let sum = 0; for (let j = a; j < b; j++) sum += input[j];
+      out[i] = sum / Math.max(1, b - a);
+    }
+    return out;
+  }
+  function finish() {
+    capturing = false; quietMs = 0;
+    const chunks = frames; frames = [];
+    if (heardMs >= 350) {
+      post("/api/call/hear", toWav(chunks), "audio/wav").catch(() => {});
+      if (heardMs >= 900) setTimeout(() => playClip("ack"), 120);  // react straight away, like a person would
+      clearTimeout(fillerTimer);
+      fillerTimer = setTimeout(() => { if (!current && !queue.length) playClip("filler"); }, 4500);
+    }
+    heardMs = 0; show();
+  }
+  function onAudio(e) {
+    const input = e.inputBuffer.getChannelData(0), ms = 1000 * input.length / ctx.sampleRate;
+    let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    const rms = Math.sqrt(sum / input.length), small = downsample(input, ctx.sampleRate);
+    if (muted) return;
+    // Over JARVIS's own voice the bar is higher, so his echo doesn't interrupt him.
+    const low = Math.max(0.016, floor * 3.5), high = Math.max(0.045, floor * 8);
+    const bar = capturing ? low : (current || clipNode) ? high : low;
+    if (!capturing) {
+      pre.push(small); if (pre.length * ms > 450) pre.shift();
+      if (rms < floor * 2.5) floor = Math.max(0.002, floor * 0.96 + rms * 0.04);
+      loud = rms > bar ? loud + 1 : 0;
+      if (loud >= 3) {
+        if (current || queue.length) stopTalking();
+        capturing = true; frames = pre.slice(); pre = []; heardMs = 0; quietMs = 0; show();
+      }
+      return;
+    }
+    frames.push(small);
+    if (rms > bar * 0.6) { heardMs += ms; quietMs = 0; } else quietMs += ms;
+    // A soft "mm-hm" in a breath of a long stretch, as a listener would, at most every eight seconds.
+    if (heardMs > 5000 && quietMs >= 250 && quietMs - ms < 250 && Date.now() - lastHmm > 8000 && playClip("hmm", 0.6))
+      lastHmm = Date.now();
+    if (quietMs > 850 || frames.length * ms > 30000) finish();
+  }
+
+  // ---- the call
+  function events() {
+    es = new EventSource(`/api/call/events?k=${encodeURIComponent(KEY)}`);
+    es.onmessage = (m) => {
+      const e = JSON.parse(m.data);
+      if (e.type === "heard") { $("you").textContent = `“${e.text}”`; thinking = true; }
+      else if (e.type === "clips") loadClips(e.clips);
+      else if (e.type === "say" && e.wav) { thinking = false; clearTimeout(fillerTimer); queue.push(e); playNext(); }
+      else if (e.type === "say") { thinking = false; $("him").textContent = e.text; }
+      else if (e.type === "status") thinking = e.status !== "idle";
+      show();
+    };
+    es.onerror = () => { $("state").textContent = "Reconnecting…"; };
+  }
+  function tick() {
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+  async function answer() {
+    document.body.classList.remove("ringing");
+    $("state").textContent = "Connecting…";
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = "play-and-record";
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await ctx.resume();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true,
+        autoGainControl: true, channelCount: 1 } });
+    } catch (err) {
+      $("state").textContent = "I need the microphone, sir. Allow it and tap again.";
+      document.body.classList.add("ringing");
+      return;
+    }
+    source = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(2048, 1, 1);
+    proc.onaudioprocess = onAudio;
+    const silent = ctx.createGain(); silent.gain.value = 0;
+    source.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+    document.body.classList.add("oncall");
+    startedAt = Date.now(); timerId = setInterval(tick, 1000); tick();
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (_) {}
+    events();
+    post("/api/call/hello", "{}").catch(() => {});
+    show();
+  }
+  function hangup() {
+    stopTalking();
+    es?.close(); proc?.disconnect(); source?.disconnect();
+    stream?.getTracks().forEach((t) => t.stop());
+    ctx?.close(); ctx = null; wakeLock?.release?.().catch?.(() => {});
+    clearInterval(timerId);
+    document.body.classList.remove("oncall", "speaking", "thinking");
+    document.body.classList.add("ringing");
+    $("state").textContent = "Call ended. Tap to call again.";
+  }
+  $("answer").onclick = answer;
+  $("hangup").onclick = hangup;
+  $("mute").onclick = () => { muted = !muted; $("mute").classList.toggle("on", muted); if (muted && capturing) { capturing = false; frames = []; } show(); };
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "visible" && ctx) {
+      await ctx.resume().catch(() => {});
+      try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (_) {}
+    }
+  });
+})();
+</script>
+</body>
+</html>
