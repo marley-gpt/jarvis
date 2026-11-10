@@ -1239,14 +1239,15 @@ function buildWorld(THREE, addons, renderer, opts) {
       const clip = (n) => tpl.animations.find((a) => a.name.endsWith("|" + n)) || tpl.animations.find((a) => a.name.includes(n));
       const act = (n, hold) => { const k = clip(n); if (!k) return null; const a = mixer.clipAction(k); a.play(); a.setEffectiveWeight(0);
         if (hold) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.time = k.duration - 0.001; a.paused = true; } return a; };
-      const actions = { idle: act("Idle"), walk: act("Walk"), sit: act("SitDown", true), cheer: act("Victory") };
+      const actions = { idle: act("Idle"), walk: act("Walk"), cheer: act("Victory") };
       if (!actions.idle || !actions.walk) return;
       actions.idle.time = Math.random() * 4;
       const bones = {}; obj.traverse((o) => { if (o.isBone) bones[o.name] = o; });
       if (c.prop && bones.FistR) { c.prop.position.set(0, 0, 0); c.prop.rotation.set(0, 0, 0); c.prop.visible = false; bones.FistR.add(c.prop); }   // sized on its first frame (see pose)
       else if (c.prop) c.prop.visible = false;
       c.fallback.forEach((x) => c.root.remove(x)); c.root.add(body);
-      Object.assign(c, { kind: "fbx", body, obj, mixer, actions, bones });
+      const base = {}; for (const n of NUDGED) base[n] = new THREE.Quaternion();
+      Object.assign(c, { kind: "fbx", body, obj, mixer, actions, bones, base, nudged: false });
     });
   }
   const propGeo = {};
@@ -1336,17 +1337,32 @@ function buildWorld(THREE, addons, renderer, opts) {
   }
   const lerp = (a, b, t) => a + (b - a) * t;
   const tmpA = new V3(), tmpB = new V3();
+  // Sitting and typing, as bone angles on top of the Idle clip (found on screen: upper arm forward is -z on this rig,
+  // the forearm bends forward with +x, thighs come up with -x, shins drop with +x). stage.hq.tune for live adjustment.
+  const TUNE = { sl: -1.5, sk: 1.5, sy: -0.15, sz: 0, ux: 0, uz: -1.3, lx: 0.9, tx: 0.1, hx: 0.15 };
+  const NUDGED = ["UpperLegL", "UpperLegR", "LowerLegL", "LowerLegR", "UpperArmL", "UpperArmR", "LowerArmL", "LowerArmR", "Torso", "Head"];
   // Pose from blend weights: walk, sit, type (hands on the keys), lean (+ back when relaxed, - slumped when blocked),
   // look (waiting: watching for the hand-off), tab (tablet), swing (tennis).
   function pose(c, st, ph) {
     const a = st.walk, s = st.sit, ty = st.type, w = st.walkPhase, calm = REDUCED ? 0 : 1;
     if (c.kind === "fbx") {   // the real model: blend its clips, then nudge the bones for typing and looking
-      const A = c.actions, b = c.bones, sit = s * (1 - a);
-      A.walk.setEffectiveWeight(a); A.sit?.setEffectiveWeight(sit); A.idle.setEffectiveWeight(Math.max(0, 1 - a - sit));
+      const A = c.actions, b = c.bones, sit = s * (1 - a), T = TUNE;
+      A.walk.setEffectiveWeight(a); A.idle.setEffectiveWeight(1 - a);
       A.walk.setEffectiveTimeScale(0.9 + 0.5 * a);
+      // The mixer rewrites a bone only when its animated value changes, so every nudge below is undone before the next
+      // update (stepActor restores c.base), or a still bone would collect them frame after frame.
+      for (const n of NUDGED) if (b[n]) c.base[n].copy(b[n].quaternion);
+      c.nudged = true;
+      // Sitting is built on the Idle clip (the pack's SitDown ends slumped): thighs forward, shins down, body lowered.
+      if (b.UpperLegL && b.LowerLegL) { for (const sd of ["L", "R"]) { b["UpperLeg" + sd].rotation.x += T.sl * sit; b["LowerLeg" + sd].rotation.x += T.sk * sit; } }
+      c.body.position.set(0, T.sy * sit, T.sz * sit);
       const tap = (Math.sin(ph * 11) * 0.5 + Math.sin(ph * 17.3) * 0.5) * 0.06 * calm;
-      if (b.UpperArmL && b.LowerArmL) { b.UpperArmL.rotation.x -= 0.5 * ty; b.UpperArmR.rotation.x -= 0.5 * ty; b.LowerArmL.rotation.x -= (0.6 + tap) * ty; b.LowerArmR.rotation.x -= (0.6 - tap) * ty; }
-      if (b.Head) { b.Head.rotation.x += 0.15 * ty + 0.3 * Math.max(0, -st.lean) - 0.1 * st.look; b.Head.rotation.y += Math.sin(ph * 0.31) * (0.08 + 0.3 * st.look) * calm; }
+      if (b.UpperArmL && b.LowerArmL) {   // hands down onto the keys (the clips have no typing), fingers tapping
+        b.UpperArmL.rotation.x += T.ux * ty; b.UpperArmR.rotation.x += T.ux * ty; b.UpperArmL.rotation.z += T.uz * ty; b.UpperArmR.rotation.z -= T.uz * ty;
+        b.LowerArmL.rotation.x += (T.lx + tap) * ty; b.LowerArmR.rotation.x += (T.lx - tap) * ty;
+        if (b.Torso) b.Torso.rotation.x += T.tx * ty;
+      }
+      if (b.Head) { b.Head.rotation.x += T.hx * ty + 0.3 * Math.max(0, -st.lean) - 0.1 * st.look; b.Head.rotation.y += Math.sin(ph * 0.31) * (0.08 + 0.3 * st.look) * calm; }
       if (c.prop && !c.propFit && c.bones.FistR) {   // the armature carries its own scale: size the held prop from the hand's real scale, once
         const r = c.root.getWorldScale(tmpA).x, f = c.bones.FistR.getWorldScale(tmpB).x;
         if (r > 0.01 && f > 0) { c.prop.scale.setScalar(0.8 * r / f); c.propFit = true; }
@@ -1424,7 +1440,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     st.look = damp(st.look, atDesk && A.status === "waiting" ? 1 : 0, 2.5, dt);
     st.tab = damp(st.tab, A.helper && !moving && !A.gone ? 1 : 0, 4, dt);
     st.swing = damp(st.swing, !moving && A.activity === "tennis" ? 1 : 0, 4, dt);
-    if (A.c.mixer) A.c.mixer.update(dt);
+    if (A.c.mixer) { if (A.c.nudged) { for (const n of NUDGED) if (A.c.bones[n]) A.c.bones[n].quaternion.copy(A.c.base[n]); A.c.nudged = false; } A.c.mixer.update(dt); }
     pose(A.c, st, A.phase + time);
   }
 
@@ -2409,6 +2425,6 @@ function buildWorld(THREE, addons, renderer, opts) {
     actors.forEach((A, i) => { A.path = []; A.sitting = false; A.wait = 0; A.c.root.position.set((i - (n - 1) / 2) * 1.5, 0, -4); A.face = 0; A.c.root.rotation.y = 0; });
     return () => saved.forEach((s) => { s.A.c.root.position.copy(s.pos); s.A.face = s.face; s.A.sitting = s.sitting; s.A.path = s.path; s.A.wait = s.wait; });
   }
-  stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, lineup, personas, renderer, composer, world, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
+  stage.hq = { camera, controls, actors, frame, me, solid, boss, jarvisA, errands, lineup, personas, renderer, composer, world, tune: TUNE, snap: (q = 0.85) => { if (composer) composer.render(); else renderer.render(scene3, camera); return canvas.toDataURL("image/jpeg", q); } };
   return { update, dispatch, focus, demo, view, whereabouts, simple, setTime: (mode) => { timeMode = TIMES[mode] ? mode : "live"; applyTime(); }, reward, interact, walking: () => me.on, pause: (on) => { paused = !!on; }, setSound };
 }
