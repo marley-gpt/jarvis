@@ -62,7 +62,7 @@ BUTTONS = {"📋 Today": "/today", "🎙 Brief me": "/brief", "🛒 Check the st
 KEYBOARD = {"keyboard": [[{"text": "📋 Today"}, {"text": "🎙 Brief me"}], [{"text": "🛒 Check the store"}, {"text": "➕ New product"}], [{"text": "🔎 Product hunt"}, {"text": "🔄 Reset JARVIS"}]],
             "resize_keyboard": True, "is_persistent": True}
 COMMANDS = [("today", "Today at a glance"), ("brief", "Brief me now"), ("store", "Check the store"),
-            ("product", "Start a new product"), ("hunt", "Product hunt on the PC"), ("jobs", "Jobs on the PC"), ("approvals", "Approvals waiting"), ("stop", "Interrupt JARVIS"), ("reset", "JARVIS is stuck: stop and carry on"), ("new", "Fresh conversation")]
+            ("product", "Start a new product"), ("hunt", "Product hunt on the PC"), ("jobs", "Jobs on the PC"), ("approvals", "Approvals waiting"), ("laptop", "Answer from the laptop"), ("desktop", "Answer from the home PC"), ("phone", "Which machine answers"), ("stop", "Interrupt JARVIS"), ("reset", "JARVIS is stuck: stop and carry on"), ("new", "Fresh conversation")]
 
 
 class TelegramError(Exception):
@@ -414,6 +414,9 @@ class Bridge:
                 self.error = str(exc)
                 time.sleep(5)
                 continue
+            if not self.running or not self.enabled():
+                # Handed to the other machine mid-poll (phone.py): leave this batch unread for it to answer.
+                break
             for u in updates:
                 offset = u["update_id"] + 1
                 try:
@@ -423,6 +426,33 @@ class Bridge:
                         self._message(u.get("message") or {})
                 except Exception as exc:  # one bad message must not stop the bridge
                     self.error = f"{type(exc).__name__}: {exc}"
+            if not self.enabled():  # e.g. /laptop just handed the phone over: stop before polling again
+                break
+        self.running = False
+        if offset is not None:
+            # Confirm what this machine already answered (an offset acknowledges everything before it), so the
+            # machine that answers next doesn't get those again. Anything newer stays unread for it.
+            try:
+                call("getUpdates", {"timeout": 0, "offset": offset, "limit": 1}, timeout=15)
+            except TelegramError:
+                pass
+
+    def _hand_phone(self, chat, target: str) -> None:
+        """/laptop or /desktop: hand the phone to that machine; /phone: say which one answers (phone.py)."""
+        from . import phone
+        if target == "phone":
+            return self._reply(chat, phone.status_line(), KEYBOARD)
+        conn = db.connect()
+        try:
+            result = phone.hand_to(conn, target)
+        except Exception as exc:  # unknown machine, OneDrive busy: say so rather than go quiet
+            return self._reply(chat, f"I couldn't switch the phone, sir: {exc}", KEYBOARD)
+        finally:
+            conn.close()
+        if not result["changed"]:
+            return self._reply(chat, f"{result['holder']} is already answering, sir.", KEYBOARD)
+        self._reply(chat, f"Handing your phone to {result['holder']}, sir. Give it a minute while OneDrive carries "
+                          "the note; your messages wait safely until it picks up.", KEYBOARD)
 
     def _reply(self, chat, text: str, markup: dict | None = None) -> None:
         if not chat:
@@ -460,6 +490,8 @@ class Bridge:
         if text in ("/start", "/help"):
             return self._reply(chat, "At your service, sir. Text, voice note or photo, or a button below. "
                                      "/stop interrupts me, /new starts fresh.", KEYBOARD)
+        if text.lower() in ("/laptop", "/desktop", "/phone"):
+            return self._hand_phone(chat, text.lower().lstrip("/"))
         if text == "/today":
             conn = db.connect()
             try:
