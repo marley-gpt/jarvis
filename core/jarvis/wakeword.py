@@ -23,6 +23,8 @@ from . import paths, tts
 
 
 class WakeWord:
+    REVIVE_AFTER = 15  # seconds before the first restart after an unplanned stop
+
     def __init__(self, on_wake, on_heard=None, on_state=None):
         self.on_wake, self.on_heard, self.on_state = on_wake, on_heard, on_state
         self.proc: subprocess.Popen | None = None
@@ -30,6 +32,7 @@ class WakeWord:
         self.stt = False  # the worker can transcribe (faster-whisper loaded)
         self.error: str | None = None
         self.lock = threading.Lock()
+        self.restarts = 0  # unplanned stops in a row
 
     def command(self) -> list[str] | None:
         cfg = paths.config()
@@ -67,7 +70,7 @@ class WakeWord:
         for line in proc.stdout:
             line = line.strip()
             if line.startswith("READY"):
-                self.ready, self.stt = True, line.endswith(" stt")
+                self.ready, self.stt, self.restarts = True, line.endswith(" stt"), 0
             elif line.startswith("WAKE"):
                 self.on_wake(line)
             elif line in ("LISTENING", "THINKING", "NOSPEECH"):
@@ -84,6 +87,25 @@ class WakeWord:
             elif line.startswith("ERROR"):
                 self.error = line[6:]
         self.ready = False
+        self._revive(proc)
+
+    def _revive(self, proc: subprocess.Popen) -> None:
+        """The worker stopped on its own (a mic hiccup at start-up, a crash): start it again after a pause,
+        unless it was switched off. Waits longer each time, up to five minutes, so a missing mic can't spin."""
+        if self.proc is not proc or not self.enabled():
+            return
+        self.restarts += 1
+        wait = min(300, self.REVIVE_AFTER * 2 ** min(self.restarts - 1, 5))
+
+        def again():
+            if self.proc is proc and self.enabled():
+                with self.lock:
+                    if self.proc is proc:
+                        self.proc = None
+                self.start()
+        timer = threading.Timer(wait, again)
+        timer.daemon = True
+        timer.start()
 
     def listen(self, followup: bool = False) -> bool:
         """Record and transcribe one request now, without the wake word. False if the worker can't."""

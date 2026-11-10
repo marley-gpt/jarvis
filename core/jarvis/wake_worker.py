@@ -32,6 +32,30 @@ RATE, BLOCK = 16000, 1280  # 80 ms blocks, what openWakeWord expects
 WAKE_AFTER = re.compile(r"^\W*(hey|hi|okay|ok)?\W*jarvis\W*", re.I)
 
 
+def open_mic(sd, tries: int = 3):
+    """The microphone, unopened-for-reading. The default first; if Windows hands that out on a driver this can't
+    read (WDM-KS: "Blocking API not supported"), or the mic is busy at start-up, the mics through MME, DirectSound
+    and WASAPI, the default mic's own name first. A few rounds, as a mic can take a moment after sign-in."""
+    apis = [a["name"] for a in sd.query_hostapis()]
+    order = {"MME": 0, "Windows DirectSound": 1, "Windows WASAPI": 2}
+    found = sd.query_devices()
+    try:
+        mine = found[sd.default.device[0]]["name"][:24]
+    except Exception:
+        mine = ""
+    mics = [i for i, d in enumerate(found) if d["max_input_channels"] > 0 and apis[d["hostapi"]] in order]
+    mics.sort(key=lambda i: (not found[i]["name"].startswith(mine), order[apis[found[i]["hostapi"]]]))
+    last = None
+    for attempt in range(tries):
+        for dev in [None, *mics]:
+            try:
+                return sd.InputStream(device=dev, samplerate=RATE, channels=1, dtype="int16", blocksize=BLOCK)
+            except Exception as exc:
+                last = exc
+        time.sleep(2)
+    raise last
+
+
 def main() -> int:
     threshold = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
     stt_model = sys.argv[2] if len(sys.argv) > 2 else "small.en"
@@ -121,7 +145,7 @@ def main() -> int:
         wake.reset()
 
     threading.Thread(target=commands, daemon=True).start()
-    with sd.InputStream(samplerate=RATE, channels=1, dtype="int16", blocksize=BLOCK) as stream:
+    with open_mic(sd) as stream:
         print("READY " + ("stt" if whisper else "nostt"), flush=True)
         while not state["quit"]:
             if state["request"] and whisper:

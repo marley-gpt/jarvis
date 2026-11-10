@@ -8,7 +8,7 @@ import unittest.mock
 
 from helpers import CORE, BrainTest
 
-from jarvis import dashboard, db, records
+from jarvis import dashboard, db, records, wakeword
 
 FAKE = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_claude.py")]
 FAKE_TTS = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_tts.py")]
@@ -228,6 +228,97 @@ class DashboardTest(BrainTest):
         self.assertIn(b"/stage.js", self.request("GET", "/stage", token=False)[1])
         self.assertNotIn(b"/app.js", self.request("GET", "/stage", token=False)[1])
         self.assertIn(b"/brain.js", self.request("GET", "/brain", token=False)[1])
+
+    def test_showcase_mode_on_the_main_page(self):
+        # T108: /#show and the Show button, drawn from the ledger's own endpoints and the Live view's feed.
+        import re
+        status, html = self.request("GET", "/", token=False)
+        self.assertEqual(status, 200)
+        for needle in (b'id="showBtn"', b'id="show"', b'id="showFx"', b'id="showFig"', b'id="showRail"',
+                       b'id="showCrew"', b'id="showFeed"', b'id="showStatus"', b'<script src="/show.js"></script>'):
+            self.assertIn(needle, html)
+        self.assertLess(html.index(b"/swarm.js"), html.index(b"/show.js"))
+        status, js = self.request("GET", "/show.js", token=False)
+        self.assertEqual(status, 200)
+        for needle in (b'"#show"', b"/api/ops/sales", b"/api/ops/roas", b"/api/swarm", b"n/a", b"No live data",
+                       b"prefers-reduced-motion", b"wakeLock", b"requestFullscreen"):
+            self.assertIn(needle, js)
+        ids = set(re.findall(rb'id="([^"]+)"', html))
+        for found in set(re.findall(rb'\$\("([A-Za-z0-9]+)"\)', js)):
+            self.assertIn(found, ids, found)
+        # The figures it reads are served, with the fields the display names.
+        status, raw = self.request("GET", "/api/ops/sales", token=False)
+        self.assertEqual(status, 200)
+        fig = json.loads(raw)["figures"]
+        for key in ("sales_aud", "sales_count", "ad_spend_aud", "profit_today_aud", "profit_week_aud", "weekly_target_aud"):
+            self.assertIn(key.encode(), js)
+            self.assertIn(key, fig)
+        status, raw = self.request("GET", "/api/ops/roas", token=False)
+        self.assertEqual(status, 200)
+        r = json.loads(raw)
+        for key in ("live", "why_not_live", "breakeven", "week", "today"):
+            self.assertIn(key, r)
+        self.assertIsNone(r["week"]["roas"])  # nothing spent in an empty ledger: the display shows n/a, not 0×
+        self.assertEqual(self.request("GET", "/api/swarm", token=False)[0], 200)
+
+    def test_showcase_is_in_the_dashboard_blue(self):
+        # M-261110-c6a8: the owner wants the showcase in the dashboard's own blue, not red and amber.
+        import re
+        html = self.request("GET", "/", token=False)[1].decode()
+        start = html.index("Showcase mode (T108)")
+        block = html[start:html.index("Team map (T109)", start)]
+        for red in ("#ff2d3f", "#ffa62b", "255, 45, 63", "255, 166, 43", "--ember", "--amber"):
+            self.assertNotIn(red, block)
+        self.assertIn("var(--arc)", block)
+        self.assertIn("var(--ice)", block)
+        js = self.request("GET", "/show.js", token=False)[1].decode()
+        self.assertIn('rgb("--arc"', js)
+        self.assertNotIn("255, 45, 63", js)
+        self.assertFalse(re.search(r"\[255,\s*\d+,\s*\d+\]", js))
+
+    def test_team_map_shows_every_agent_by_department(self):
+        # T109: /#team, the org chart: JARVIS, the twelve specialists in six departments, skills, SOP and live work.
+        import re
+        from jarvis import orgchart
+        status, html = self.request("GET", "/", token=False)
+        self.assertEqual(status, 200)
+        for needle in (b'id="teamBtn"', b'id="team"', b'id="teamStage"', b'id="teamFx"', b'id="teamPanel"',
+                       b'id="teamFlow"', b'href="#show"', b'href="#team"', b'<script src="/team.js"></script>'):
+            self.assertIn(needle, html)
+        self.assertLess(html.index(b"/show.js"), html.index(b"/team.js"))
+        status, js = self.request("GET", "/team.js", token=False)
+        self.assertEqual(status, 200)
+        for needle in (b'"#team"', b"/api/teammap", b"/api/swarm", b"/api/skills?agent=", b"J.send", b"prefers-reduced-motion"):
+            self.assertIn(needle, js)
+        ids = set(re.findall(rb'id="([^"]+)"', html))
+        for found in set(re.findall(rb'\$\("([A-Za-z0-9]+)"\)', js)) - {b"teamNow", b"teamLevel", b"teamAsk", b"teamQ", b"teamReply"}:
+            self.assertIn(found, ids, found)
+        # The older /api/team (teams, hires, pace) still answers as before.
+        self.assertIn("teams", json.loads(self.request("GET", "/api/team", token=False)[1]))
+        # The map itself, from the agent files and the task records.
+        tid = records.task_add(self.conn, "Brush launch")
+        a = records.task_add(self.conn, "Research the brush", parent=tid, agent="market-research")
+        records.task_update(self.conn, a, status="done", summary="done")
+        b = records.task_add(self.conn, "Statics for the brush", parent=tid, agent="creative-director")
+        status, raw = self.request("GET", "/api/teammap", token=False)
+        self.assertEqual(status, 200)
+        data = json.loads(raw)
+        self.assertEqual([d["id"] for d in data["departments"]][:6], ["research", "creative", "store", "ads", "money", "ops"])
+        placed = [n for d in data["departments"] for n in d["agents"]]
+        on_disk = sorted(p.stem for p in orgchart.AGENTS_DIR.glob("*.md"))
+        self.assertEqual(sorted(placed), on_disk)
+        self.assertEqual(len(placed), len(set(placed)))
+        shop = data["agents"]["shopify"]
+        self.assertIn("blake-shopify-cro", shop["skills"])
+        self.assertIn("cro", shop["playbooks"])
+        self.assertTrue(shop["sop"] and shop["sop"][0]["title"] == "Role")
+        self.assertNotIn("Skills", [s["title"] for s in shop["sop"]])
+        cd = data["agents"]["creative-director"]
+        self.assertEqual([t["id"] for t in cd["open"]], [f"T{b}"])
+        hand = data["handoffs"][-1]
+        self.assertEqual((hand["from"], hand["to"], hand["task"]), ("market-research", "creative-director", f"T{b}"))
+        self.assertIn("total", data["memory"])
+        self.assertIn("open_projects", data["jarvis"])
 
     def test_records_a_reply_names_are_nodes_in_the_graph(self):
         from jarvis import brain_graph
@@ -651,6 +742,36 @@ class WakeWordTest(BrainTest):
             server.wake.stop()
             server.shutdown()
             server.server_close()
+
+
+class WakeWordReviveTest(BrainTest):
+    def test_a_worker_that_falls_over_at_start_up_is_started_again(self):
+        self.init()
+        flaky = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_wake_flaky.py"), str(self.home / "mic-failed")]
+        (self.home / "config.json").write_text(json.dumps({"wake_command": flaky}), encoding="utf-8")
+        ears = wakeword.WakeWord(lambda line: None)
+        ears.REVIVE_AFTER = 0.2
+        try:
+            ears.start()
+            deadline = time.time() + 15
+            while not ears.ready and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(ears.ready, ears.error)
+            self.assertEqual(ears.restarts, 0)
+        finally:
+            ears.stop()
+
+    def test_switched_off_it_stays_off(self):
+        self.init()
+        flaky = [sys.executable, str(CORE / "tests" / "fixtures" / "fake_wake_flaky.py"), str(self.home / "mic-failed")]
+        (self.home / "config.json").write_text(json.dumps({"wake_command": flaky, "wake_word": False}), encoding="utf-8")
+        ears = wakeword.WakeWord(lambda line: None)
+        ears.REVIVE_AFTER = 0.2
+        ears.start()
+        time.sleep(1.5)
+        self.assertFalse(ears.ready)
+        self.assertTrue((self.home / "mic-failed").exists())
+        ears.stop()
 
 
 class LocalEarsTest(BrainTest):
