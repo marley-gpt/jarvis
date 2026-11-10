@@ -1248,6 +1248,15 @@ function buildWorld(THREE, addons, renderer, opts) {
       c.fallback.forEach((x) => c.root.remove(x)); c.root.add(body);
       const base = {}; for (const n of NUDGED) base[n] = new THREE.Quaternion();
       Object.assign(c, { kind: "fbx", body, obj, mixer, actions, bones, base, nudged: false });
+      // Clicking a person opens them (an agent's own panel, JARVIS's for JARVIS): an unseen capsule round the body takes
+      // the click, since a skinned mesh is not something the picking ray can rely on.
+      const clickable = name === "jarvis" || (name in LOOKS && !["owner", "blake", "mark", "you"].includes(name));
+      if (clickable) {
+        const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 1.75, 8), new THREE.MeshBasicMaterial());
+        hit.visible = false; hit.position.y = 0.88;
+        if (name === "jarvis") hit.userData.pick = "jarvis"; else hit.userData.desk = name;
+        c.root.add(hit); hitTargets.push(hit);
+      }
     });
   }
   const propGeo = {};
@@ -1940,7 +1949,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     me.pitch = -0.04;
     me.vel.set(0, 0, 0); me.keys.clear(); me.stick.x = me.stick.y = 0; me.near = null;
     unstick(me.pos); me.pos.y = groundAt(me.pos.x, me.pos.z);
-    you.root.position.copy(me.pos); you.root.rotation.y = me.yaw; you.root.visible = me.third;
+    you.root.position.copy(me.pos); you.root.rotation.y = me.yaw + Math.PI; you.root.visible = me.third;   // the figure looks where you walk
     tell();
   }
   function stopWalk() {
@@ -2094,6 +2103,7 @@ function buildWorld(THREE, addons, renderer, opts) {
     // The avatar (seen over the shoulder) walks with you.
     youSt.walk = damp(youSt.walk, moving > 0.15 ? 1 : 0, 6, dt);
     if (youSt.walk > 0.01) youSt.walkPhase += dt * 7.2 * (0.5 + 0.5 * youSt.walk) * (k.has("run") ? 1.4 : 1);
+    if (you.mixer) { if (you.nudged) { for (const n of NUDGED) if (you.bones[n]) you.bones[n].quaternion.copy(you.base[n]); you.nudged = false; } you.mixer.update(dt); }
     pose(you, youSt, time);
     you.root.position.copy(me.pos);
     you.root.rotation.y += wrap(me.yaw - you.root.rotation.y) * (1 - Math.exp(-10 * dt));
