@@ -34,7 +34,41 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brain_graph, brief, control, db, hq, hq_assets, journal, live, memory, paths, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
+from . import activity, brain_graph, brief, control, db, hq, hq_assets, journal, live, memory, paths, phone as phone_note, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
+
+
+def follow_phone(bridge, every: float = 20.0, rounds: int | None = None) -> None:
+    """Start or stop the phone when the shared phone note moves it between the PC and the laptop (phone.py).
+
+    Taking the phone over, this machine first pulls the brain the other machine pushed as it handed over, so it
+    answers with everything the other one knew. `rounds` limits the loop for tests.
+    """
+    from . import sync
+    phone_note.register()
+    was = paths.machine_role()
+    n = 0
+    while rounds is None or n < rounds:
+        n += 1
+        try:
+            role = paths.machine_role()
+            if role == "primary" and was == "standby":
+                m, st = sync.manifest(), sync.local_state()
+                if m and m.get("machine", "").lower() != phone_note.this_machine().lower() \
+                        and m.get("stamp") != st.get("pulled_stamp"):
+                    conn = db.connect()
+                    try:
+                        sync.pull(conn, force=True)
+                    finally:
+                        conn.close()
+            was = role
+            if bridge.enabled() and not bridge.running:
+                bridge.start()
+            elif bridge.running and not bridge.enabled():
+                bridge.stop()
+        except Exception as exc:  # never let the watcher die; say why on the dashboard's phone status
+            bridge.error = f"phone switch: {type(exc).__name__}: {exc}"
+        if rounds is None or n < rounds:
+            time.sleep(every)
 
 STATIC = paths.CORE_DIR / "dashboard"
 # The main view (T97) is the speaking stage (T86: the orb and the cards of what JARVIS is saying) in front of the
@@ -1123,6 +1157,7 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         server.wake.start()
     if server.telegram.enabled():
         server.telegram.start()  # the owner's phone: texts, voice notes and photos to JARVIS
+    threading.Thread(target=follow_phone, args=(server.telegram,), daemon=True).start()
     if open_browser and not restarted:
         webbrowser.open(url)
     swap = threading.Event()

@@ -688,6 +688,21 @@ def cmd_machine(conn, args):
     role = paths.machine_role()
     out(f"Role: {role}. " + ("Telegram bridge, routines and calls run here." if role == "primary" else
         "Telegram bridge, routines tick and call server stay off here; the other machine answers."))
+    import os
+    from . import phone
+    if phone.holder() and not os.environ.get("JARVIS_ROLE"):
+        out(f"(The shared phone note decides this, not the role file: {phone.status_line()} "
+            "Use bin/jarvis phone to switch.)")
+
+
+def cmd_phone(conn, args):
+    from . import phone
+    if args.target:
+        try:
+            out(phone.hand_to(conn, args.target, takeover=args.takeover)["note"])
+        except phone.PhoneError as exc:
+            raise records.RecordError(str(exc)) from exc
+    out(phone.status_line())
 
 
 def cmd_sync(conn, args):
@@ -1485,6 +1500,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("machine", help="this machine's role: primary answers the phone, standby stays quiet")
     s.add_argument("role", nargs="?", choices=paths.ROLES)
     s.set_defaults(fn=cmd_machine)
+
+    s = sub.add_parser("phone", help="which machine answers the owner's phone; hand it to the laptop or the PC")
+    s.add_argument("target", nargs="?", help="laptop, desktop, here, or a machine name")
+    s.add_argument("--takeover", action="store_true",
+                   help="take the phone on this machine when the one answering now is off or unreachable")
+    s.set_defaults(fn=cmd_phone)
 
     s = sub.add_parser("sync", help="the lean brain shared through OneDrive: the primary pushes, the standby pulls")
     s.add_argument("action", nargs="?", choices=("status", "push", "pull"), default="status")

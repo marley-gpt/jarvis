@@ -127,6 +127,14 @@ def role_file() -> Path:
 def machine_role() -> str:
     role = (os.environ.get("JARVIS_ROLE") or "").strip().lower()
     if not role:
+        # The shared phone note (phone.py) wins over the role file: the machine it names answers the phone.
+        from . import phone
+        try:
+            here = phone.answers_here()
+        except Exception:  # an unreadable note must never stop JARVIS; the role file decides instead
+            here = None
+        if here is not None:
+            return "primary" if here else "standby"
         try:
             role = role_file().read_text(encoding="utf-8").strip().lower()
         except OSError:

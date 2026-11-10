@@ -159,7 +159,8 @@ def push(conn, force: bool = False) -> dict:
     if secrets.is_dir():
         _write_atomic(out / SECRETS_ZIP, lambda zf: [zf.write(f, f.relative_to(paths.home()).as_posix())
                                                      for f in sorted(secrets.rglob("*")) if f.is_file()])
-    m = {"stamp": datetime.now().astimezone().isoformat(timespec="seconds"), "machine": socket.gethostname(),
+    from . import phone  # the same machine name the phone switch uses
+    m = {"stamp": datetime.now().astimezone().isoformat(timespec="seconds"), "machine": phone.this_machine(),
          "role": paths.machine_role(), "files": len(found) + 1, "bytes": (out / BRAIN_ZIP).stat().st_size,
          "fingerprint": fp}
     (out / MANIFEST).write_text(json.dumps(m, indent=1), encoding="utf-8")
