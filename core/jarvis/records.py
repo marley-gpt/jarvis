@@ -270,14 +270,16 @@ def test_metric(conn, test_id, day, **values) -> None:
 
 
 def evaluate(conn, test_id) -> dict:
-    """Aggregate a test's metrics. `sufficient` is False until minimum spend and clicks are met."""
+    """Aggregate a test's metrics. `sufficient` is False until minimum spend and clicks are met.
+    A day read more than once (partial reads through the day) counts once: its latest read."""
     tid = int(str(test_id).upper().lstrip("X"))
     t = conn.execute(
         """SELECT COALESCE(SUM(spend),0) spend, COALESCE(SUM(impressions),0) impressions,
                   COALESCE(SUM(clicks),0) clicks, COALESCE(SUM(add_to_cart),0) atc,
                   COALESCE(SUM(checkouts),0) checkouts, COALESCE(SUM(purchases),0) purchases,
                   COALESCE(SUM(revenue),0) revenue, COUNT(*) days
-           FROM test_metrics WHERE test_id = ?""", (tid,)).fetchone()
+           FROM test_metrics WHERE test_id = ? AND id IN
+                (SELECT MAX(id) FROM test_metrics WHERE test_id = ? GROUP BY day)""", (tid, tid)).fetchone()
     div = lambda a, b: round(a / b, 4) if b else None  # noqa: E731
     cfg = paths.config()
     out = dict(t)

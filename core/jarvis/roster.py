@@ -1,11 +1,8 @@
-"""Data for the 3D HQ page (`/hq`): the teams, what each agent is connected to, and its work.
-
-The live state (statuses, tasks, approvals) still comes from `/api/state` and the event
-stream; this adds what that doesn't carry: the eight teams of T54 (plan section 7), each
-agent's tools, connectors and skills from `.claude/agents/*.md`, its recent finished work,
-and safe read access to deliverable files for the live preview. When the agent activity log
-(activity.py, phase 1) is installed, its current state and recent events are included too,
-so the page switches to it without changes.
+"""The agent roster and the small controls round it: each agent's tools, connectors, skills and model from
+`.claude/agents/*.md`, model choice per agent and per task, a new task from the page, connector health as Claude
+Code reports it, the consequential actions log, the saved store and ad figures (`bin/jarvis metrics`), the daily
+profit line, and safe read access to deliverable files for previews. (This was the data half of the 3D HQ, which
+was removed in T110; the page-independent parts live on here.)
 """
 
 from __future__ import annotations
@@ -19,30 +16,10 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import hq_assets, memory, paths, records
+from . import memory, paths, records
 
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 SKILLS_DIR = paths.REPO_ROOT / ".claude" / "skills"
-
-# Draft grouping from the T54 plan, section 7 (final grouping still to agree with the owner).
-TEAMS = [
-    {"id": "research", "name": "Research", "agents": ["product-research", "market-research", "creative-research"],
-     "job": "Finds products, reads customers and studies competitor ads."},
-    {"id": "creative", "name": "Creative", "agents": ["creative-director"],
-     "job": "Turns research into angles, image briefs and ad copy."},
-    {"id": "store", "name": "Store", "agents": ["shopify", "store-qa"],
-     "job": "Drafts product pages and checks the store like a customer."},
-    {"id": "ads", "name": "Ads", "agents": ["meta-ads", "meta-ads-auditor"],
-     "job": "Prepares Meta campaigns and audits the ad account."},
-    {"id": "testing", "name": "Testing", "agents": ["product-testing"],
-     "job": "Runs each product test and calls the verdict."},
-    {"id": "money", "name": "Money", "agents": ["accountant"],
-     "job": "Tracks every cost and sale against the weekly target."},
-    {"id": "learning", "name": "Learning", "agents": ["mentor-learning"],
-     "job": "Turns the mentor's lessons into playbooks for every agent."},
-    {"id": "operations", "name": "Operations", "agents": ["operations"],
-     "job": "Keeps the task list, bottlenecks and daily overview."},
-]
 
 # MCP servers and built-in tools, by the name the owner knows them by.
 CONNECTORS = {
@@ -112,11 +89,6 @@ def set_agent_model(name: str, model: str) -> str:
     return value
 
 
-def _agent_voices() -> dict:
-    from . import tts
-    return tts.agent_voices()
-
-
 def task_models() -> dict:
     tm = paths.config().get("task_models") or {}
     return tm if isinstance(tm, dict) else {}
@@ -138,7 +110,7 @@ def set_task_model(task_id, model: str | None) -> dict:
 
 
 def add_task(conn, title: str, *, agent=None, product=None, description=None, model=None) -> int:
-    """A new task from HQ: goes on the backlog JARVIS works from, assigned to an agent if one was picked."""
+    """A new task from the page: goes on the backlog JARVIS works from, assigned to an agent if one was picked."""
     title = " ".join((title or "").split())
     if not title:
         raise ValueError("A task needs a title.")
@@ -154,7 +126,7 @@ PREVIEW_TEXT = {".md", ".txt", ".csv", ".json"}
 PREVIEW_IMAGE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                  ".gif": "image/gif"}
 PREVIEW_MAX_TEXT = 6000
-PREVIEW_MAX_IMAGE = 8 * 1024 * 1024   # the 4K backdrops in brain/files/hq are about 4.5 MB
+PREVIEW_MAX_IMAGE = 8 * 1024 * 1024
 
 
 def _list(value) -> list[str]:
@@ -197,42 +169,6 @@ def agents() -> dict[str, dict]:
         out[name] = {"tools": tools, "connections": connections(tools), "skills": skills_for(meta, body),
                      "model": model_alias(meta.get("model"))}
     return out
-
-
-def recent_work(conn, limit: int = 6) -> dict[str, list[dict]]:
-    """Each agent's latest finished tasks, newest first."""
-    out: dict[str, list[dict]] = {}
-    for r in conn.execute("SELECT id, title, agent, product, deliverable, summary, completed FROM tasks"
-                          " WHERE status = 'done' AND agent IS NOT NULL ORDER BY completed DESC LIMIT 300"):
-        rows = out.setdefault(r["agent"], [])
-        if len(rows) < limit:
-            rows.append(dict(r))
-    return out
-
-
-def live_activity(conn) -> dict | None:
-    """The phase 1 activity log, when it is installed; None until then."""
-    try:
-        from . import activity
-    except ImportError:
-        return None
-    try:
-        return {"agents": activity.current(conn), "events": activity.recent(conn, 60)}
-    except Exception:  # table not created yet on this brain
-        return None
-
-
-def board(conn) -> dict:
-    """Every open task, and what was finished in the last two weeks: the Now / Needs you / Done / To do board."""
-    marks = ",".join("?" * len(records.OPEN_TASK_STATUSES))
-    open_rows = conn.execute(f"SELECT id, parent_id, title, description, agent, product, status, priority, deliverable,"
-                             f" summary, created, updated FROM tasks WHERE status IN ({marks}) ORDER BY priority, id DESC",
-                             records.OPEN_TASK_STATUSES).fetchall()
-    since = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
-    done = conn.execute("SELECT id, parent_id, title, description, agent, product, status, deliverable, summary, created,"
-                        " updated, completed FROM tasks WHERE status = 'done' AND completed >= ? ORDER BY completed DESC"
-                        " LIMIT 40", (since,)).fetchall()
-    return {"open": [dict(r) for r in open_rows], "done": [dict(r) for r in done]}
 
 
 def week(conn) -> dict:
@@ -319,7 +255,7 @@ def recent_actions(conn, limit: int = 12) -> list[dict]:
     from . import hooks
     admin = (paths.config().get("shopify_admin_url") or "").rstrip("/")
     out = []
-    for r in conn.execute("SELECT ts, tool, summary FROM actions ORDER BY id DESC LIMIT ?", (limit * 4,)):
+    for r in conn.execute("SELECT ts, tool, summary FROM actions ORDER BY id DESC LIMIT ?", (limit * 60,)):
         tool, summary = r["tool"], r["summary"] or ""
         server = tool.split("__")[1] if tool.count("__") >= 2 else tool
         if hooks.LOCAL_MCP_SERVERS.match(server) or len(out) >= limit:
@@ -381,27 +317,6 @@ def metrics_set(snapshot: dict) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(clean, indent=2), encoding="utf-8")
     return clean
-
-
-def data(conn) -> dict:
-    cfg = paths.config()
-    return {"teams": TEAMS, "agents": agents(), "recent": recent_work(conn), "activity": live_activity(conn),
-            "board": board(conn), "week": week(conn), "daily": daily_profit(conn), "connectors": connectors(),
-            "actions": recent_actions(conn), "metrics": metrics(), "models": MODELS, "task_models": task_models(),
-            "agent_voices": _agent_voices(), "recommended": {k: {"model": m, "why": w} for k, (m, w) in RECOMMENDED.items()},
-            "conversation_model": model_alias(cfg.get("dashboard_model")) if cfg.get("dashboard_model") else "",
-            "conversation_effort": cfg.get("dashboard_effort") or "",
-            "assets": hq_assets.ready(),   # the CC0 model packs this machine has (the scene draws stand-ins for the rest)
-            "products": [r["slug"] for r in conn.execute("SELECT slug FROM products ORDER BY slug")],
-            # Set by JARVIS or the owner in brain/config.json; the page says so when they're missing.
-            "milestone": cfg.get("hq_milestone"), "allowance": cfg.get("max_allowance"),
-            # Plan section 16 (parked): unlocks earned on real strong sales days. Nothing is unlocked until the rules are agreed.
-            "rewards": rewards(conn)}
-
-
-def rewards(conn) -> list[str]:
-    """Hook for plan section 16: reward ids unlocked by real sales. Empty until the owner agrees the rules."""
-    return []
 
 
 def resolve(ref: str) -> Path | None:

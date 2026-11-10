@@ -1,11 +1,11 @@
-"""The Live view (T106): every agent at work right now, from what they really did.
+"""Agents at work (T106): every agent working right now, from what they really did.
 
 The owner wants to watch the team work (M-261109-dea4, the reel in M-261109-dbbe): who is live, what each one is
 doing, what it last made and how far along it is. Nothing here is invented. Each action comes from a durable
 worker's stream-json log (brain/work/runs/W<n>.log, read incrementally as it grows) or from the dashboard session's
 own hand-offs (`note`, called by the Runner). When nothing runs the view says so.
 
-    GET /api/swarm          the whole view: agents, feed, timeline window, counts
+    the `live` section of the app's state (cockpit.live_view): agents, the action feed, counts
     GET /api/swarm/file     an image an agent made, for the preview (repo files only, never secrets)
 """
 
@@ -265,10 +265,10 @@ def _brief_title(brief: str) -> str:
     return _clip(text, 110)
 
 
-def state(conn=None, live: dict | None = None) -> dict:
+def state(conn=None, live: dict | None = None, workers: list[dict] | None = None) -> dict:
     now = time.time()
     agents, feed = [], []
-    for w in _workers():
+    for w in (_workers() if workers is None else workers):
         status = w.get("status")
         st = read_log(w["log"]) if w.get("log") else _fresh("")
         last_t = (st["last"] or {}).get("t") or _parse_started(w.get("updated") or w.get("started"))

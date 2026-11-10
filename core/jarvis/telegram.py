@@ -49,7 +49,7 @@ PREFIX = "(Sent from the owner's phone by Telegram; reply in a few short sentenc
 CALL_LINE = "Sir, JARVIS here. Something urgent needs you. The details are in Telegram."
 STORE_CHECK_SECONDS = 900
 
-# One-tap actions, shared with the chat app.
+# One-tap actions on the phone.
 ACTIONS = {
     "brief": "Brief me now: the jarvis-daily-brief, short, with real numbers.",
     "store": "Check the store like a customer with the store-qa agent and tell me what's broken, most serious first.",
@@ -346,7 +346,7 @@ class Bridge:
     """Long-polls Telegram inside the dashboard server and relays to and from JARVIS.
 
     Also watches the store (an alert if it stops answering) and carries out approvals
-    decided by button, here or in the chat app.
+    decided by button, here or in the app's inbox.
     """
 
     def __init__(self, hub, runner, kokoro):

@@ -88,34 +88,3 @@ class ActivityTest(BrainTest):
     def test_hook_survives_bad_payload(self):
         proc = self.run_hook("post_tool", {"tool_name": "Bash", "tool_input": "not a dict", "agent_type": 5})
         self.assertEqual(proc.returncode, 0)
-
-
-class ActivityEndpointTest(BrainTest):
-    def test_endpoint(self):
-        import http.client
-        self.init()
-        activity.add(self.conn, "shopify", "drafting PDP", tool="Write", file="a.md")
-        server = dashboard.make_server(port=0)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        try:
-            port = server.server_address[1]
-
-            def get(path):
-                c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-                c.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
-                r = c.getresponse()
-                body = r.read()
-                c.close()
-                return r.status, body
-
-            status, raw = get("/api/activity?n=10")
-            self.assertEqual(status, 200)
-            data = json.loads(raw)
-            self.assertEqual(data["events"][0]["action"], "drafting PDP")
-            self.assertEqual(data["agents"]["shopify"]["state"], "working")
-            self.assertEqual(get("/api/activity?n=abc")[0], 400)
-        finally:
-            server.shutdown()
-            server.runner.close()
-            server.tts.stop()
-            server.server_close()

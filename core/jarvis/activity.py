@@ -1,7 +1,6 @@
 """The agent activity log: one row for everything an agent starts, does and finishes.
 
-Every visual on the HQ dashboard (the office floor, the activity stream, agent profiles, and the
-"Monaco Estate" 3D world, whose characters only move on real events) reads from here. The hooks write most of it automatically (a subagent starting and stopping, each tool
+The app's live views read from here. The hooks write most of it automatically (a subagent starting and stopping, each tool
 it uses and the file it touched, who it hands work to), task records add assigned/done/blocked as tasks change,
 and agents and JARVIS can add their own with `bin/jarvis event add`. Every row is a real event: nothing
 here is ever invented to make the world look busy. `kind` is "agent" today; business data (orders,
@@ -20,7 +19,7 @@ from . import paths
 STATUSES = ("assigned", "started", "working", "collaborating", "waiting", "done", "blocked", "error")
 ACTIVE = ("started", "working", "collaborating")
 
-# Departments (buildings in the HQ world) for the 12 specialists; JARVIS runs the executive HQ.
+# Departments for the 12 specialists; JARVIS runs the business.
 DEPARTMENTS = {
     "jarvis": "executive",
     "mentor-learning": "knowledge",

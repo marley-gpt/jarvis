@@ -64,9 +64,17 @@ def _alive(pid: int | None) -> bool:
     if not pid:
         return False
     if os.name == "nt":
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
-                           creationflags=paths.NO_WINDOW)
-        return str(pid) in r.stdout
+        # Asked of Windows directly: starting tasklist for each running worker cost 0.2 s a worker, on every listing.
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -111,7 +119,7 @@ def _spawn(run: dict, prompt: str, resume: bool) -> None:
         raise WorkError("Can't find the claude command.")
     # stream-json, so the log grows as the worker goes and the dashboard can show it live (`tail`).
     cmd = [*claude, "-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
-           "--model", paths.config().get("worker_model") or "opus"]
+           "--model", run.get("model") or paths.config().get("worker_model") or "opus"]
     cmd += ["--resume", run["session"]] if resume else ["--session-id", run["session"]]
     if run.get("agent") and not resume:
         cmd += ["--agent", run["agent"]]
@@ -129,13 +137,13 @@ def _spawn(run: dict, prompt: str, resume: bool) -> None:
     _save(run)
 
 
-def start(brief: str, task: str = "", agent: str = "") -> dict:
+def start(brief: str, task: str = "", agent: str = "", model: str = "") -> dict:
     brief = (brief or "").strip()
     if not brief:
         raise WorkError("A worker needs a brief.")
     wid = max([_id(p.stem) for p in runs_dir().glob("W*.json")] or [0]) + 1
     run = {"id": wid, "task": task, "agent": agent, "brief": brief, "session": str(uuid.uuid4()),
-           "log": str(runs_dir() / f"W{wid}.log"), "status": "new", "started": paths.now(), "attempts": 0}
+           "log": str(runs_dir() / f"W{wid}.log"), "status": "new", "started": paths.now(), "attempts": 0, "model": model}
     _spawn(run, brief, resume=False)
     return run
 

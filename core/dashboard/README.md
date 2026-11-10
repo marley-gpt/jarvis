@@ -1,121 +1,133 @@
-# JARVIS dashboard
+# The JARVIS app
 
-`bin/jarvis dashboard` serves these pages on http://127.0.0.1:8765 (`core/jarvis/dashboard.py`).
+`bin/jarvis dashboard` serves one app on http://127.0.0.1:8765 (`core/jarvis/dashboard.py`). It was rebuilt in T110
+(D74, D75) as a product-testing cockpit: the owner's priority is testing products properly and quickly, so that is
+the home page, and everything else is a page behind it.
 
-| Route | File | What it is |
+## Pages
+
+| Address | Script | What it is |
 |---|---|---|
-| `/` (also `/app`) | `app.html` + `app.js`, with `stage.js` and `brain.js` | The main page (T97): the brain graph as the living background, the speaking orb at the centre, the cards of what JARVIS says in front, and the records he names lit up in the graph |
-| `/stage` | `stage.html` + `stage.js` | The speaking stage on its own (T86): the JARVIS orb, which moves with his voice, and cards of what he is talking about, timed to each sentence |
-| `/brain` | `brain.html` + `brain.js` | The Brain (T95): a live knowledge graph of memory, agents, products, tasks and decisions, the JARVIS orb, and a "what I'm doing" panel |
-| `/hq` | `hq.html` + `hq.js` + `hq-scene.js` | The Monaco Estate (3D HQ, one pavilion per agent) with glass overlays, task board, panels and talk bar. Paused (T86) |
-| `/chat` | `chat.html` | The full chat app (also the phone-sized window) |
-| `/#control` | `control.js` (on `/` and `/chat`) | The control centre (T98): permission prompts, live steps, queue, files, slash commands, sessions, the PC, jobs and workers |
-| `/office` | `office.html` | The earlier isometric office |
-| `/console`, `/classic` | `console.html`, `index.html` | Earlier designs, kept |
+| `/` (`/testing`) | `page-testing.js` | The cockpit: every product on its rail of stages with its blockers and one next action, each test's numbers per day against Blake's day rules, the kill rule, who is working now, add a candidate |
+| `/team` | `page-team.js` | The org chart with JARVIS as the boss (T109), what each agent is doing, an agent's panel (tasks, skills, model, ask box), the activity log |
+| `/work` | `page-work.js` | What waits for the owner, the plan of every open project, workers and their models, desktop jobs, recent approvals |
+| `/money` | `page-money.js` | Today, the week against A$380, ROAS against breakeven, 14 days of profit, the month by category, each test's profit and loss, the ledger |
+| `/brain` | `page-brain.js` | Memory search and reader, latest decisions, the conversation journal |
+| `/system` | `page-system.js` | Routines, connections, Claude capacity, conversation model and sessions, voice, the PC |
 
-All pages share `jarvis.js` (`window.J`): the live connection (`/api/events`), `/api/state`, sending messages, the mic, the wake word and the Kokoro voice. Talking to JARVIS from any page goes through `/api/chat`, the same headless Claude Code session on this PC, so it has the same connectors, skills, memory, hooks and approval gates as the desktop app. Don't open a second event stream in a page; listen with `J.on(type, fn)`.
+A deeper address opens a record on that page: `/work/T110` (that plan), `/work/W36` (that worker's log),
+`/team/creative-director`, `/brain/M-261110-cdd9`, `/testing/X1`. `call.html` is the phone-call page; the call server
+(`core/jarvis/call.py`) serves it, not the dashboard. The addresses of the removed pages (`/hq`, `/chat`, `/office`,
+`/console`, `/stage`, `/classic`, `/app`) redirect to `/`.
 
-## The main page (`/`)
+## How it fits together
 
-The owner's brief (M-261109-4b6d): the Luke Cutting stage visuals and the Zubair Trabzada brain graph on one page. `app.html` loads `jarvis.js`, `stage.js`, `brain.js` (with `window.BRAIN_EMBED = true`) and `app.js`; the stage and brain scripts are the same files the separate pages use, so a fix to either shows on both.
+**One shell.** Every page address returns the same `app.html`. `app.js` is the frame that stays put: the navigation,
+the status strip (sales, spend, profit, ROAS against breakeven, the week against the target, Claude capacity), the
+inbox, the record drawer and the talk panel. A page is a script that calls `App.register(name, { title, render(el, S),
+open(arg, el) })`; it is loaded the first time it is opened and draws into `<main>`. Moving between pages changes the
+address with the History API and never reloads, so the talk panel, a reply in progress and the voice carry on.
 
-- **Layers**: the graph canvas fills the window; over it the effects canvas (`#fx`), the orb, the "What I'm doing" panel (left; brain.js's live panel and details, plus stage.js's "just now" ticker from live events), the cards (right), the talk bar (bottom centre). Header: search, Filters, Fit, Now (the panel), the other views.
-- **Embedded brain** (`BRAIN_EMBED`): brain.js draws no orb of its own and leaves the connection light to jarvis.js. It takes two rectangles from the page: `BRAIN_HOME()`, where the whole brain sits at rest (round the orb on a desktop, under it on a phone), and `BRAIN_FOCUS()`, the free area it flies records into (between the panels, under the orb, above the talk bar or card sheet).
-- **Lighting what he says**: stage.js gives each card the graph node it stands for (`data-ref`: `T12`, `A3`, `D7`, `M-…`, `product:<slug>`, `file:brain/...`) and fires `jarvis:beat` with them when the voice reaches the sentence. app.js calls `brain.light(ids)`: those nodes glow and keep their labels, their links brighten, the rest dims, and the camera flies to frame them while the orb steps back to the top (`.app.focus`). It lets go 25 s after JARVIS goes quiet, or when the owner speaks again (`jarvis:clear`), and flies home. Tapping a card opens its record in the graph and the panel.
-- **Approvals and files are nodes** (`brain_graph.py`): each approval hangs off its task, and each brain file that is a task's deliverable or a memory entry's `source_ref` hangs off what made it, so `[[show A3]]` and `[[file brain/work/x.md]]` have something to light.
-- **Effects** (`#fx`, app.js): dashed beams from the orb to each lit node with a breathing halo, a green ring going out from running work, and sparks along random visible links (about every 1.5 s at rest, many while JARVIS thinks, fewer while he speaks; none while the camera moves; none with reduced motion). It only clears and redraws while something is showing, so the graph itself still redraws only when it moves. On a desktop with 1,560 nodes it runs at the display rate (measured with headless Edge: about 90 to 110 frames a second during a flight).
-- **ROAS** (T103, `app.js` "ROAS" section): a tile at the top of the side panel and a pill in the header (under the header on a phone; tapping it opens the panel). Today's and the last 7 days' ROAS (Shopify sales / Meta spend, both from the ledger), the sales and spend behind each, and a gauge with the breakeven line (`bin/jarvis sales breakeven <roas> --note ...`, kept in brain/config.json): green at or above breakeven, red below, neutral with no spend or no breakeven set. It polls `GET /api/ops/roas` every 60 s and when the tab comes back. When the last pull is older than `sales_live_minutes` (45) or either source failed, it says **NO LIVE DATA** with the reason and dims the ledger's figures; it never shows anything else.
-- **Live view** (T106, `swarm.js`, `/#live`, the Live button with its count in the header): the agents at work, after the owner's reels (M-261109-dea4, M-261109-dbbe). One tile per running worker, per helper a worker has out (the Agent tool inside it) and per agent the dashboard session has handed work to, each with its own colour and named badge; the tile shows what it is doing now, the last file it wrote or edited (the tail of the text from the tool call itself, or the image via `/api/swarm/file`, repo and brain only, never `secrets/`) with the agent's named cursor at the end, and progress from its own TodoWrite plan or, failing that, its task's subtasks ("No plan shared yet" otherwise). The swarm feed lists every action in plain English (`swarm.plain`: Bash, Read, Edit, Write, Grep, WebSearch, WebFetch, Agent, Skill, connectors) with its real time, and the timeline puts one tick per action on a lane per agent over the last 30 minutes. Server: `core/jarvis/swarm.py`, `GET /api/swarm`; it reads each worker's stream-json log incrementally (only what was appended since the last call, a half-written line waits) and the Runner's hand-offs (`swarm.note`). Workers that finished in the last 15 minutes stay, dimmed. No fake motion: a cursor blinks only while its agent acted in the last 20 s, and with nothing running the view says so. Polls every 2 s while open (15 s closed, for the count), and at once on `dispatch`, `agent_activity` and `agent_done`.
-- Phone (820px or less): the orb and caption at the top, the graph under it, the cards as a sheet above the talk bar, and "What I'm doing" as a drawer (the Now button, or tap a node). The drawer holds the links to the other views and the demo.
+**One state.** `core/jarvis/cockpit.py` builds everything the pages show in one pass (`state()`, about 30 ms on the
+live brain): `kpis`, `pipeline`, `tests`, `inbox`, `work`, `live`, `money`, `capacity`, `brain`, `system`.
+`cockpit.Feed` keeps the last build, rebuilds when the brain's fingerprint changes (and every 2 s while agents are
+working, 10 s otherwise), and publishes only the sections whose content changed.
 
-## The control centre (Control button, `/#control`, Ctrl+K)
+**One stream.** `jarvis.js` (`window.J`) holds the only connection, `/api/events`. Its first message is the whole
+state (`{"type": "state", "full": true, "sections": {...}}`); after that come `state` events with the changed
+sections, and the conversation's events (`status`, `say_delta`, `say_chunk`, `say`, `jarvis_tool`, `dispatch`,
+`agent_activity`, `permission`, `ears`, `wake` and so on). `J.sections` is always current; listen with
+`J.on(type, fn)`. Nothing polls. Don't open a second event stream and don't add a timer that fetches state.
+`GET /api/app` returns the same sections for anything that wants them once (`?fresh=1` forces a rebuild).
 
-Built for T98 (M-261109-7b9c): everything the owner used to open the Claude Code window for. `control.js` adds it to any page that loads it after `jarvis.js` (the main page and `/chat`): in the page's header where it has a `#ctlBtn`, otherwise as a floating button. `/#control-live`, `-chat`, `-sessions` and `-pc` open a tab directly. The server side is `core/jarvis/control.py` (routes under `/api/control/`); the gap audit is `brain/work/general/T98-gap-audit.md`.
+Fetched only when asked for: `/api/teammap` (who the agents are, when the Team page opens), `/api/skills?agent=`
+(skill levels, when an agent is picked), `/api/memory?q=&c=` (a search), `/api/record?id=` (the record drawer:
+`T12`, `A3`, `D7`, `X1`, `M-…`, `product:<slug>`, `agent:<name>`, `cat:<name>`, `file:brain/...`), `/api/file?path=`
+(a deliverable's preview: brain files only, never `secrets/`), `/api/control/worker?id=` (a worker's log),
+`/api/control/sessions`, `/api/control/screen`.
 
-- **Permission prompts**: the dashboard's Claude Code runs with `--permission-prompt-tool stdio`, so anything that would prompt in the window arrives as a `can_use_tool` control request (`Runner._permit`). Read-only tools pass (the owner's blanket permission; `dashboard_auto_allow` in brain/config.json adds more). Anything else becomes a real approval record (kind `tool`). It goes to the phone with Approve / Reject (Telegram), shows as a banner on every page that has the drawer, and is spoken. The owner answers on the banner, on the board, on the phone, with `bin/jarvis approval`, or by saying or typing "yes" or "no". No answer within `permission_wait_seconds` (600) is a refusal, as it was before T98; the guard hook and the approval gates are unchanged. AskUserQuestion shows its options and sends the answer back; it creates no approval and opens no clearance window.
-- **Live**: every step of the conversation (`Runner.steps`): the owner's message, each tool JARVIS runs with its result or error (`jarvis_tool`, `jarvis_tool_done`), and each hand-off. Messages sent while JARVIS is busy wait their turn on the server (`Runner.queue`, the `queued` event) instead of being refused, and can be removed from the queue.
-- **Chat**: a composer with attachments of any kind (drop, paste or the button; up to 4 files of 15 MB each, no programs, saved in brain/files/uploads and named in the message), images as before, and slash commands and skills with completion (the list comes from Claude Code's `init` event). Slash-command output (`/context`, `/cost`) is shown, not spoken. Files dropped on the main talk bar open the composer.
-- **Sessions**: every Claude Code conversation of this repo (`~/.claude/projects/<repo>/*.jsonl`; `claude_sessions_dir` overrides the folder). Read one back, switch to it (the next message resumes it), or start a new one.
-- **PC**: the screen live (ffmpeg gdigrab, every 2 s, only while shown; the page key goes in the image URL); open an app (`control.APPS` plus `pc_apps` in config), a folder, a file (not a program) or a web page; desktop jobs for the computer-use runner (queue, cancel, whether the runner is on); durable workers (start one with a brief, live log, stop, resume). Workers now log stream-json, so `bin/jarvis work log W<n>` and the page show them as they go; `bin/jarvis work stop W<n>` marks one cancelled so it isn't resumed. `bin/jarvis job cancel J<n>` takes a queued job off the queue.
+Markup the shell acts on anywhere: `data-ref="T12"` opens the record drawer, `data-file="brain/..."` previews a
+deliverable, `data-act="<name>"` runs `App.acts[name](element)`, and any `a[href="/..."]` navigates in place. Record
+ids written in text (`App.link`) become links by themselves. `App.block(el, html)` sets a block's markup only when it
+changed, so scrolling, focus and half-typed input survive the state arriving; build a page as a fixed skeleton with
+blocks inside it (see `page-testing.js`).
 
-## The speaking stage (`/stage`)
+## The testing cockpit (`cockpit.py`)
 
-Built after the owner's reels (M-261109-ced6, M-261108-ede3, M-261109-738f): JARVIS shows what he is saying.
+- **Pipeline** (`pipeline`, `_card`): each product on the rail candidate, researched, creatives, product page,
+  campaign draft, your approval, live test, verdict. A stage's state comes from evidence, never from a typed status:
+  the tasks of the agents that own it (`STAGE_AGENTS`), pending and approved gate approvals, and the product's tests.
+  A finished test closes a round; what was done before it shows as "from the last round". `at` is where the product
+  is now, `blockers` are worked out (blocked tasks, approvals waiting, stopped workers, queued work nobody started),
+  and `next` is the one action: approve, read the test, start research, start a task, watch, or put it to the council.
+  Open product-research work with no product yet is listed as the hunt for the next candidate.
+- **Tests** (`tests_view`, `day_call`): the reads per day (a day read several times keeps its last read, and
+  `records.evaluate` now counts it once too), totals, CPC, CTR, CPA, ROAS against the breakeven line, and Blake's
+  cut-or-continue call per day judged on the totals to date. His counts are examples, not thresholds, so the rule only
+  separates none from some. Under `min_spend_for_verdict_usd` or `min_clicks_for_verdict` the page says
+  **Insufficient data** and shows the rule's reading beside it, never a win. Reads labelled two ways (day numbers and
+  dates) are flagged, because the totals may count spend twice. Per-creative figures are not stored yet (T112); the
+  written per-ad reads from the feedback loop are listed instead.
+- **Kill rule**: ad spend since the last sale against `sales_kill_aud`, from the ledger; hitting it also puts a line
+  in the inbox.
+- **Inbox** (`inbox`): approvals, permission prompts and questions from JARVIS's own Claude Code
+  (`control.Permissions`), stopped or failed workers, failed desktop jobs (several at once become one line), the kill
+  rule, a queue with the job runner off, and Claude Code signed out. Each has its one-tap action.
 
-- **Orb** (`startOrb` in `stage.js`): a canvas of a tick ring, rotating arcs and a radial band round a glowing core. The band and core follow the voice: `J.spectrum()` and `J.level()` in `jarvis.js` read the Kokoro audio through a Web Audio analyser. The audio is only routed through the analyser once a tap or key press has started the AudioContext (audio routed into a suspended context plays silently, which would mute the voice on a phone); until then, and for the browser's own voice, the orb uses a synthetic pulse. Arcs spin while JARVIS thinks or hands out work.
-- **Cards**: each sentence of a reply goes to `POST /api/visuals` (`core/jarvis/visuals.py`), which returns up to four cards: screen hints the reply carries (`[[count 412 applications]]`, `[[list a; b; c]]`, `[[show T12 A3]]`, `[[date Thursday 3pm call]]`, `[[money 380 target]]`, `[[file brain/work/x.md]]`, `[[case proposal; reason; reason]]`), then record ids (T, A, D, M) resolved through the records, then what the sentence itself says (products, money, counts, percentages, a list of three or more, a day with a meeting word, brain file paths). With a hint, ids still resolve but the guesses give way. The voice prompt (`VOICE_PROMPT` in `dashboard.py`) tells JARVIS about the hints; the server strips them from what is spoken.
-- **Timing**: `jarvis.js` speaks a few sentences per clip and reports progress as `caption` events; a sentence's cards go up when the voice reaches it, in the order said. With the voice off, the whole reply's cards go up at once. Earlier sentences' cards stay, dimmed, so the reply builds up; a new message clears them.
-- **Between replies**: "On the board" shows pending approvals (Approve and Reject work) and who is working, from `/api/state`. The ticker under the orb (desktop) lists live agents and hand-offs.
-- **Demo**: "Play a demo" speaks four sample lines with sample cards, labelled "Demo with sample data, not your records".
-- Phone (900px or less): the orb and caption stay pinned at the top and shrink while cards are up, the cards scroll under them, the talk bar is fixed at the bottom.
+One-tap actions that only record a decision go straight to the server (`/api/approval`, `/api/control/permission`,
+`/api/control/worker`, `/api/control/job`, `/api/task`, `/api/task-model`, `/api/agent-model`). Actions that start
+work (research a candidate, run the pipeline, start a task, ask an agent) are sent to JARVIS as a message
+(`App.say`), so the approval gates, the mentor checks and the task records all still apply.
 
-## The Brain (`/brain`)
+## Talking to JARVIS
 
-Built from the owner's brief (M-261108-3a97, the Zubair Trabzada reel M-261108-78c1): function before graphics. Read-only over the brain. It doesn't load `jarvis.js` or open an event stream; it polls.
+The talk panel is docked on every page (a sheet on a phone; Ctrl+/ focuses it). Typed messages, pasted or dropped
+images (up to 4) and attached files (up to 4, 15 MB each, no programs) go to `POST /api/chat`: the same headless Claude
+Code session as before, with the same connectors, skills, memory, hooks and approval gates. Messages sent while JARVIS
+is busy wait their turn on the server.
 
-- **Server** (`core/jarvis/brain_graph.py`): `GET /api/brain/graph` returns `nodes` (`id`, `k` kind, `g` group, `l` label, `s` status, `p` provenance), `links` as `[from index, to index, kind]`, `counts` per group and `sig`. Nodes: JARVIS (index 0), the agents in `.claude/agents/`, products, every memory entry (grouped by category, with a hub node per category), tasks and decisions. Edges: memory to its category hub, `supersedes`, a memory's product, task parent, agent and product, a decision's task and product, then `[[links]]` (by id or title) and record ids written in memory bodies (M-…, T<n>, D<n>). Any group that still can't reach JARVIS (a task for an agent outside the roster) is hung off JARVIS by its best-connected node. The graph is cached on a fingerprint of the memory, tasks, decisions and products tables (0.4 s to build with ~1,300 entries, about 2 ms cached). `GET /api/brain/node?id=` gives one node's details (a memory entry's meta and body, a task with subtasks and history, a decision, product, agent or category). `GET /api/brain/now` is the live panel: workers (`work.listing`, cached 10 s because it asks the OS about each running one), active agents (the activity log plus the dashboard session's live hand-offs), open tasks (in progress first), pending approvals, the last 12 journal lines, `busy` and the same `sig`.
-- **Page** (`brain.js`): no libraries. A Barnes-Hut force simulation on typed arrays and one canvas, drawn in batches by colour, redrawn only while the layout is moving or the view changes, so 1,500 nodes stay smooth on a phone. Labels for hubs always and the rest when zoomed in, skipped where they would overlap. Drag to pan, wheel or pinch to zoom, drag a node to move it, tap a node for its details (its neighbours light up; record ids in the text are links). Search highlights matches (Enter jumps to the first). Filters switch categories and record kinds on and off; superseded memory is hidden unless "Show superseded memory" is ticked. Fit re-frames the graph. `/brain#<id>` opens a node (e.g. `/brain#T95`, `/brain#M-261108-3a97`).
-- **Orb**: a DOM element pinned to the JARVIS node; it pulses and its rings spin while `busy` (a worker running, an agent active, or JARVIS thinking in the dashboard session). Nodes with work running now get a green ring.
-- **Live**: `/api/brain/now` every 4 s (paused while the tab is hidden); when its `sig` differs from the graph's, the graph is refetched and known nodes keep their positions.
-- Phone (820px or less): the graph on top (56vh), the panel scrolls below it.
+- **Speed.** The reply's words are published as they are written (`say_delta`) and shown at once; sentences go to
+  the Kokoro voice as each one completes (`say_chunk`), fetched ahead while the previous one plays. Claude Code is
+  started at server start and primed with `/cost` (`Runner._prime`: answered by Claude Code itself, no usage, nothing
+  added to the conversation) so the first message doesn't pay for its connectors loading; it is started again at once
+  after Stop, and within 30 s whenever it has ended. `python core/tests/latency.py` measures all of it on a copy of
+  the brain.
+- **Voice.** "Hey JARVIS" (the local wake word, `wakeword.py`), the mic button, hands-free follow-ups and the British
+  Kokoro voice work as before; they live in `jarvis.js` and the settings are on the System page.
+- **Permission prompts.** The dashboard's Claude Code runs with `--permission-prompt-tool stdio`. Read-only tools
+  pass; anything else becomes an approval record that shows in the inbox, as a toast, on the phone and can be answered
+  by saying or typing yes or no. `AskUserQuestion` shows its options in the inbox.
 
-## Operations data (`/api/ops/*`, T101)
+## Upgrades that came with the rebuild
 
-The main page draws `/api/ops/roas` (the ROAS tile); the rest is JSON only so far. Served by `core/jarvis/ops.py` (one route line in `dashboard.py`), read-only over the brain.
+- **Model per worker**: `bin/jarvis work start --model`, the Start a worker form, and the Workers table show the
+  model each run uses (the default is `worker_model`). Fable is offered only as the owner's own choice (D77).
+- **Plan view**: every open parent task with its steps, agent, status, model, deliverable link and running worker.
+- **Ask this agent**: on an agent's panel; the question goes through JARVIS (`Ask the <agent> agent, from the team
+  page: …`) and the answer arrives in the talk panel.
+- **Debate mode**: `POST /api/debate` starts a durable worker that runs the `marketing-council` skill on a big call
+  (product pick, kill or continue, scale), writes its deliverable, and records the outcome with `bin/jarvis decide
+  --by jarvis`. It recommends; spending and launching still go through approval.
+- **Capacity meter**: `bin/jarvis pace` in the strip and on the System page: used, even pace, the ceiling that keeps
+  a reserve for the owner.
 
-| Endpoint | What it returns | CLI twin |
-|---|---|---|
-| `/api/ops/overview` | one line each for sales and routines, the projects counts, social post counts, the last 5 spoken sales lines: for a small tile | |
-| `/api/ops/projects` | every open top-level task: subtasks done/total, workers, deadline and days left, worked-out blockers, most urgent first | `bin/jarvis projects --json` |
-| `/api/ops/sales` | today's figures from the ledger (sales, ad spend, spend since the last sale, profit today and this week against A$380), which sources are set up, the last watch, recent announcements | `bin/jarvis sales status --json` |
-| `/api/ops/roas` | today's and 7-day ROAS with revenue and spend, the breakeven line and verdicts, `live` and why not, the source and time of the last pull (the ROAS tile) | `bin/jarvis sales roas --json` |
-| `/api/ops/social` | the social queue: counts by status, the next 14 days of the calendar, open comment replies | `bin/jarvis social board` |
-| `/api/ops/routines` | each unattended routine's schedule, last run, result and next run, and whether the 15-minute tick is alive | `bin/jarvis routines --json` |
+## Look
 
-**Spoken sales lines**: every alert the sales watch raises (a sale, the first sale of the day, a budget spent with no sale, no add-to-carts, the kill rule, the evening profit line) has a short `say` line, kept in `brain/work/sales/announce.jsonl` with a rising `id` (`sales_watch.announcements(since_id)`) and logged to the activity feed as the accountant. A page or the call can poll `/api/ops/sales` (or `/api/ops/overview`) and speak any `announcements` with an `id` it hasn't said yet.
-
-## The 3D HQ (`/hq`), piece by piece
-
-**`hq.html`**: the layout and all the CSS (the HQ work is paused while T86 is the main view). Tokens are on `:root` (white marble, champagne gold, ivory, navy; smoked-glass panels). Desktop: the estate fills the screen; overlays sit round it (top nav, Business overview, Live activity, Quick actions, Agent performance, view controls, latest-event toast and talk bar). Up to 1180px wide, Live activity and Agent performance hide. Phone (860px or less): the estate on top, then the cards and the task board, with the talk bar fixed at the bottom; building chips become icon badges.
-
-**`hq.js`**: everything except the 3D view. Its sections, in order:
-- *Data adapter* (`Feed`): the only place data comes in. The model carries `teams` (the eight teams) and `departments` (one per agent: what the estate draws). It combines `J.state` (`/api/state`), `/api/hq` and live events (`dispatch`, `agent_activity`, `agent_done`, `status`) into one model, and works out each agent's status. When the activity log (`core/jarvis/activity.py`) is installed, `/api/hq` carries it and it takes priority. To add a data source, add it here and give it a field on the model.
-- *Top bar*: navigation (Dashboard, Agents, Tasks, Analytics, Settings; each opens its panel), Monaco weather (Open-Meteo, hidden if it can't load), the next milestone.
-- *Corner cards*: Business overview (this week's profit against the weekly target, a 14-day daily profit line, sales, costs, ROAS from logged tests), Live activity (task events and live hand-offs), Agent performance (tasks finished per day, share of open tasks on track), the latest finished task.
-- *Task board*: Now, Needs you (one-tap Approve and Reject), Done today, To do. In the Tasks panel on a desktop, inline on a phone.
-- *Panels*: team (its workspace), agent (profile), task, JARVIS (command chat from the journal, and the boardroom: work shared across teams), Agents, Tasks, Analytics, Settings. Anything with `data-team`, `data-agent`, `data-task`, `data-nav` or `data-ask` opens the matching panel or fills the talk bar.
-- *Talk bar*: typed messages go to `J.send`, the mic to `J.listen`; replies show as a caption and are spoken by `jarvis.js`.
-- Graphics (Settings): **Low** (simplified: no shadows or post-processing, less scenery; automatic on phones and 4-core devices, or `?simple`), **Medium** (the desktop default: the full scene, 2K shadows, bloom, SMAA, the grade) and **High** (by hand: 4K shadows, ambient occlusion, depth of field). The look, with no downloaded assets: ACES tone mapping and sRGB output; image-based light from the drawn sky (sun, drifting clouds, stars at night) rendered into an environment map, replaced by an HDRI photograph of the same time of day (from the three.js repository on the CDN the library comes from, normalised to the same brightness) once it loads; a sun shadow map that follows the view (sharp at a desk, wide over the estate); physically based materials with drawn normal and roughness maps (plaster, marble, paving joints, tarmac, brushed gold), lacquer on cars and yachts, photographed grass and hardwood (same source as the water's wave map, which had been 404ing from the npm path); height fog that thins with altitude plus a low mist over the harbour; a subtle grade (colour, contrast, vignette). A governor watches the frame time: after the first 12 s, two seconds of frames over 24 ms shed depth of field, then ambient occlusion, then the render scale, then the water's reflection rate, with a console note, so the page never stutters for long. Real models (milestone 12): with the free CC0 packs installed (Settings → Download, or `bin/jarvis hq assets fetch`; they go to C:/JarvisMedia/hq-assets or brain/files/hq/assets, never the repo, served at `/hq-assets/`), the people are Quaternius's animated characters (FBX, painted in each person's colours by material name: Skin, Hair, Black = suit, Shirt, Pants, Details = tie; Idle/Walk/SitDown clips blended from the actor's state, typing and looking as bone nudges on top, the held prop on the FistR bone), the visitors are idle Quaternius extras, the circuit crowd and promenade are four Quaternius figures baked still in their Idle pose and drawn as instances (`bakeFigure`, `bakeCrowd`), desks and chairs are Poly Haven's metal office desk and modern arm chair, the owner's corner has Sofa_01, ArmChair_01 and the modern coffee table, planters are potted_plant_04, plaza benches are modular_street_seating, and the flower beds are Kenney's flowers. Sitting is built on the Idle clip plus leg-bone angles and typing puts the hands on the desk (`TUNE`, adjustable live as `stage.hq.tune`); every bone nudge is undone before the next mixer update, because the mixer rewrites a bone only when its animated value changes. Clicking a person opens them (an unseen capsule takes the click). Everything is drawn by hand first and the model takes its place when it loads (`propKind(..., models)`, `placeModel`, `upgrade` in hq-scene.js), so a missing or failed pack costs nothing. `core/jarvis/hq_assets.py` holds the pinned sources and checksums.
-- Time of day: the light follows this computer's clock (day 6:30am to 4:30pm, golden hour, sunset, then the estate lit for the evening). Settings has an override (Day, Sunset, Evening) for previewing; "Live" is the default and what the owner asked for.
-- Look of the estate: the layout follows the rendered day backdrop (two curved rows of pavilions, `SITES`; pool and tennis court at the corners; palms between the pavilions, olives and flower beds along each row). Visitors are instanced figures of the agents' build (four parts for all of them). On capable devices (not simplified): reflecting water on the bay (three.js Water, reflection at 384 px every other frame, its normal map from the pinned three.js CDN), SMAA anti-aliasing, and ambient occlusion when the computer has 8+ cores or the Settings toggle is on (`opts.ao`). Nothing is downloaded into the repo; `brain/work/general/hq-progress/backdrop-vs-live-3d.jpg` is the side-by-side.
-- Characters: `LOOKS` in `hq-scene.js` gives each head agent its department colour, hair, build, glasses and a prop for the job (held when standing or walking, put down at the keys); JARVIS is black with a glowing gold tie, the owner cream, Blake and Mark casual persona figures on the HQ terrace. `nameTag()` floats a name over each one, fading beyond 45 m and hidden from far overview (the chips name the buildings then). `stage.hq.lineup()` stands everyone in a row for a picture and returns a function that puts them back.
-- The race: the GP cars on the circuit brake for corners, queue in their lane and overtake on the straights (`lane`, `passing`); 5 cars in simplified mode. The engine note is synthesised in the browser (no audio files; `engine()`), heard within 90 m of the nearest car after the page has been touched, off in Settings. Agents on a break can stand at the railing above the circuit (`LEISURE` "rail").
-- Conversation speed: `bin/jarvis dashboard` starts the voice model and Claude Code (resuming the saved conversation) at start-up, so the first spoken turn doesn't pay for either; the Claude Code process stays alive between messages and replies stream sentence by sentence to the voice. Settings has "Conversation model" (Haiku fastest, Sonnet quick, Opus strongest, or Claude Code's default), kept as `dashboard_model` in brain/config.json via `/api/hq/conversation`; changing it restarts the warm process. The per-message hook (recall + journal) loads only what it needs. `python core/tests/latency_hq.py [--prewarm 12 --model sonnet]` measures time to the first spoken sentence and the full reply on a brain copy.
-- Cinematic view (the Cinematic button): the estate as Higgsfield rendered it from the owner's brief, three 4K stills in `brain/files/hq/backdrop-{day,sunset,evening}.jpg` (generated 2026-11-05, 4.25 credits each; the brief is in `brain/work/general/hq-progress/backdrop-brief.md`), picked by the clock or the Settings time override, with the live chips and approval cards placed at each building's spot (`BACKDROPS` in `hq.js`, fractions of the frame per still) and wheel/pinch/button zoom with drag. The 3D scene pauses underneath (`scene.pause`). If the files aren't there the view says so.
-- Zoom everywhere: the orbit camera goes from 5 m (2 m in the office) to 360 m, down to eye level; close in it stops at walls (`solid.camSegs` for the penthouse) and never goes under a floor. Walking, the wheel, pinch and +/- run one zoom from eye level out over the shoulder. The cinematic view zooms the picture.
-- Nobody walks through anyone: `keepApart()` pushes walking people apart from each other and round the owner (seated or walking) with a sideways slide and a nudged waypoint, so they go round and stop rather than pass through; the walker is stopped by people too.
-- Images in the talk bar: paste (Ctrl+V), drop on the bar, or the clip button; up to four, sent with the message like the chat page.
-- Model picker: "Same as JARVIS" (the agent runs on JARVIS's session model), "Recommended: …" (JARVIS's per-agent recommendation from `hq.RECOMMENDED`, with the reason shown), or a fixed model; the current one is marked "(now)".
-- The owner's office: HQ opens there (the crown penthouse of the HQ building: the owner at his desk, the desk screen with this week's profit against the target, sales, costs, what is working, what needs him, the view over the plaza to the sea). "My office" in the view controls returns there from anywhere; "3D View" goes out to the estate. JARVIS has its own office on floor 2 of the HQ building (command desk, globe, sign); clicking anything on the building still opens JARVIS.
-- Approvals come to the owner's desk: a pending approval (the real record in `approvals`) sends the agent whose task it is (JARVIS, from his floor-2 office, for his own) out of its office, round the plaza, up the HQ steps and into the lift; it reappears at the penthouse lift door and stands beside the desk with the card (`.acard`, rendered by `renderChips` in `hq.js`, placed by the estate like a chip) until Approve or Reject is pressed, then goes back the same way. The board's "Needs you" tab shows the same records.
-- Voices: every head agent, and the Blake and Mark method personas, speaks with its own Kokoro voice (`tts.AGENT_VOICES`: stock British voices and blends, all different; nothing imitates a real person). Talking to one of them (the talk bar's addressee, or "Talk to Blake"/"Talk to Mark" on the JARVIS panel) sets `J.replyVoice`, so the replies arrive in that voice; talking to JARVIS brings his own back. The owner can change any voice on the agent's profile (saved to `agent_voices` in brain/config.json via `/api/hq/agent-voice`) and hear a sample.
-- Walk from the office: Walk while in the office takes the owner's avatar down the lift to the forecourt (over the shoulder); tapping a building chip walks him there round the plaza ring (every door faces the plaza, so the route never crosses the basin or another office), and "My office" in the walk bar brings him back to his chair. Taking the controls (keys, stick) cancels a walk-there.
-- Walk mode (the Walk button in the view controls): move through the estate and into the offices at eye level or over the shoulder. Desktop: click the view to take the mouse, W A S D or the arrows to walk, Shift to run, mouse to look, V to switch eye level and over the shoulder, Esc gives the mouse back (a second Esc leaves). Phone: the on-screen stick (bottom left) walks, dragging the view looks. Walking up to an agent, into an office or up to the HQ shows a button (and E opens it) for its panel. Clicking a building chip while walking steps you over to its door. `hq.js` only renders the hint, the stick and the buttons (`renderWalk`); the movement lives in the scene.
-
-**`hq-scene.js`**: the three.js world. Scenery props (furniture, planting, visitors) go through `prop(kind, parent, x, y, z)` and are drawn as one instanced mesh per kind; `stage.hq.snap()` returns the current frame as an image.
-
-`hq-scene.js` details: the three.js world (three@0.160.0 from jsdelivr, through the import map in `hq.html`). `startScene(opts)` returns `update(model)`, `dispatch(agent)`, `focus(id)`, `demo(on)`, `view("reset" | "in" | "out" | "explore" | "walk" | "eye")`, `interact()` (open whatever the walker is standing next to), `walking()`, `whereabouts()`, `setTime(mode)` and `reward(id)` (plan section 16 hook, a no-op until the rules are agreed). Walk mode's collisions are the `solid` registry: round things (`solid.circle`), wall segments (`solid.seg`, `solid.rect`) and raised floors (`solid.floors`, a function of x and z), registered where each thing is built, so new scenery that should stop the walker registers itself there. The walker is a circle pushed out of them each frame; the over-the-shoulder camera comes in closer rather than passing through a wall. Sections: textures and materials, golden-hour light, the harbour, circuit and city, the estate (plaza and globe, HQ, beam, pool, tennis, forecourt, palms), the people (one low-poly style, looks fixed per agent), actors (walk, sit, type, play), pavilions (one per agent, as the old office had a room per agent, coloured by team, with a full office inside), idle life (agents with no live task take a break round the estate and come back when work arrives), hand-off pulses, sub-agents and new hires (demo only until the hiring feed exists), camera and the frame loop. It draws only what the model says; the city, yachts and cars are scenery. If three.js can't load, the rest of the page still works. `stage.hq.snap()` returns the current frame as an image, for checking the view.
-
-**`core/jarvis/hq.py`** (server side): `GET /api/hq` returns teams (T54 plan, section 7); each agent's tools, connectors, skills and model from `.claude/agents/*.md`; the board (all open tasks, plus tasks done in the last 14 days); this week's money against `weekly_profit_target_aud`; daily profit for 14 days; and the activity log when it exists. `POST /api/hq/connectors` runs `claude mcp list` (Claude Code's own connector health check) and keeps the result in memory. `GET /api/hq/file?path=` previews a deliverable: brain files only, never `secrets/`.
-
-## Settings the page reads (brain/config.json)
-
-- `hq_milestone`: `{"title": "Brush launch", "when": "2026-11-05T20:00"}`, shown in the top bar.
-- `max_allowance`: `{"used_pct": 42, "resets": "2026-11-10T09:00+10:30", "source": "..."}`, the Claude Max weekly pace in Analytics. Until something fills it in, it says "Not connected yet".
+Slate surfaces with hairline borders; the JARVIS arc blue and ice for anything that is JARVIS or data
+(M-261110-cdd9); amber only for what waits on the owner; green only for work running or a figure above breakeven; red
+only for a cut or a figure below it. Figures are set in a DIN face (Bahnschrift on Windows, DIN Alternate on the
+iPhone), text in the system face, no downloaded fonts. Layouts follow the room the page has (container queries on
+`.main`), so they hold with the talk panel open or closed and down to a phone, where the navigation becomes a bottom
+bar. Motion only where something is happening: a dot pulses while an agent runs, a rail stop rings while its stage is
+active, a department's line runs while someone in it works, a log line is lit as it arrives, and nothing else moves
+(all off with reduced motion).
 
 ## Rules for changes
 
-- Real data only. If something isn't known or isn't built, say so on the page. Demo content must be labelled as demo where it shows. No control that does nothing.
-- Keep the task board one tap away and readable on a phone. The 3D view must never hide the status.
-- Run `python -m unittest discover -s core/tests` (tests in `core/tests/test_hq.py` and `test_dashboard.py`), then check the page in a browser at desktop and phone width with no console errors.
-- Before a merge, run `python core/tests/e2e_hq.py`: the whole app against a copy of the brain with the real Claude Code and connectors (chat, task assign/start, approve/reject, models, metrics, activity log, skills, every connector, voice, job runner, Telegram status, the earlier pages unchanged). It never touches the live brain; `--skip-chat` skips the steps that spend Claude usage.
+- Real data only. If something isn't known or isn't built, say so on the page. No control that does nothing.
+- A test with too little data is "Insufficient data", never a win (the owner's honesty rule).
+- New data goes into a section of `cockpit.state()`; a page never fetches its own copy of what the state carries.
+- A new page is one script plus its name in `dashboard.APP_PAGES`, the `ROUTES` table in `app.js` and the navigation
+  in `app.html`. No second HTML page: `test_app.py` checks that every address serves the one shell.
+- Run `python -m unittest discover -s core/tests` (`test_app.py`, `test_dashboard.py`, `test_roster.py`,
+  `test_swarm.py`, `test_control.py`), then look at every page at desktop and phone width with no console errors.

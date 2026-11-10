@@ -185,7 +185,7 @@ def recall(conn, prompt: str, session_id: str | None) -> str:
 
 
 def record_activity(conn, kind: str, event: dict) -> None:
-    """Feed the HQ activity log. Best effort: a hook must never fail because of it."""
+    """Feed the agent activity log. Best effort: a hook must never fail because of it."""
     try:
         agent = event.get("agent_type") or event.get("subagent_type") or "jarvis"
         session = event.get("session_id")
@@ -242,7 +242,7 @@ def main(argv: list[str]) -> int:
             sys.stdout.write(brief.session_brief(conn, session_id=event.get("session_id")) + "\n")
         elif kind == "prompt":
             prompt = journal.owner_words(event.get("prompt") or "")
-            if not prompt:  # a background-task notice, not the owner
+            if not prompt or prompt.strip() == "/cost":  # a background-task notice, or the dashboard warming Claude Code up
                 return
             session = event.get("session_id")
             context = recall(conn, prompt, session)  # search before recording, so the message can't match itself

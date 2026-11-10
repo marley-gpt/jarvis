@@ -1,27 +1,12 @@
-// Shared client for every JARVIS dashboard design: live state, chat, voice in and out.
-// A page sets window.JARVIS_TOKEN, then listens with J.on(type, fn).
+// The app's line to the server: one live event stream that carries the state and every event, sending messages,
+// the mic, the wake word and the Kokoro voice. app.js draws the pages; this file has no markup in it.
+// The page sets window.JARVIS_TOKEN, then listens with J.on(type, fn).
 (function () {
-  const AGENT_META = {
-    "mentor-learning":   { icon: "🎓", layer: "Knowledge layer", color: "#a78bfa", blurb: "Watches the mentor's lessons and turns them into cited procedures every agent follows." },
-    "product-research":  { icon: "🔎", layer: "Opportunity scan", color: "#38bdf8", blurb: "Finds and vets products: demand, competition, suppliers and margins." },
-    "market-research":   { icon: "💬", layer: "Customer voice", color: "#2dd4bf", blurb: "Mines reviews and Reddit for pain points, objections and angles." },
-    "creative-research": { icon: "🧲", layer: "Ad intelligence", color: "#fb7185", blurb: "Studies competitor ads and builds the inspiration library." },
-    "creative-director": { icon: "🎨", layer: "Creative studio", color: "#f59e0b", blurb: "Develops angles, image briefs and copy for static ads." },
-    "shopify":           { icon: "🛍️", layer: "Storefront", color: "#22c55e", blurb: "Drafts product pages and reviews the store, read-only." },
-    "store-qa":          { icon: "🛠️", layer: "Store QA", color: "#f472b6", blurb: "Clicks through the store like a customer, finds bugs and prepares tested fixes." },
-    "meta-ads":          { icon: "📣", layer: "Campaign layer", color: "#3b82f6", blurb: "Prepares campaign drafts and analyses ad performance." },
-    "meta-ads-auditor":  { icon: "🩺", layer: "Account audit", color: "#06b6d4", blurb: "Read-only deep audit of the Meta ad account: signals, creative, structure, audiences." },
-    "accountant":        { icon: "🧾", layer: "Money", color: "#facc15", blurb: "Tracks every cost and sale, and reports profit and loss for each week and each product test." },
-    "product-testing":   { icon: "🧪", layer: "Validation", color: "#a3e635", blurb: "Records every test, judges results and captures lessons." },
-    "operations":        { icon: "📊", layer: "Signal layer", color: "#818cf8", blurb: "Tracks tasks, bottlenecks and costs, and writes the daily overview." },
-  };
-  const DEFAULT_META = { icon: "🤖", layer: "Specialist", color: "#94a3b8", blurb: "" };
-
   const handlers = {};
   const J = {
-    state: null, status: "idle", listening: false, speaking: false, connected: false,
-    meta: (name) => AGENT_META[name] || DEFAULT_META,
-    label: (name) => (J.state?.agents.find((a) => a.name === name) || {}).label || name,
+    // sections: the cockpit's state by section (kpis, pipeline, tests, inbox, work, live, money, capacity, brain,
+    // system), kept current by "state" events on the stream. Nothing polls.
+    sections: {}, status: "idle", listening: false, speaking: false, connected: false,
     on(type, fn) { (handlers[type] ||= []).push(fn); return J; },
     emit(type, data) { (handlers[type] || []).forEach((fn) => { try { fn(data); } catch (e) { console.error(e); } }); },
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
@@ -50,15 +35,19 @@
     return data;
   }
   J.post = post;
+  const sys = () => J.sections.system || {};
+  function merge(sections, full) {
+    Object.assign(J.sections, sections);
+    J.emit("state", { sections, full: !!full });
+  }
+  // The stream brings the state on its own; this is for a window that wants it now (after an action, say).
   J.refresh = async () => {
-    const r = await fetch("/api/state");
-    if (!r.ok) return;
-    J.state = await r.json();
-    J.emit("state", J.state);
+    const r = await fetch("/api/app");
+    if (r.ok) merge((await r.json()).sections, true);
   };
   J.memory = async (q, c) => (await fetch(`/api/memory?q=${encodeURIComponent(q || "")}&c=${encodeURIComponent(c || "")}`)).json();
   J.memoryEntry = async (id) => (await fetch(`/api/memory/${encodeURIComponent(id)}`)).json();
-  J.decide = async (id, approve) => { await post("/api/approval", { id, approve }); J.refresh(); };
+  J.decide = (id, approve) => post("/api/approval", { id, approve });
   J.stop = () => { cancelSpeech(); if (J.listening) rec?.stop(); post("/api/stop").catch(() => {}); };
   J.newConversation = () => post("/api/new").catch((e) => J.emit("error", { text: e.message }));
 
@@ -94,7 +83,7 @@
     return J.speaking ? "speaking" : J.listening ? "listening" : J.ears === "thinking" ? "thinking" : J.status;
   }
   // The PC can transcribe locally (faster word-for-word, no internet, doesn't cut you off at a pause).
-  const localEars = () => !!(J.state && J.state.wake && J.state.wake.stt);
+  const localEars = () => !!(sys().wake && sys().wake.stt);
   // A short rising two-note tone: JARVIS is listening. Quieter and quicker than speaking a greeting.
   let audioCtx = null;
   function chime() {
@@ -112,10 +101,9 @@
   }
   J.shown = shown;
 
-  let refreshTimer = null;
   function onEvent(e) {
     switch (e.type) {
-      case "changed": clearTimeout(refreshTimer); refreshTimer = setTimeout(J.refresh, 150); return;
+      case "state": merge(e.sections, e.full); return;
       case "status": J.status = e.status; J.emit("status", { ...e, shown: shown() }); if (e.status === "idle") afterTurn(); return;
       // Replies stream in a sentence at a time (say_chunk) and are spoken as they arrive;
       // "say" then carries the whole paragraph for display, already spoken if it was streamed.
@@ -154,7 +142,7 @@
 
   function connect() {
     const es = new EventSource("/api/events");
-    es.onopen = () => { J.connected = true; J.emit("connection", { live: true }); J.refresh(); };
+    es.onopen = () => { J.connected = true; J.emit("connection", { live: true }); };
     es.onerror = () => { J.connected = false; J.emit("connection", { live: false }); };
     es.onmessage = (m) => onEvent(JSON.parse(m.data));
   }
@@ -219,9 +207,9 @@
     return vs.find((v) => v.name === J.settings.voice) || vs.find((v) => /natural|neural|online/i.test(v.name) && /en-(GB|AU)/.test(v.lang))
       || vs.find((v) => /natural|neural|online/i.test(v.name)) || vs[0];
   };
-  const kokoroOn = () => !!J.state?.tts?.available;
+  const kokoroOn = () => !!sys().tts?.available;
   J.voiceOptions = () => [
-    ...(kokoroOn() ? J.state.tts.voices.map((v) => ({ id: "kokoro:" + v.id, label: `JARVIS (Kokoro) · ${v.name}` })) : []),
+    ...(kokoroOn() ? sys().tts.voices.map((v) => ({ id: "kokoro:" + v.id, label: `JARVIS (Kokoro), ${v.name}` })) : []),
     ...(kokoroOn() ? [] : J.voices().map((v) => ({ id: v.name, label: v.name }))),  // only without the JARVIS voice
   ];
   // George was the default before the JARVIS-tuned voice existed: move people who never chose otherwise.
@@ -230,12 +218,12 @@
   J.currentVoice = () => {
     const saved = J.settings.voice, opts = J.voiceOptions();
     if (saved && opts.some((o) => o.id === saved)) return saved;
-    if (kokoroOn()) return "kokoro:" + J.state.tts.voice;
+    if (kokoroOn()) return "kokoro:" + sys().tts.voice;
     return J.bestVoice()?.name || "";
   };
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => J.emit("voices", J.voices());
   let ttsSeen = null;
-  J.on("state", (s) => { const k = JSON.stringify(s.tts || null); if (k !== ttsSeen) { ttsSeen = k; J.emit("voices", J.voices()); } });
+  J.on("state", () => { const k = JSON.stringify(sys().tts || null); if (k !== ttsSeen) { ttsSeen = k; J.emit("voices", J.voices()); } });
 
   let speakQueue = 0, chain = Promise.resolve(), gen = 0, audio = null;
   function setSpeaking(v) { J.speaking = v; setStatus(J.status); }
@@ -265,7 +253,7 @@
     const voice = voiceOverride || J.replyVoice || J.currentVoice(), my = gen;
     // The JARVIS voice always, unless it isn't installed. A failed sentence stays silent (the text is on
     // screen) rather than dropping to the browser's robotic voice mid-reply.
-    const kokoro = !J.state || kokoroOn();
+    const kokoro = !J.sections.system || kokoroOn();
     const voiceId = voice.startsWith("kokoro:") ? voice.slice(7) : "";
     chunks(all).forEach((c) => {
       speakQueue++; setSpeaking(true);
@@ -394,15 +382,13 @@
   }
   J.on("status", syncWakePause);
   J.greeting = () => {
-    const s = J.state, h = new Date().getHours();
+    const k = J.sections.kpis, h = new Date().getHours();
     const part = h < 5 ? "evening" : h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
     const open = [`Good ${part}, sir.`, `Welcome home, sir.`, `At your service, sir.`, `Good ${part}, sir. All systems are online.`];
     const bits = [open[Math.floor(Math.random() * open.length)]];
-    if (s) {
-      const working = s.agents.filter((a) => a.status === "working").length;
-      const ap = s.approvals.length;
-      if (ap) bits.push(`You have ${ap} approval${ap === 1 ? "" : "s"} awaiting your decision.`);
-      bits.push(working ? `${working} of the team ${working === 1 ? "is" : "are"} at work.` : "The team is standing by.");
+    if (k) {
+      if (k.inbox) bits.push(`${k.inbox} thing${k.inbox === 1 ? " is" : "s are"} waiting for your decision.`);
+      bits.push(k.agents_live ? `${k.agents_live} of the team ${k.agents_live === 1 ? "is" : "are"} at work.` : "The team is standing by.");
     }
     bits.push("What can I do for you?");
     return bits.join(" ");
@@ -424,7 +410,7 @@
     }, 250);
   };
   Object.defineProperty(J.settings, "wake", {
-    get() { return !!(J.state && J.state.wake && J.state.wake.enabled); },
+    get() { return !!(sys().wake && sys().wake.enabled); },
     set(v) { post("/api/wake", { on: !!v }).then(() => J.refresh()).catch((e) => J.emit("error", { text: e.message })); },
   });
 

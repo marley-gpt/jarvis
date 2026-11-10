@@ -158,34 +158,28 @@ class SwarmRouteTest(BrainTest):
         data = resp.read()
         conn.close()
         return resp.status, data
+    def live(self):
+        return json.loads(self.get("/api/app?fresh=1")[1])["sections"]["live"]
 
-    def test_live_view_on_the_main_page_and_its_api(self):
-        status, html = self.get("/")
-        self.assertEqual(status, 200)
-        for needle in (b'id="liveBtn"', b'id="swarm"', b'id="swarmFeed"', b'id="swarmLanes"', b'<script src="/swarm.js"></script>'):
-            self.assertIn(needle, html)
-        status, js = self.get("/swarm.js")
-        self.assertEqual(status, 200)
-        self.assertIn(b"/api/swarm", js)
-        status, body = self.get("/api/swarm")
-        self.assertEqual(status, 200)
-        data = json.loads(body)
-        self.assertEqual((data["live"], data["agents"], data["window"]), (0, [], swarm.WINDOW_SECONDS))
+    def test_live_section_of_the_app_state(self):
+        data = self.live()
+        self.assertEqual((data["count"], data["agents"], data["feed"]), (0, [], []))
+        self.assertEqual(data["jarvis"]["status"], "idle")
         self.assertEqual(self.get("/api/swarm/file?path=nothing.png")[0], 204)
 
-    def test_dashboard_hand_offs_reach_the_live_view(self):
+    def test_dashboard_hand_offs_reach_the_live_section(self):
         runner = self.server.runner
         dispatched = {}
         runner._handle(tool("Agent", {"description": "Draft the PDP", "subagent_type": "shopify"}, tid="toolu_a"), dispatched)
         runner._handle(tool("Read", {"file_path": "brain/work/pdp.md"}, parent="toolu_a", tid="toolu_b"), dispatched)
-        data = json.loads(self.get("/api/swarm")[1])
-        self.assertEqual(data["live"], 1)
+        data = self.live()
+        self.assertEqual(data["count"], 1)
         self.assertEqual(data["agents"][0]["name"], "shopify")
         self.assertEqual([f["text"] for f in data["feed"]][0], "Took on: Draft the PDP")
         runner._handle({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "toolu_a", "content": "ok"}]}}, dispatched)
-        data = json.loads(self.get("/api/swarm")[1])
-        self.assertEqual(data["live"], 0)
+        data = self.live()
+        self.assertEqual(data["count"], 0)
         self.assertEqual(data["feed"][-1]["text"], "Finished and handed back")
 
 

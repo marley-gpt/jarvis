@@ -420,26 +420,6 @@ def cmd_journal(conn, args):
         out(fmt_journal(r, n=args.width))
 
 
-def cmd_hq_assets(conn, args):
-    from . import hq_assets
-    if args.action == "fetch":
-        try:
-            st = hq_assets.fetch(args.only or None, log=out)
-        except Exception as exc:
-            raise SystemExit(f"Asset fetch stopped: {exc}")
-    else:
-        st = hq_assets.status()
-    if args.json:
-        out(json.dumps(st, indent=1)); return
-    for k, p in st["packs"].items():
-        out(f"{'ready  ' if p['ready'] else 'missing'}  {k:24} {p['title']} ({p['size_mb']} MB, {p['licence']})")
-    ph = st["polyhaven"]
-    out(f"{'ready  ' if all(ph.values()) else 'missing'}  polyhaven                {sum(ph.values())} of {len(ph)} Poly Haven models (CC0)")
-    out("Folder: " + st["root"])
-    if not st["ready"] and args.action != "fetch":
-        out("Fetch what is missing with: bin/jarvis hq assets fetch")
-
-
 def cmd_dashboard(conn, args):
     from . import dashboard
     conn.close()  # the server opens its own connections per request
@@ -587,7 +567,7 @@ def cmd_job_finish(ok):
 
 def cmd_work_start(conn, args):
     text = Path(args.brief_file).read_text(encoding="utf-8") if args.brief_file else args.brief
-    run = work.start(text, task=args.task or "", agent=args.agent or "")
+    run = work.start(text, task=args.task or "", agent=args.agent or "", model=args.model or "")
     out(f"W{run['id']} started (pid {run['pid']}): it survives session restarts. Log: {paths.rel(Path(run['log']))}")
 
 
@@ -616,16 +596,16 @@ def cmd_work_resume(conn, args):
 
 
 def cmd_metrics(conn, args):
-    from . import hq
+    from . import roster
     if args.sub == "set":
         raw = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
         try:
-            snap = hq.metrics_set(json.loads(raw))
+            snap = roster.metrics_set(json.loads(raw))
         except (ValueError, OSError) as exc:
             raise records.RecordError(f"metrics: {exc}") from exc
-        out(f"Saved the {snap['period']} snapshot ({len(snap['shopify'])} Shopify and {len(snap['meta'])} Meta figures) for the HQ.")
+        out(f"Saved the {snap['period']} snapshot ({len(snap['shopify'])} Shopify and {len(snap['meta'])} Meta figures).")
         return
-    snap = hq.metrics()
+    snap = roster.metrics()
     if not snap:
         out("No metrics snapshot yet. JARVIS pulls Shopify and Meta figures read-only and saves them with: bin/jarvis metrics set --file <json>")
         return
@@ -1338,13 +1318,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-w", "--width", type=int, default=300)
     s.set_defaults(fn=cmd_journal)
 
-    s = sub.add_parser("hq", help="the 3D HQ: its free asset packs")
-    hs = s.add_subparsers(dest="sub", required=True)
-    a = hs.add_parser("assets", help="status of the CC0 3D packs (people, trees, furniture), or fetch the missing ones")
-    a.add_argument("action", nargs="?", choices=["status", "fetch"], default="status")
-    a.add_argument("--only", action="append", help="just this pack or Poly Haven model id (repeatable)")
-    a.add_argument("--json", action="store_true")
-    a.set_defaults(fn=cmd_hq_assets)
     s = sub.add_parser("dashboard", help="live dashboard: watch the agents and talk to JARVIS")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--no-open", action="store_true", help="don't open the browser")
@@ -1438,6 +1411,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--brief-file")
     s.add_argument("--task")
     s.add_argument("--agent", help="a .claude/agents name, e.g. product-research")
+    s.add_argument("--model", help="model for this worker, e.g. claude-fable-5-2 (default: worker_model)")
     s.set_defaults(fn=cmd_work_start)
     s = wk.add_parser("list")
     s.add_argument("-n", type=int, default=15)
@@ -1453,13 +1427,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", nargs="?")
     s.set_defaults(fn=cmd_work_resume)
 
-    mt = sub.add_parser("metrics", help="the live Shopify and Meta figures the HQ shows (a read-only snapshot JARVIS pulls)").add_subparsers(
+    mt = sub.add_parser("metrics", help="a saved snapshot of Shopify and Meta figures (read-only, pulled by JARVIS)").add_subparsers(
         dest="sub", required=True)
     s = mt.add_parser("set", help="save a snapshot: JSON with period, shopify {...}, meta {...}, products [...]")
     s.add_argument("--file", help="read the JSON from this file instead of stdin")
     s.set_defaults(fn=cmd_metrics)
     mt.add_parser("show").set_defaults(fn=cmd_metrics)
-    ev = sub.add_parser("event", help="the agent activity log the HQ dashboard reads").add_subparsers(
+    ev = sub.add_parser("event", help="the agent activity log").add_subparsers(
         dest="sub", required=True)
     s = ev.add_parser("add", help="log what an agent is doing")
     s.add_argument("agent")

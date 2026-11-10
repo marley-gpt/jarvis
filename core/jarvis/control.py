@@ -474,7 +474,7 @@ def handle_post(path: str, body: dict, server) -> tuple[int, object] | None:
             action = body.get("action")
             if action == "start":
                 return 201, work.start(str(body.get("brief") or ""), task=str(body.get("task") or ""),
-                                       agent=str(body.get("agent") or ""))
+                                       agent=str(body.get("agent") or ""), model=str(body.get("model") or ""))
             if action == "stop":
                 return 200, work.stop(body.get("id"))
             if action == "resume":

@@ -5,7 +5,7 @@ description: JARVIS's morning brief (8am) and evening summary (9pm) for the owne
 
 # Daily brief and evening summary
 
-The owner wants a morning brief and an evening summary every day (2026-10-26). Both are written to `brain/reports/` and end with a short spoken version in the jarvis-voice style, which is what the owner sees in the JARVIS chat app. Read only: never launch, spend, edit the store or ads, or message anyone while doing this. Never invent a number; write "no data" instead.
+The owner wants a morning brief and an evening summary every day (2026-10-26). Both are written to `brain/reports/` and end with a short spoken version in the jarvis-voice style, which is what the owner sees in the JARVIS app. Read only: never launch, spend, edit the store or ads, or message anyone while doing this. Never invent a number; write "no data" instead.
 
 ## Morning brief
 1. Run, each on its own: `bin/jarvis brief`, `bin/jarvis task list`, `bin/jarvis approval list`, `bin/jarvis test list`, `bin/jarvis feedback digest`, `bin/jarvis cost check 0`, `bin/jarvis journal --previous`.

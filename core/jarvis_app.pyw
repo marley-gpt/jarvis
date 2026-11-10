@@ -2,10 +2,10 @@
 
 Starts the dashboard server in the background (no console window) unless it is already running,
 waits until it answers, then opens it as an app window (no address bar or tabs) in Chrome or Edge.
-`--chat` opens the chat window instead of the office. `--server` only starts the server, with no window:
-the Startup-folder shortcut uses it so JARVIS (and the owner's Telegram) is back after every restart.
-`python core/jarvis_app.pyw --install` creates the Desktop and Start-menu shortcuts (JARVIS and JARVIS Chat)
-and the Startup shortcut (JARVIS background).
+`--server` only starts the server, with no window: the Startup-folder shortcut uses it so JARVIS (and the owner's
+Telegram) is back after every restart. `python core/jarvis_app.pyw --install` creates the Desktop and Start-menu
+shortcuts (JARVIS, which opens the one app, and Reset JARVIS) and the Startup shortcut (JARVIS background), and
+removes the JARVIS Chat shortcut of the separate chat page that no longer exists (T110).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ DETACHED = 0x00000008   # DETACHED_PROCESS
 
 def running() -> bool:
     try:
-        with urllib.request.urlopen(URL + "api/state", timeout=2) as r:
+        with urllib.request.urlopen(URL + "api/live", timeout=2) as r:
             return r.status == 200
     except OSError:
         return False
@@ -64,28 +64,27 @@ def start_server() -> None:
                          creationflags=NO_WINDOW | DETACHED, close_fds=True)
 
 
-def open_window(page: str = "") -> None:
+def open_window() -> None:
     browser = next((b for b in BROWSERS if Path(b).exists()), None)
-    size = "980,860" if page == "chat" else "1440,900"
     if browser:
         # A dedicated profile so the window's flags always apply (they're ignored if Chrome is already running),
         # sound can play when JARVIS wakes without a click first, and mic permission is remembered for JARVIS only.
         profile = Path(os.environ.get("LOCALAPPDATA", str(REPO))) / "JARVIS" / "browser-profile"
-        subprocess.Popen([browser, f"--app={URL}{page}", f"--window-size={size}", f"--user-data-dir={profile}",
+        subprocess.Popen([browser, f"--app={URL}", "--window-size=1600,960", f"--user-data-dir={profile}",
                           "--autoplay-policy=no-user-gesture-required", "--no-first-run", "--no-default-browser-check"],
                          creationflags=DETACHED, close_fds=True)
     else:
-        os.startfile(URL + page)
+        os.startfile(URL)
 
 
-def launch(page: str = "") -> None:
+def launch() -> None:
     if not running():
         start_server()
         for _ in range(60):  # up to ~30 s on a cold start (the voice model loads in the background)
             time.sleep(0.5)
             if running():
                 break
-    open_window(page)
+    open_window()
 
 
 def reset() -> None:
@@ -154,7 +153,7 @@ def install() -> None:
     target = str(pyw if pyw.exists() else sys.executable)
     script = str(Path(__file__).resolve())
     # Ask Windows for the real folders: the Desktop is often redirected into OneDrive.
-    shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"), ("JARVIS Chat", " --chat", "Chat with JARVIS"),
+    shortcuts = (("JARVIS", "", "JARVIS - Urban Supplied AI"),
                  ("Reset JARVIS", " --reset", "JARVIS stuck? Stops what he is doing, or restarts him if frozen"))
     places = [(folder, s) for folder in ("Desktop", "Programs") for s in shortcuts]
     places.append(("Startup", ("JARVIS background", " --server", "Starts JARVIS and the phone bridge at sign-in")))
@@ -167,6 +166,12 @@ def install() -> None:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                            creationflags=NO_WINDOW)
         print(f"Shortcut: {r.stdout.strip() or r.stderr.strip()}")
+    # The separate chat page is gone: its shortcut would only open the same app, so it is removed.
+    gone = ("foreach ($f in 'Desktop', 'Programs') { $p = Join-Path ([Environment]::GetFolderPath($f)) 'JARVIS Chat.lnk'; "
+            "if (Test-Path $p) { Remove-Item $p -Confirm:$false; \"Removed: $p\" } }")
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", gone], capture_output=True, text=True, creationflags=NO_WINDOW)
+    if r.stdout.strip():
+        print(r.stdout.strip())
 
 
 if __name__ == "__main__":
@@ -178,4 +183,4 @@ if __name__ == "__main__":
         if not running():
             start_server()
     else:
-        launch("chat" if "--chat" in sys.argv else "")
+        launch()   # an old "JARVIS Chat" shortcut (--chat) opens the same one app

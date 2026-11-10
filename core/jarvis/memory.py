@@ -121,14 +121,21 @@ def sync(conn: sqlite3.Connection) -> dict:
     seen: set[str] = set()
     known = {r["path"]: r for r in conn.execute("SELECT path, id, mtime, size FROM memory")}
     stats = {"added": 0, "updated": 0, "removed": 0, "fixed": 0}
+    root = paths.memory_dir()
+    base = paths.rel(root)   # resolved once: resolving every file made each sync cost a third of a second
     for path in iter_files():
-        key = paths.rel(path)
+        key = f"{base}/{path.relative_to(root).as_posix()}"
         st = path.stat()
         row = known.get(key)
         seen.add(key)
         if row and row["mtime"] == st.st_mtime and row["size"] == st.st_size:
             continue
-        entry = read_entry(path)
+        try:
+            entry = read_entry(path)
+        except OSError:
+            # a OneDrive cloud-only file that will not download; skip it
+            # rather than break every memory command, retry on the next sync
+            continue
         if _normalise(entry, path):
             write_entry(entry)
             st = path.stat()

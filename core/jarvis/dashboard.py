@@ -1,18 +1,15 @@
-"""Live local dashboard: watch JARVIS delegate to its agents, and talk to it.
+"""The JARVIS app: a product-testing cockpit, and the way to talk to JARVIS.
 
-`bin/jarvis dashboard` serves the pages in core/dashboard/ on 127.0.0.1 (the
-app at `/`: status board, talk bar and the 3D HQ, see core/dashboard/README.md; the
-isometric office at `/office`, the sidebar console at `/console`, the chat app at
-`/chat`, the first version at `/classic`, all sharing jarvis.js) and streams
-state over Server-Sent Events. Talking to JARVIS runs one headless Claude Code
-process (`claude -p`, stream-json in and out) that stays running between
-messages and resumes the saved conversation if restarted, so it uses the
-owner's existing Claude subscription. Pasted images go in with the message.
-Each delegation (Agent tool call) and each specialist's tool use is pushed to
-the page as it happens. Durable state (tasks, approvals, memory, journal) comes
-from the brain, so the page also shows work done from any other Claude Code session.
+`bin/jarvis dashboard` serves one app on 127.0.0.1 (core/dashboard/, see its README): a few pages inside one
+shell (Testing, Team, Work, Money, Brain, System) with a talk panel on every page. All of them draw from one
+state (cockpit.py) that arrives on the live event stream, so nothing polls. Talking to JARVIS runs one headless
+Claude Code process (`claude -p`, stream-json in and out) that stays running between messages and resumes the saved
+conversation if restarted, so it uses the owner's existing Claude subscription. Pasted images go in with the
+message. Each delegation (Agent tool call) and each specialist's tool use is pushed to the page as it happens.
+Durable state (tasks, approvals, memory, journal) comes from the brain, so the app also shows work done from any
+other Claude Code session.
 
-Listening uses the browser's speech recognition; speaking uses local Kokoro
+Listening uses the local ears (or the browser's speech recognition); speaking uses local Kokoro
 (core/jarvis/tts.py) with the browser's voice as a fallback, so it costs nothing extra.
 """
 
@@ -34,22 +31,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import activity, brain_graph, brief, control, db, hq, hq_assets, journal, live, memory, paths, readiness, records, skills, swarm, team, telegram, tts, visuals, wakeword
+from . import cockpit, control, db, journal, live, lookup, memory, paths, records, roster, skills, swarm, telegram, tts, visuals, wakeword
 
 STATIC = paths.CORE_DIR / "dashboard"
-# The main view (T97) is the speaking stage (T86: the orb and the cards of what JARVIS is saying) in front of the
-# brain graph (T95); each still has its own page, and the 3D HQ (T54), office, console and earlier versions stay.
-PAGES = {"/": "app.html", "/app": "app.html", "/stage": "stage.html", "/hq": "hq.html", "/console": "console.html",
-         "/office": "office.html", "/chat": "chat.html", "/classic": "index.html", "/brain": "brain.html"}
-ASSETS = {"/jarvis.js": ("jarvis.js", "text/javascript; charset=utf-8"),
-          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-          "/swarm.js": ("swarm.js", "text/javascript; charset=utf-8"),
-          "/control.js": ("control.js", "text/javascript; charset=utf-8"),
-          "/live.js": ("live.js", "text/javascript; charset=utf-8"),
-          "/hq.js": ("hq.js", "text/javascript; charset=utf-8"),
-          "/hq-scene.js": ("hq-scene.js", "text/javascript; charset=utf-8"),
-          "/stage.js": ("stage.js", "text/javascript; charset=utf-8"),
-          "/brain.js": ("brain.js", "text/javascript; charset=utf-8")}
+# One app (T110, D75): every page route serves the same shell, and the page inside it changes without a reload.
+# A deeper path opens a record on that page: /work/T110, /team/creative-director, /brain/M-261110-cdd9.
+APP_PAGES = ("testing", "team", "work", "money", "brain", "system")
+SHELL = "app.html"
+# Addresses of the pages that were removed (the 3D HQ, the separate chat, the office, console, stage and brain
+# graph): an old bookmark or shortcut lands on the app instead of an error.
+RETIRED = ("/app", "/hq", "/chat", "/office", "/console", "/stage", "/classic")
+ASSET_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".ico": "image/x-icon"}
+ASSET_NAME = re.compile(r"^/[a-z0-9][a-z0-9-]*\.(?:js|css|ico)$")
 AGENTS_DIR = paths.REPO_ROOT / ".claude" / "agents"
 
 # Display order and short names; mentor first because every other agent depends on it.
@@ -85,10 +78,15 @@ VOICE_PROMPT = (
     "Be brief: a few short spoken sentences, no tables, no code blocks, no headings, "
     "no lists, no markdown. Lead with the answer, then the one thing that matters next. "
     "When you hand work to specialists, say plainly who is doing what. Put detail in deliverable files, "
-    "not in the spoken reply. The screen shows what you mention as you say it: say record ids such as T12, A3 or D7 and real numbers plainly, and you may end a sentence with one silent screen hint in double square brackets, for example [[count 412 applications]], [[list first; second; third]], [[show T12 A3]], [[date Thursday 3pm supplier call]], [[file brain/work/x.md]] or, when you propose taking a job on, [[case the proposal; reason one; reason two]]; hints are shown, never spoken. Never invent figures or results. Consequential actions such as spending, "
+    "not in the spoken reply. Say record ids such as T12, A3, D7 or X1 and real numbers plainly: the page turns each id into a link to the record. Never invent figures or results. Consequential actions such as spending, "
     "launching or changing ads, prices or the live store still need the owner's approval first."
 )
 
+
+# What a freshly started Claude Code is sent to warm it up (answered locally, no usage), and how long a message
+# waits for that before giving up on the process.
+PRIME_COMMAND = "/cost"
+PRIME_WAIT = 60
 
 # Claude Code's own wording when it has no credentials, and when a resumed conversation is gone.
 LOGIN_PROBLEM = re.compile(r"^\s*(not logged in|invalid api key|please run /login)", re.I)
@@ -115,107 +113,6 @@ def agent_roster() -> list[dict]:
         }
     order = [n for n in AGENT_LABELS if n in found] + [n for n in found if n not in AGENT_LABELS]
     return [found[n] for n in order]
-
-
-def _rows(rows) -> list[dict]:
-    return [dict(r) for r in rows]
-
-
-def snapshot(conn, live: dict | None = None) -> dict:
-    live = live or {}
-    agents = agent_roster()
-    for a in agents:
-        a["tasks"] = _rows(records.task_list(conn, agent=a["name"], open_only=True, limit=5))
-        last = conn.execute("SELECT * FROM tasks WHERE agent = ? AND status = 'done' ORDER BY completed DESC LIMIT 1",
-                            (a["name"],)).fetchone()
-        a["last_done"] = dict(last) if last else None
-        run = conn.execute("SELECT * FROM agent_runs WHERE agent = ? ORDER BY id DESC LIMIT 1", (a["name"],)).fetchone()
-        running = bool(run and run["event"] == "SubagentStart" and time.time() - _epoch(run["ts"]) < 3 * 3600)
-        live_agent = live.get("agents", {}).get(a["name"])
-        if live_agent:
-            a["status"], a["now"] = "working", live_agent.get("description")
-        elif running or any(t["status"] == "in_progress" for t in a["tasks"]):
-            a["status"], a["now"] = "working", next((t["title"] for t in a["tasks"] if t["status"] == "in_progress"), None)
-        elif a["tasks"]:
-            a["status"], a["now"] = "queued", a["tasks"][0]["title"]
-        else:
-            a["status"], a["now"] = "idle", None
-        a["activity"] = live.get("activity", {}).get(a["name"], [])[-4:]
-        a["runs"] = conn.execute("SELECT COUNT(*) FROM agent_runs WHERE agent = ? AND event = 'SubagentStart'",
-                                 (a["name"],)).fetchone()[0]
-        a["open"] = len(a["tasks"])
-
-    parents = conn.execute(
-        f"""SELECT * FROM tasks WHERE parent_id IS NULL AND status IN ({','.join('?' * len(records.OPEN_TASK_STATUSES))})
-            ORDER BY updated DESC LIMIT 8""", records.OPEN_TASK_STATUSES).fetchall()
-    tasks = []
-    for p in parents:
-        subs = conn.execute("SELECT id, title, agent, status FROM tasks WHERE parent_id = ? ORDER BY id", (p["id"],)).fetchall()
-        tasks.append({**dict(p), "subtasks": _rows(subs)})
-
-    recent_tasks = conn.execute("SELECT * FROM tasks ORDER BY updated DESC LIMIT 60").fetchall()
-    products = conn.execute("SELECT * FROM products ORDER BY updated DESC").fetchall()
-    tests = []
-    for t in conn.execute("SELECT * FROM tests ORDER BY id DESC LIMIT 40").fetchall():
-        tests.append({**dict(t), "eval": records.evaluate(conn, t["id"])})
-    month = paths.now()[:7]
-    by_service = _rows(conn.execute("SELECT service, ROUND(SUM(amount_aud), 2) AS aud, COUNT(*) AS n FROM costs "
-                                    "WHERE substr(ts, 1, 7) = ? GROUP BY service ORDER BY aud DESC", (month,)))
-    counts = {
-        "delegations": conn.execute("SELECT COUNT(*) FROM tasks WHERE parent_id IS NOT NULL").fetchone()[0],
-        "decisions": conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0],
-        "open_tasks": conn.execute(f"SELECT COUNT(*) FROM tasks WHERE status IN ({','.join('?' * len(records.OPEN_TASK_STATUSES))})",
-                                   records.OPEN_TASK_STATUSES).fetchone()[0],
-        "agent_runs": conn.execute("SELECT COUNT(*) FROM agent_runs WHERE event = 'SubagentStart'").fetchone()[0],
-    }
-    events = conn.execute(
-        """SELECT e.ts, e.kind, e.note, t.id AS task_id, t.title, t.agent FROM task_events e
-           JOIN tasks t ON t.id = e.task_id ORDER BY e.id DESC LIMIT 25""").fetchall()
-    ok, spent, budget = records.cost_check(conn, 0)
-    st = memory.stats(conn)
-    return {
-        "agents": agents,
-        "tasks": tasks,
-        "approvals": _rows(conn.execute("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id")),
-        "activity": _rows(events),
-        "memory": {"total": st["total"], "needs_review": st["needs_review"], "by_category": st["by_category"],
-                   "recent": _rows(memory.listing(conn, status="active", limit=6))},
-        "journal": _rows(journal.recent(conn, limit=40)),
-        "cost": {"spent": spent, "budget": budget, "by_service": by_service},
-        "recent_tasks": _rows(recent_tasks),
-        "products": _rows(products),
-        "tests": tests,
-        "counts": counts,
-        "progress": readiness.summary(conn),
-        "today": telegram.today(conn),
-        "actions": telegram.ACTIONS,
-        "brain": str(paths.home()),
-        "jarvis": {"status": live.get("status", "idle"), "request": live.get("request"),
-                   "claude": live.get("claude"), "login_needed": bool(db.get_meta(conn, "claude_login_needed"))},
-    }
-
-
-def _epoch(ts: str) -> float:
-    from datetime import datetime
-    try:
-        return datetime.fromisoformat(ts).timestamp()
-    except ValueError:
-        return 0.0
-
-
-def signature(conn) -> tuple:
-    """Cheap fingerprint of the brain: changes whenever anything the page shows changes."""
-    parts = []
-    for table in ("tasks", "task_events", "agent_runs", "journal", "approvals", "decisions", "memory", "costs",
-                  "products", "tests", "test_metrics"):
-        parts.append(conn.execute(f"SELECT COUNT(*), MAX(rowid) FROM {table}").fetchone()[:])
-    parts.append(conn.execute("SELECT MAX(updated) FROM tasks").fetchone()[0])
-    parts.append(conn.execute("SELECT MAX(updated) FROM memory").fetchone()[0])
-    parts.append(conn.execute("SELECT MAX(updated) FROM products").fetchone()[0])
-    parts.append(db.get_meta(conn, "claude_login_needed"))
-    parts.append(conn.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0])
-    parts.append(conn.execute("SELECT GROUP_CONCAT(status) FROM tests").fetchone()[0])
-    return tuple(parts)
 
 
 # ---------------------------------------------------------------- live events
@@ -325,6 +222,10 @@ class Runner:
         self.steps: list[dict] = []
         self.commands: dict = {"slash": [], "skills": []}
         self.slash = False     # this turn is a slash command: its output is shown, not spoken
+        self.closed = False    # the server is shutting down: nothing is started again
+        self.prime = False     # serve() turns it on: a started Claude Code is primed before the first message
+        self.primed = threading.Event()   # clear while a priming exchange has the process's output
+        self.primed.set()
 
     @property
     def busy(self) -> bool:
@@ -351,14 +252,43 @@ class Runner:
         """Start Claude Code now (resuming the saved conversation) so the first message doesn't pay for its start-up
         and the session hooks. Best effort, in the background."""
         def go():
+            proc = None
             try:
                 with self.lock:
                     claude = find_claude()
-                    if claude and not (self.proc and self.proc.poll() is None) and not self.busy:
+                    if claude and not (self.proc and self.proc.poll() is None) and not self.busy and not self.closed:
                         self._spawn(claude, self.session())
+                        if self.prime:
+                            proc = self.proc
+                            self.primed.clear()
+                if proc:
+                    self._prime(proc)
             except OSError:
                 pass
+            finally:
+                if proc:
+                    self.primed.set()
         threading.Thread(target=go, daemon=True).start()
+
+    def _prime(self, proc: subprocess.Popen) -> None:
+        """Make a freshly started Claude Code do its slow first-message work now: it only loads its connectors and
+        settings when the first message arrives, which cost the owner's first message about ten seconds. `/cost` is
+        answered by Claude Code itself, so this spends no usage and adds nothing to the conversation. The next
+        message waits for it to finish (see _turn)."""
+        msg = {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": PRIME_COMMAND}]}}
+        self._send(proc, json.dumps(msg) + "\n")
+        for line in proc.stdout:
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("type") == "system" and ev.get("subtype") == "init" and isinstance(ev.get("slash_commands"), list):
+                self.commands = {"slash": sorted(str(c) for c in ev["slash_commands"]),
+                                 "skills": sorted(str(c) for c in ev.get("skills") or [])}
+            if ev.get("type") == "result":
+                return
 
     def start(self, text: str, images: list | None = None, files: list | None = None, queue: bool = False) -> str:
         """Send a message. Busy: with `queue` it waits its turn ("queued"), otherwise RuntimeError."""
@@ -433,8 +363,10 @@ class Runner:
         return step
 
     def stop(self) -> None:
-        """Interrupt the reply. The process ends; the next message resumes the conversation."""
+        """Interrupt the reply. The process ends and a new one starts at once on the same conversation, so the
+        next message doesn't wait for Claude Code to start."""
         self.close()
+        self.warm()
 
     def close(self) -> None:
         proc, self.proc = self.proc, None
@@ -471,6 +403,9 @@ class Runner:
 
     def _turn(self, claude: list[str], text: str, images: list[dict]) -> None:
         try:
+            if not self.primed.wait(PRIME_WAIT):   # the warm-up never finished: that process is no use
+                self.close()
+                self.primed.set()
             for attempt in (1, 2):
                 sid = self.session()
                 if not (self.proc and self.proc.poll() is None):
@@ -561,7 +496,10 @@ class Runner:
         """Speak top-level text as it arrives, a sentence at a time."""
         e = ev.get("event") or {}
         if e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
-            self.buf += e["delta"].get("text", "")
+            piece = e["delta"].get("text", "")
+            self.buf += piece
+            if piece and not self.slash:   # the words as they are written: the page shows them before the voice has them
+                self.hub.publish({"type": "say_delta", "text": piece})
             if self.buf.rfind("[[") > self.buf.rfind("]]"):
                 return  # a screen hint is still arriving: never split it
             *done, self.buf = SENTENCE_END.split(self.buf)
@@ -710,6 +648,46 @@ class Runner:
         self.hub.publish({"type": "agent_activity", "agent": agent, "line": line})
 
 
+# ---------------------------------------------------------------- debate mode
+
+DEBATE_KINDS = {"product": "a product pick", "kill": "a kill-or-continue call on a test", "scale": "a scale call",
+                "other": "a big call"}
+
+
+def start_debate(conn, body: dict) -> dict:
+    """Start a durable worker that argues a big call out with the marketing-council skill and records the outcome.
+    It recommends; anything that spends, launches or changes the store still goes through the owner's approval."""
+    from . import work
+    question = " ".join(str(body.get("question") or "").split())
+    if len(question) < 8:
+        raise ValueError("Say what the council should decide.")
+    kind = body.get("kind") if body.get("kind") in DEBATE_KINDS else "other"
+    product = (body.get("product") or "").strip() or None
+    records.require_product(conn, product)
+    tid = records.task_add(conn, f"Council debate: {question}"[:300], product=product,
+                           description=f"Debate mode from the dashboard ({DEBATE_KINDS[kind]}).")
+    path = paths.rel(records.task_workpath(conn, tid))
+    brief = (
+        f"Task T{tid}: council debate on {DEBATE_KINDS[kind]} for Urban Supplied"
+        + (f", product {product}" if product else "") + f". The question: {question}\n\n"
+        "Load the marketing-council skill and run it properly: each seat argues its own position from the evidence, "
+        "then the council weighs them and gives one recommendation with the main dissent. Before you start, read what "
+        "the brain holds (bin/jarvis mem search, the product's test records with bin/jarvis test show, the feedback "
+        "digest) and Blake's method for this kind of call (blake-testing, blake-product-research, blake-mindset). "
+        "Mentor methods outrank the council; label the council's own view as a JARVIS recommendation. Use real "
+        "figures only, and say insufficient data where that is the truth.\n\n"
+        f"REQUIRED deliverable: {path} (the question, each seat's case, the evidence with record ids, the recommendation, "
+        "the dissent, what would change the call). Then record the outcome with bin/jarvis decide '<recommendation>' "
+        f"--why '<the deciding reasons>' --task T{tid} --by jarvis" + (f" -p {product}" if product else "") + ", close the task "
+        f"with bin/jarvis task done T{tid} --summary '...' --deliverable {path}, and send the owner two lines with "
+        "bin/jarvis telegram send. Do not spend, launch, change budgets or edit the store: if the call needs one of "
+        "those, raise it with bin/jarvis approval request and stop there."
+    )
+    run = work.start(brief, task=f"T{tid}", model=str(body.get("model") or ""))
+    records.task_update(conn, tid, status="in_progress", note=f"W{run['id']} started the debate")
+    return {"ok": True, "task": f"T{tid}", "worker": f"W{run['id']}", "deliverable": path}
+
+
 # ---------------------------------------------------------------- HTTP
 
 def page_token() -> str:
@@ -778,12 +756,20 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
             if not self._host_ok():
                 return self._json(403, {"error": "forbidden host"})
             route, _, query = self.path.partition("?")
-            if route in PAGES:
-                html = (STATIC / PAGES[route]).read_text(encoding="utf-8").replace("__JARVIS_TOKEN__", token)
+            first = route.strip("/").split("/", 1)[0]
+            if route == "/" or first in APP_PAGES:
+                html = (STATIC / SHELL).read_text(encoding="utf-8").replace("__JARVIS_TOKEN__", token)
                 return self._send(200, live.inject(html).encode(), "text/html; charset=utf-8")
-            if route in ASSETS:
-                name, ctype = ASSETS[route]
-                return self._send(200, (STATIC / name).read_bytes(), ctype)
+            if route in RETIRED:
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if ASSET_NAME.match(route) and (STATIC / route[1:]).is_file():
+                return self._send(200, (STATIC / route[1:]).read_bytes(), ASSET_TYPES[route[route.rfind("."):]])
+            if route == "/api/app":  # the whole state in one answer; after that the event stream carries the changes
+                return self._json(200, {"sections": self.server.feed.snapshot(0 if "fresh" in query else 1.0)})
             if route.startswith("/api/control/"):  # the control centre (T98)
                 found = control.handle_get(route, parse_qs(query), self.server)
                 if found:
@@ -796,32 +782,29 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     return self._json(*found)
             if route == "/api/live":
                 return self._json(200, live.state())
-            if route == "/api/swarm":  # the Live view (T106): every agent at work, from their real logs
+            if route == "/api/teammap":  # the team page: departments, each agent's skills, procedure and tasks
+                from . import orgchart
                 conn = db.connect()
                 try:
-                    return self._json(200, swarm.state(conn, runner.live))
+                    return self._json(200, orgchart.state(conn))
                 finally:
                     conn.close()
             if route == "/api/swarm/file":
                 found = swarm.image((parse_qs(query).get("path") or [""])[0])
                 return self._send(200, *found) if found else self._send(204, b"", "text/plain")
-            if route.startswith("/hq-assets/"):   # the CC0 packs in brain/files/hq/assets (models, textures), nothing else
-                found = hq_assets.serve(route[len("/hq-assets/"):])
-                return self._send(200, *found) if found else self._json(404, {"error": "no such asset"})
-            if route == "/api/hq/assets":
-                return self._json(200, hq_assets.status())
             if route == "/api/memory":
                 return self._memory(parse_qs(query))
-            if route == "/api/hq":
-                conn = db.connect()
-                try:
-                    return self._json(200, hq.data(conn))
-                finally:
-                    conn.close()
-            if route == "/api/hq/file":
-                found = hq.preview((parse_qs(query).get("path") or [""])[0])
+            if route == "/api/file":  # a deliverable's preview: brain files only, never secrets
+                found = roster.preview((parse_qs(query).get("path") or [""])[0])
                 # A deliverable that moved is normal, not an error the page should log: 204, nothing to show.
                 return self._send(200, *found) if found else self._send(204, b"", "text/plain")
+            if route == "/api/record":  # one record by id, for the record drawer
+                conn = db.connect()
+                try:
+                    found = lookup.detail(conn, (parse_qs(query).get("id") or [""])[0], {a["name"]: a for a in agent_roster()})
+                finally:
+                    conn.close()
+                return self._json(200, found) if found else self._json(404, {"error": "no such record"})
             if route.startswith("/api/memory/"):
                 conn = db.connect()
                 try:
@@ -831,29 +814,8 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 finally:
                     conn.close()
                 return self._json(200, {"meta": entry.meta, "body": entry.body, "path": paths.rel(entry.path)})
-            if self.path == "/api/state":
-                conn = db.connect()
-                try:
-                    data = snapshot(conn, runner.live)
-                finally:
-                    conn.close()
-                data["jarvis"]["claude"] = bool(find_claude())
-                data["tts"] = kokoro.info()
-                data["wake"] = {**wake.info(), "enabled": wake.enabled()}
-                data["telegram"] = phone.info()
-                return self._json(200, data)
-            if route == "/api/activity":
-                return self._activity(parse_qs(query))
-            if route.startswith("/api/brain/"):  # the Brain page (T95): graph, one node, and the live panel
-                return self._brain(route.rsplit("/", 1)[1], parse_qs(query))
             if self.path == "/api/events":
                 return self._events()
-            if route == "/api/team":  # teams, sub-agents at work, hires, and the usage pacer
-                conn = db.connect()
-                try:
-                    return self._json(200, team.board(conn))
-                finally:
-                    conn.close()
             if route == "/api/skills":  # per agent: skills and level, recently learned, backlog, review queue
                 conn = db.connect()
                 try:
@@ -878,50 +840,20 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     "source_ref", "updated", "snippet")
             return self._json(200, [{k: r[k] for k in keep if k in r.keys()} for r in rows])
 
-        def _brain(self, what: str, q: dict):
-            conn = db.connect()
-            try:
-                if what == "graph":
-                    return self._json(200, brain_graph.graph(conn, [a["name"] for a in agent_roster()]))
-                if what == "now":
-                    return self._json(200, brain_graph.now(conn, runner.live))
-                if what == "node":
-                    found = brain_graph.detail(conn, (q.get("id") or [""])[0],
-                                               {a["name"]: a for a in agent_roster()})
-                    return self._json(200, found) if found else self._json(404, {"error": "no such node"})
-                return self._json(404, {"error": "not found"})
-            finally:
-                conn.close()
-
-        def _activity(self, q: dict):
-            # Recent agent events (newest first) and each agent's current state, for the HQ visuals.
-            try:
-                limit = max(1, min(int((q.get("n") or ["50"])[0]), 500))
-                since = int((q.get("since") or ["0"])[0])
-            except ValueError:
-                return self._json(400, {"error": "n and since must be numbers"})
-            conn = db.connect()
-            try:
-                data = {"events": activity.recent(conn, limit, agent=(q.get("agent") or [None])[0], since_id=since),
-                        "agents": activity.current(conn)}
-            finally:
-                conn.close()
-            return self._json(200, data)
-
         def _events(self):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
+            feed = self.server.feed
             q = hub.subscribe()
-            conn = db.connect()
-            last_sig, last_beat = None, time.time()
+            last_beat = time.time()
             try:
+                # The whole state first, so the page draws from one message; after that the feed publishes only
+                # the sections that changed, to every window at once.
+                self._event({"type": "state", "full": True, "sections": feed.snapshot()})
+                feed.start()
                 while True:
-                    sig = signature(conn)
-                    if sig != last_sig:
-                        last_sig = sig
-                        self._event({"type": "changed"})
                     try:
                         self._event(q.get(timeout=1.0))
                         while not q.empty():
@@ -936,7 +868,6 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                 pass
             finally:
                 hub.unsubscribe(q)
-                conn.close()
 
         def _event(self, data: dict) -> None:
             self.wfile.write(f"data: {json.dumps(data, default=str)}\n\n".encode())
@@ -1009,25 +940,16 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     conn.close()
                 phone.decided(row, via="dashboard")  # approved: JARVIS carries it out now
                 return self._json(200, {"ok": True, "status": row["status"]})
-            if self.path == "/api/visuals":  # the cards for a spoken sentence (T86 speaking visuals)
-                conn = db.connect()
-                try:
-                    return self._json(200, {"cards": visuals.cards(conn, str(body.get("text") or "")[:2000])})
-                finally:
-                    conn.close()
-            if self.path == "/api/hq/connectors":
-                return self._json(202, hq.check_connectors())
-            if self.path == "/api/hq/assets/fetch":   # the owner's button: fetch the CC0 packs this machine is missing
-                started = hq_assets.fetch_in_background(body.get("only") or None)
-                return self._json(202, {"ok": True, "started": started, **hq_assets.status()})
-            if self.path == "/api/hq/conversation":
+            if self.path == "/api/connectors":   # ask Claude Code which connectors answer (it takes a while)
+                return self._json(202, roster.check_connectors())
+            if self.path == "/api/conversation":
                 # The model the conversation runs on (fast for talking, the strongest for hard work), kept in
                 # brain/config.json; the running Claude Code is closed so the next message uses it.
                 if "model" in body:
                     model = (body.get("model") or "").strip().lower()
                     if model not in ("", "haiku", "sonnet", "opus", "fable"):
                         return self._json(400, {"error": "Pick haiku, sonnet, opus, fable or the default."})
-                    paths.set_config("dashboard_model", hq.MODEL_IDS.get(model, model) or None)
+                    paths.set_config("dashboard_model", roster.MODEL_IDS.get(model, model) or None)
                 if "effort" in body:
                     effort = (body.get("effort") or "").strip().lower()
                     if effort not in ("", "low", "medium", "high"):
@@ -1037,24 +959,27 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
                     runner.close(); runner.warm()
                 cfg = paths.config()
                 return self._json(200, {"ok": True, "model": cfg.get("dashboard_model"), "effort": cfg.get("dashboard_effort")})
-            if self.path == "/api/hq/agent-voice":
-                # The voice an agent (or Blake / Mark) speaks with in the HQ, kept in brain/config.json.
-                try:
-                    return self._json(200, {"ok": True, "voice": tts.set_agent_voice(body.get("agent") or "", body.get("voice") or "")})
-                except ValueError as exc:
-                    return self._json(400, {"error": str(exc)})
-            if self.path in ("/api/hq/task", "/api/hq/agent-model", "/api/hq/task-model"):
-                # Control from HQ: assign a task, pick an agent's model, pick a model for one task.
+            if self.path in ("/api/task", "/api/agent-model", "/api/task-model"):
+                # From the page: a new task for the backlog, an agent's model, a model for one task.
                 conn = db.connect()
                 try:
-                    if self.path == "/api/hq/task":
-                        tid = hq.add_task(conn, body.get("title"), agent=body.get("agent"), product=body.get("product"),
-                                          description=body.get("description"), model=body.get("model"))
+                    if self.path == "/api/task":
+                        tid = roster.add_task(conn, body.get("title"), agent=body.get("agent"), product=body.get("product"),
+                                              description=body.get("description"), model=body.get("model"))
                         return self._json(201, {"ok": True, "id": tid})
-                    if self.path == "/api/hq/agent-model":
-                        return self._json(200, {"ok": True, "model": hq.set_agent_model(body.get("agent"), body.get("model"))})
-                    return self._json(200, {"ok": True, "task_models": hq.set_task_model(body.get("task"), body.get("model"))})
+                    if self.path == "/api/agent-model":
+                        return self._json(200, {"ok": True, "model": roster.set_agent_model(body.get("agent"), body.get("model"))})
+                    return self._json(200, {"ok": True, "task_models": roster.set_task_model(body.get("task"), body.get("model"))})
                 except (ValueError, records.RecordError) as exc:
+                    return self._json(400, {"error": str(exc)})
+                finally:
+                    conn.close()
+            if self.path == "/api/debate":   # a big call argued out by the marketing council, as a durable worker
+                from . import work
+                conn = db.connect()
+                try:
+                    return self._json(201, start_debate(conn, body))
+                except (ValueError, records.RecordError, work.WorkError, OSError) as exc:
                     return self._json(400, {"error": str(exc)})
                 finally:
                     conn.close()
@@ -1078,6 +1003,11 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
         # stale code; fail instead so serve() can open the one already running.
         allow_reuse_address = os.name != "nt"
 
+        def shutdown(self):
+            self.feed.close()
+            self.runner.closed = True
+            super().shutdown()
+
         def handle_error(self, request, client_address):
             import sys
             if not isinstance(sys.exc_info()[1], ConnectionError):  # a closed tab is not an error
@@ -1086,6 +1016,8 @@ def make_server(host="127.0.0.1", port=8765) -> ThreadingHTTPServer:
     server = Server((host, port), Handler)
     server.hub, server.runner, server.token, server.tts, server.wake = hub, runner, token, kokoro, wake
     server.telegram = phone
+    server.feed = cockpit.Feed(server)
+    server.keep_warm = False   # serve() turns it on: Claude Code is started again whenever it has ended
     return server
 
 
@@ -1109,7 +1041,10 @@ def serve(port: int = 8765, open_browser: bool = True) -> None:
         return
     # Warm up for the first spoken turn: the voice model loads and Claude Code starts before anyone says a word.
     threading.Thread(target=server.tts.warm, daemon=True).start()
+    server.runner.prime = True
     server.runner.warm()
+    server.keep_warm = True
+    server.feed.start()   # it also restarts Claude Code if it ends while idle, so a reply never waits for a cold start
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"JARVIS dashboard running at {url}  (Ctrl+C to stop)", flush=True)
     if not find_claude():

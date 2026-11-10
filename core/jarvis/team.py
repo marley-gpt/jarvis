@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS hires (
 );
 """
 
-# Teams from the HQ plan (T54 section 7); hired agents join the team they were hired into.
+# Teams from the T54 plan (section 7); hired agents join the team they were hired into.
 TEAMS = {
     "research": ("product-research", "market-research", "creative-research"),
     "creative": ("creative-director",),
