@@ -377,7 +377,7 @@ class RoutinesTest(BrainTest):
         self.assertEqual(names[:3], ["sales-watch", "worker-resume", "social-sync"])
         self.assertTrue(all(e["ok"] for e in done), done)
         again = routines.tick(self.conn, now=at + timedelta(minutes=15), start_worker=self.worker)
-        self.assertEqual([e["routine"] for e in again], ["sales-watch", "phone-line", "reels-retry"])
+        self.assertEqual([e["routine"] for e in again], ["sales-watch", "phone-line", "brain-merge", "reels-retry"])
 
     def test_missed_morning_brief_starts_a_worker_once(self):
         at = datetime(2026, 11, 9, 8, 50)

@@ -17,6 +17,10 @@ the last-pull record (kept outside brain/, next to the role file) are never over
     bin/jarvis sync              status
     bin/jarvis sync push [--force]
     bin/jarvis sync pull [--force]
+
+Since T119 the standby's own work comes back too: before each pull it writes an outbox of what it made or changed,
+which the primary merges on every tick, and after the pull it puts back whatever the primary hasn't merged yet.
+See twoway.py.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import os
 import socket
 import sqlite3
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -194,8 +199,13 @@ def pull(conn, force: bool = False) -> dict:
     if not m or not src.exists():
         return {"pulled": False, "note": f"nothing pushed yet in {sync_dir()}"}
     st = local_state()
-    if not force and st.get("pulled_stamp") == m.get("stamp"):
+    if not force and not _newer_push(m, st):
         return {"pulled": False, "note": f"already up to date ({m['stamp']})", **m}
+    from . import twoway
+    # T119: this machine's own work goes into its outbox first, so the pull can't lose it.
+    twoway.export(conn)
+    here = twoway.machine().lower()
+    sender = m.get("machine") or "primary"
     home = paths.home()
     home.mkdir(parents=True, exist_ok=True)
     cfg_path = home / "config.json"
@@ -213,12 +223,22 @@ def pull(conn, force: bool = False) -> dict:
                 source.backup(conn)  # in place: other open connections stay valid
                 source.close()
                 _rebase_memory_paths(conn)
-            elif ".." not in Path(name).parts and not Path(name).is_absolute():
+            elif ".." in Path(name).parts or Path(name).is_absolute():
+                continue
+            elif name.startswith("work/remote/"):
+                # The sender's mirror of this machine's own runs: the real ones are here already.
+                if name.split("/")[2].lower() != twoway._safe(here).lower():
+                    zf.extract(name, home)
+            elif name.startswith("work/runs/"):
+                _mirror_run(zf, name, sender)
+            else:
                 zf.extract(name, home)
         sec = sync_dir() / SECRETS_ZIP
         if sec.exists():
             with zipfile.ZipFile(sec) as sz:
                 sz.extractall(home)
+        twoway.save_baseline(Path(tmp) / "jarvis.db", zf, m.get("stamp"), time.time())
+    mine = twoway.reapply(conn)  # this machine's work the primary hasn't merged yet goes back on top
     keep = {k: local_cfg[k] for k in LOCAL_CONFIG_KEYS if k in local_cfg}
     if keep:
         try:
@@ -226,14 +246,44 @@ def pull(conn, force: bool = False) -> dict:
         except (OSError, ValueError):
             pulled = {}
         cfg_path.write_text(json.dumps({**pulled, **keep}, indent=2), encoding="utf-8")
-    _save_local_state({"pulled_stamp": m["stamp"], "pulled_at": paths.now(), "from": m.get("machine")})
-    return {"pulled": True, "note": f"pulled the brain pushed {m['stamp']} by {m.get('machine')}", **m}
+    _save_local_state({"pulled_stamp": m["stamp"], "pulled_fp": m.get("fingerprint"), "pulled_at": paths.now(),
+                       "from": m.get("machine")})
+    note = f"pulled the brain pushed {m['stamp']} by {m.get('machine')}"
+    if mine and (mine["added"] or mine["updated"] or mine["files"]):
+        note += (f"; kept {mine['added'] + mine['updated']} record(s) and {mine['files']} file(s) of this machine's "
+                 "own work the primary hasn't merged yet")
+    return {"pulled": True, "note": note, **m}
+
+
+def _newer_push(m: dict, st: dict) -> bool:
+    """A push the standby hasn't pulled. Two pushes can share a stamp (a merge pushes straight away), so the
+    fingerprint counts too."""
+    return st.get("pulled_stamp") != m.get("stamp") or st.get("pulled_fp", m.get("fingerprint")) != m.get("fingerprint")
+
+
+def _mirror_run(zf, name: str, sender: str) -> None:
+    """A worker run from the other machine is kept as a read-only mirror, never in this machine's runs/, so it is
+    never resumed here. A copy an older pull left in runs/ (same session) moves out; a different run that happens
+    to share the number is this machine's own and stays."""
+    from . import twoway
+    dest = twoway.remote_runs_dir(sender) / Path(name).name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    data = zf.read(name)
+    dest.write_bytes(data)
+    local = paths.home() / name
+    if local.suffix == ".json" and local.exists():
+        try:
+            same = json.loads(local.read_text(encoding="utf-8")).get("session") == json.loads(data).get("session")
+        except (OSError, ValueError):
+            same = False
+        if same:
+            local.unlink(missing_ok=True)
 
 
 def status() -> dict:
     m, st = manifest(), local_state()
     return {"role": paths.machine_role(), "sync_dir": str(sync_dir()), "last_push": m, "last_pull": st,
-            "behind": bool(m) and paths.standby() and st.get("pulled_stamp") != m.get("stamp")}
+            "behind": bool(m) and paths.standby() and _newer_push(m, st)}
 
 
 def status_line() -> str:
@@ -244,4 +294,9 @@ def status_line() -> str:
     line = f"Brain sync: last push {m['stamp'][:16]} from {m.get('machine')}, {m['bytes'] / 1e6:.1f} MB"
     if s["role"] == "standby":
         line += "; this standby is " + ("BEHIND" if s["behind"] else "up to date")
+    try:  # T119: the way back
+        from . import twoway
+        line += "; " + twoway.status_bit()
+    except Exception:
+        pass
     return line

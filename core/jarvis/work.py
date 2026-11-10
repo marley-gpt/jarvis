@@ -141,9 +141,13 @@ def start(brief: str, task: str = "", agent: str = "", model: str = "") -> dict:
     brief = (brief or "").strip()
     if not brief:
         raise WorkError("A worker needs a brief.")
-    wid = max([_id(p.stem) for p in runs_dir().glob("W*.json")] or [0]) + 1
+    # Numbers run past the other machine's mirrored runs too (T119), so W<n> means one run on both machines.
+    mirrored = (paths.home() / "work" / "remote").glob("*/runs/W*.json")
+    wid = max([_id(p.stem) for p in [*runs_dir().glob("W*.json"), *mirrored]] or [0]) + 1
+    from .phone import this_machine
     run = {"id": wid, "task": task, "agent": agent, "brief": brief, "session": str(uuid.uuid4()),
-           "log": str(runs_dir() / f"W{wid}.log"), "status": "new", "started": paths.now(), "attempts": 0, "model": model}
+           "log": str(runs_dir() / f"W{wid}.log"), "status": "new", "started": paths.now(), "attempts": 0, "model": model,
+           "machine": this_machine()}
     _spawn(run, brief, resume=False)
     return run
 
@@ -219,9 +223,12 @@ def resume(wid=None) -> list[dict]:
     """Restart stopped workers on their own session. Gives up after MAX_ATTEMPTS so a broken one can't loop."""
     targets = [refresh(get(wid))] if wid else listing(200)
     resumed = []
+    from .phone import this_machine
     for run in targets:
         if run["status"] != "stopped":
             continue
+        if (run.get("machine") or this_machine()).lower() != this_machine().lower():
+            continue  # the other machine's run: only the machine that started it resumes it (T119)
         if run.get("attempts", 0) >= MAX_ATTEMPTS:
             run["status"] = "failed"
             _save(run)

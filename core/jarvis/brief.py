@@ -37,6 +37,16 @@ def session_brief(conn, max_tasks: int = 8, session_id: str | None = None) -> st
         out += [f"- W{r['id']} [{'resumed' if r['id'] in resumed else r['status']}] {r['task']} {r['agent']}: "
                 f"{r['brief'][:90]}" for r in live]
 
+    try:  # T119: what the other machine is running, so neither starts the same work twice
+        from . import twoway
+        twoway.write_status(conn)
+        there = twoway.lines()
+    except Exception:
+        there = []
+    if there:
+        out.append("\n## On the other machine (don't repeat its work; `bin/jarvis sync machines`)")
+        out += there
+
     approvals = conn.execute("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id").fetchall()
     if approvals:
         out.append("\n## Waiting for the user's approval")

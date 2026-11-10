@@ -686,12 +686,29 @@ def cmd_phone(conn, args):
 
 
 def cmd_sync(conn, args):
-    from . import essentials, sync
+    from . import essentials, sync, twoway
     if args.action == "push":
         out(f"ESSENTIALS → {paths.rel(essentials.write(conn))}")
         out(sync.push(conn, force=args.force)["note"])
     elif args.action == "pull":
         out(sync.pull(conn, force=args.force)["note"])
+    elif args.action == "outbox":
+        out(twoway.export(conn)["note"])
+    elif args.action == "merge":
+        total = twoway.merge_all(conn)
+        twoway.write_status(conn)
+        out(twoway.merge_note(total))
+        if total["added"] or total["updated"] or total["files"]:
+            out(sync.push(conn)["note"])
+    elif args.action == "machines":
+        out("\n".join(twoway.lines()) or "No other machine has reported yet.")
+        return
+    elif args.action == "conflicts":
+        rows = twoway.conflicts()
+        out("\n".join(f"{c['ts'][:16]} from {c.get('from')}: {c['what']}"
+                       + (f" (loser kept in {c['loser_kept']})" if c.get("loser_kept") else "") for c in rows)
+            or "No sync conflicts logged.")
+        return
     out(sync.status_line())
 
 
@@ -1481,8 +1498,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="take the phone on this machine when the one answering now is off or unreachable")
     s.set_defaults(fn=cmd_phone)
 
-    s = sub.add_parser("sync", help="the lean brain shared through OneDrive: the primary pushes, the standby pulls")
-    s.add_argument("action", nargs="?", choices=("status", "push", "pull"), default="status")
+    s = sub.add_parser("sync", help="the lean brain shared through OneDrive: the primary pushes, the standby pulls "
+                                    "and sends its own work back in an outbox the primary merges (T119)")
+    s.add_argument("action", nargs="?", choices=("status", "push", "pull", "outbox", "merge", "machines", "conflicts"),
+                   default="status")
     s.add_argument("--force", action="store_true", help="push even if unchanged or from a standby; pull on a primary")
     s.set_defaults(fn=cmd_sync)
     s = sub.add_parser("essentials", help="rewrite brain/ESSENTIALS.md, the one-page digest of what matters now")

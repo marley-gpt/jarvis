@@ -69,12 +69,19 @@ def _descendants(conn, tid: int) -> list:
 
 def overview(conn, today: date | None = None, workers: list[dict] | None = None) -> dict:
     today = today or date.today()
+    machines = []
     if workers is None:
         try:
             from . import work
             workers = work.listing(200)
         except Exception:
             workers = []
+        try:  # T119: the other machine's workers count too, tagged W<n>@<machine>
+            from . import twoway
+            machines = twoway.other_machines()
+            workers = workers + twoway.remote_workers()
+        except Exception:
+            pass
     dl = deadlines()
     open_st = records.OPEN_TASK_STATUSES
     tops = conn.execute(f"SELECT * FROM tasks WHERE parent_id IS NULL AND status IN ({','.join('?' * len(open_st))}) "
@@ -114,7 +121,7 @@ def overview(conn, today: date | None = None, workers: list[dict] | None = None)
     # Most urgent first: overdue and near deadlines, then blocked, then running work, then priority.
     out.sort(key=lambda p: (p["days_left"] if p["days_left"] is not None else 999, not p["blockers"],
                             not any(w["status"] == "running" for w in p["workers"]), p["priority"]))
-    return {"today": today.isoformat(), "projects": out,
+    return {"today": today.isoformat(), "projects": out, "machines": machines,
             "counts": {"open": len(out), "blocked": sum(1 for p in out if p["blockers"]),
                        "with_workers": sum(1 for p in out if any(w["status"] == "running" for w in p["workers"])),
                        "due_7_days": sum(1 for p in out if p["days_left"] is not None and 0 <= p["days_left"] <= 7),
@@ -137,4 +144,8 @@ def lines(ov: dict) -> list[str]:
         out.append(f"{p['id']} {p['title'][:80]}" + (f" [{p['product']}]" if p["product"] else ""))
         out.append(f"    {'; '.join(bits)}")
         out += [f"    ! {b}" for b in p["blockers"]]
+    if ov.get("machines"):
+        from . import twoway
+        out.append("On the other machine:")
+        out += [f"    {line}" for line in twoway.lines()]
     return out

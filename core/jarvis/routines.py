@@ -45,6 +45,7 @@ ROUTINES = [
     {"name": "worker-resume", "kind": "local", "every": 30, "what": "restart workers that stopped mid-task"},
     {"name": "social-sync", "kind": "local", "every": 60, "what": "carry the owner's approve/reject onto social drafts"},
     {"name": "phone-line", "kind": "local", "every": 15, "what": "call server up and JARVIS's phone line signed in, so the owner can ring him"},
+    {"name": "brain-merge", "kind": "local", "every": 15, "what": "merge the standby laptop's outbox (its tasks, memory, deliverables, workers) into this brain and say what each machine runs"},
     {"name": "brain-sync", "kind": "local", "every": 120, "what": "rewrite brain/ESSENTIALS.md and push the lean brain to OneDrive for the laptop"},
     {"name": "reels-retry", "kind": "local", "every": 15, "what": "retry reels Instagram wouldn't download (brain/work/reels-pending.txt)"},
     {"name": "morning-brief", "kind": "claude", "at": "08:00", "grace": 45, "window": 4, "task": "jarvis-morning-brief",
@@ -178,6 +179,15 @@ def _run_local(conn, name: str, now: datetime) -> str:
     if name == "phone-line":
         from . import call
         return call.keep_line()
+    if name == "brain-merge":
+        from . import essentials, sync, twoway
+        total = twoway.merge_all(conn)
+        twoway.write_status(conn)
+        note = twoway.merge_note(total)
+        if total["added"] or total["updated"] or total["files"]:
+            essentials.write(conn)  # the standby gets its merged work back with the new ids at once
+            note += "; " + sync.push(conn)["note"]
+        return note
     if name == "brain-sync":
         from . import essentials, sync
         essentials.write(conn)
@@ -248,15 +258,21 @@ def tick(conn, now: datetime | None = None, start_worker=_default_worker) -> lis
 
 def standby_pull(conn) -> list[dict]:
     """On the standby: pull the brain the primary pushed, if it's newer. Quiet when there's nothing new."""
-    from . import sync
+    from . import sync, twoway
+    name = "brain-pull"
     try:
         res = sync.pull(conn)
         if not res["pulled"]:
-            return []
-        ok, note = True, res["note"]
+            # Nothing new from the primary: still hand it this machine's own work and say what runs here (T119).
+            out = twoway.export(conn)
+            if not out["written"]:
+                return []
+            ok, note, name = True, out["note"], "brain-outbox"
+        else:
+            ok, note = True, res["note"]
     except Exception as exc:
         ok, note = False, f"failed: {exc}"[:300]
-    entry = {"ts": paths.now(), "routine": "brain-pull", "ok": ok, "note": note}
+    entry = {"ts": paths.now(), "routine": name, "ok": ok, "note": note}
     _log(entry)
     return [entry]
 
