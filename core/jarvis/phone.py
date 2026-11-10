@@ -17,6 +17,9 @@ OneDrive carries the note in seconds to a minute; during that gap nobody answers
     bin/jarvis phone desktop         hand it back to the home PC
     bin/jarvis phone here --takeover take it on this machine when the other one is off or unreachable
 On the phone itself: /laptop or /desktop.
+
+Since T121 the switch also happens by itself when the machine answering goes quiet (fleet.py): the note then says
+`auto: true` and `home: <the quiet machine>`, which gets the phone back automatically once it has been up again.
 """
 
 from __future__ import annotations
@@ -115,8 +118,10 @@ def register() -> None:
         pass  # OneDrive busy: the next start tries again
 
 
-def hand_to(conn, target: str, takeover: bool = False) -> dict:
-    """Name the machine that answers the phone. Pushes this machine's brain first when it hands the phone away."""
+def hand_to(conn, target: str, takeover: bool = False, auto_from: str | None = None) -> dict:
+    """Name the machine that answers the phone. Pushes this machine's brain first when it hands the phone away.
+    `auto_from`: an automatic takeover (fleet.py, T121) from that quiet machine, which may get it back by itself;
+    any other hand-over is the owner's choice and clears that."""
     from . import paths, sync
     name = resolve(target)
     here = this_machine()
@@ -139,7 +144,8 @@ def hand_to(conn, target: str, takeover: bool = False) -> dict:
         if not any(k.lower() == n.lower() for k in known):
             known.append(n)
     data.update(holder=name, by=here, since=datetime.now().astimezone().isoformat(timespec="seconds"),
-                takeover=bool(takeover and name.lower() == here.lower()), machines=known)
+                takeover=bool(takeover and name.lower() == here.lower()), machines=known,
+                auto=bool(auto_from), home=auto_from or None)
     _write(data)
     note = f"{name} answers the phone now (it takes up to a minute while OneDrive carries the note)."
     if pushed:

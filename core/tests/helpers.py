@@ -28,16 +28,25 @@ class BrainTest(unittest.TestCase):
         # Brain sync never touches the owner's real OneDrive folder from a test.
         self.sync_dir = Path(tempfile.mkdtemp(prefix="jarvis-sync-"))
         os.environ["JARVIS_SYNC_DIR"] = str(self.sync_dir)
+        # Nor this machine's own state next to the role file (the fleet's failover state, sync baselines; T121).
+        self._old_local = os.environ.get("LOCALAPPDATA")
+        self.local_dir = Path(tempfile.mkdtemp(prefix="jarvis-local-"))
+        os.environ["LOCALAPPDATA"] = str(self.local_dir)
         self.conn = db.connect()
 
     def tearDown(self):
         self.conn.close()
+        if self._old_local is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = self._old_local
         if self._old is None:
             os.environ.pop("JARVIS_HOME", None)
         else:
             os.environ["JARVIS_HOME"] = self._old
         shutil.rmtree(self.home, ignore_errors=True)
         shutil.rmtree(self.sync_dir, ignore_errors=True)
+        shutil.rmtree(self.local_dir, ignore_errors=True)
 
     def init(self):
         cli.cmd_init(self.conn, None)

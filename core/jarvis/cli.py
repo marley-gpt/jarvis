@@ -567,8 +567,29 @@ def cmd_job_finish(ok):
 
 def cmd_work_start(conn, args):
     text = Path(args.brief_file).read_text(encoding="utf-8") if args.brief_file else args.brief
+    if args.anywhere:
+        from . import fleet
+        job = fleet.share(text, task=args.task or "", agent=args.agent or "", model=args.model or "")
+        out(f"{job['id']} queued for whichever machine is up and least busy (T121); the machine answering the phone "
+            "hands it out within a minute. `bin/jarvis fleet` shows where it runs.")
+        return
     run = work.start(text, task=args.task or "", agent=args.agent or "", model=args.model or "")
     out(f"W{run['id']} started (pid {run['pid']}): it survives session restarts. Log: {paths.rel(Path(run['log']))}")
+
+
+def cmd_fleet(conn, args):
+    from . import fleet
+    try:
+        if args.action == "tick":
+            out("\n".join(fleet.step(conn)) or "Nothing to do this round.")
+        elif args.action == "cancel":
+            if not args.id:
+                raise records.RecordError("Which shared job? bin/jarvis fleet cancel S-...")
+            out(f"{fleet.cancel(args.id)['id']} cancelled.")
+            return
+    except fleet.FleetError as exc:
+        raise records.RecordError(str(exc)) from exc
+    out("\n".join(fleet.lines()))
 
 
 def cmd_work_list(conn, args):
@@ -1444,6 +1465,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--task")
     s.add_argument("--agent", help="a .claude/agents name, e.g. product-research")
     s.add_argument("--model", help="model for this worker, e.g. claude-fable-5-2 (default: worker_model)")
+    s.add_argument("--anywhere", action="store_true",
+                   help="a shared job: the PC or the laptop runs it, whichever is up and least busy (T121)")
     s.set_defaults(fn=cmd_work_start)
     s = wk.add_parser("list")
     s.add_argument("-n", type=int, default=15)
@@ -1458,6 +1481,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = wk.add_parser("resume", help="restart stopped workers where they left off")
     s.add_argument("id", nargs="?")
     s.set_defaults(fn=cmd_work_resume)
+
+    s = sub.add_parser("fleet", help="the PC and the laptop: heartbeats, automatic phone failover, shared jobs (T121)")
+    s.add_argument("action", nargs="?", choices=("status", "tick", "cancel"), default="status")
+    s.add_argument("id", nargs="?", help="shared job id, for cancel")
+    s.set_defaults(fn=cmd_fleet)
 
     mt = sub.add_parser("metrics", help="a saved snapshot of Shopify and Meta figures (read-only, pulled by JARVIS)").add_subparsers(
         dest="sub", required=True)

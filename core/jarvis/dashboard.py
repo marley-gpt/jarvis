@@ -46,6 +46,15 @@ def follow_phone(bridge, every: float = 20.0, rounds: int | None = None) -> None
     n = 0
     while rounds is None or n < rounds:
         n += 1
+        try:  # T121: heartbeat, automatic failover and shared jobs (fleet.py); it may move the phone here
+            from . import fleet
+            conn = db.connect()
+            try:
+                fleet.step(conn, bridge)
+            finally:
+                conn.close()
+        except Exception as exc:
+            bridge.error = f"fleet: {type(exc).__name__}: {exc}"
         try:
             role = paths.machine_role()
             if role == "primary" and was == "standby":

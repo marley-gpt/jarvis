@@ -236,6 +236,7 @@ def run_one(conn, r: dict, st: dict, now: datetime, start_worker=_default_worker
 
 
 def tick(conn, now: datetime | None = None, start_worker=_default_worker) -> list[dict]:
+    fleet_round(conn)  # T121: heartbeat, automatic phone failover and shared jobs, on either role
     if paths.standby():
         return standby_pull(conn)  # the primary runs the routines; a standby only keeps its brain copy fresh (T105)
     now = now or datetime.now()
@@ -289,6 +290,20 @@ def mark(name: str, now: datetime | None = None) -> None:
     st = load_state()
     st.setdefault(name, {})["marked"] = (now or datetime.now()).date().isoformat()
     save_state(st)
+
+
+def fleet_round(conn) -> list[dict]:
+    """The fleet round (fleet.py) from the scheduled tick, so failover works even with the JARVIS app shut."""
+    from . import fleet
+    try:
+        notes = fleet.step(conn)
+    except Exception as exc:
+        notes = [f"failed: {type(exc).__name__}: {exc}"[:300]]
+    if not notes:
+        return []
+    entry = {"ts": paths.now(), "routine": "fleet", "ok": not notes[0].startswith("failed"), "note": "; ".join(notes)[:600]}
+    _log(entry)
+    return [entry]
 
 
 # ---------------------------------------------------------------- the Windows scheduled task
