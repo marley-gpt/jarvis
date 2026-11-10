@@ -702,12 +702,17 @@ function buildWorld(THREE, addons, renderer, opts) {
     scene3.add(new THREE.Mesh(merge(armco), std({ vertexColors: true, roughness: 0.4, metalness: 0.6 })), new THREE.Mesh(merge(flags), std({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })));
     // Spectators along the circuit fence and the marina promenade (scenery, not agents).
     if (!simple) {
-      const people = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.32, 0.9, 3, 6), std({ roughness: 0.7 }), 420);
-      const shirts = [0xffffff, 0xd4202f, 0x1d3557, 0xf1c40f, 0x2a2a2a, 0xe9d8c0, 0x3a7bd5];
-      let n = 0;
-      for (let i = 0; i < 260; i++) { const p = pts[(i * 2) % N], t2 = pts[(i * 2 + 1) % N].clone().sub(p).normalize(); const off = 8.5 + rand() * 2; people.setMatrixAt(n, at(p.x - t2.z * off, SEA + 1.6, p.z + t2.x * off)); people.setColorAt(n++, C(shirts[i % shirts.length])); }
-      for (let i = 0; i < 160; i++) { people.setMatrixAt(n, at(20 + rand() * 120, SEA + 1.4, -74 + rand() * 4)); people.setColorAt(n++, C(shirts[(i * 3) % shirts.length])); }
-      scene3.add(people);
+      // Where they stand and which way they face (the track, or the sea from the promenade).
+      const crowd = [];
+      for (let i = 0; i < 260; i++) { const p = pts[(i * 2) % N], t2 = pts[(i * 2 + 1) % N].clone().sub(p).normalize(); const off = 8.5 + rand() * 2; crowd.push([p.x - t2.z * off, SEA + 1.0, p.z + t2.x * off, Math.atan2(t2.z, -t2.x)]); }
+      for (let i = 0; i < 160; i++) crowd.push([20 + rand() * 120, SEA + 1.1, -74 + rand() * 4, Math.PI]);
+      if (hasPack("quaternius-characters")) bakeCrowd(crowd);   // real people, standing easy, baked still (see below)
+      else {
+        const people = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.32, 0.9, 3, 6), std({ roughness: 0.7 }), crowd.length);
+        const shirts = [0xffffff, 0xd4202f, 0x1d3557, 0xf1c40f, 0x2a2a2a, 0xe9d8c0, 0x3a7bd5];
+        crowd.forEach(([x, y, z], i) => { people.setMatrixAt(i, at(x, y + 0.6, z)); people.setColorAt(i, C(shirts[i % shirts.length])); });
+        scene3.add(people);
+      }
     }
 
     // Grand Prix cars racing round the circuit: braking for corners, queueing behind slower cars.
@@ -1224,6 +1229,42 @@ function buildWorld(THREE, addons, renderer, opts) {
         const idle = tpl.animations.find((a) => a.name.endsWith("|Idle")); if (!idle) return;
         const mixer = new THREE.AnimationMixer(obj), act = mixer.clipAction(idle); act.play(); act.time = (h % 40) / 10;
         mixer.update(0); extraMixers.push(mixer);
+      });
+    });
+  }
+  // A character frozen in its Idle pose as one plain geometry (the model's material groups kept), so hundreds can be
+  // drawn as instances: the circuit crowd and the promenade. Four looks, each at its own moment of the clip.
+  function bakeFigure(tpl, cloneSkinned, pal, moment) {
+    const obj = cloneSkinned(tpl); paint(obj, pal, false);
+    let mesh = null; obj.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+    const idle = tpl.animations.find((a) => a.name.endsWith("|Idle"));
+    if (!mesh || !idle) return null;
+    const mixer = new THREE.AnimationMixer(obj); mixer.clipAction(idle).play(); mixer.update(moment);
+    obj.updateMatrixWorld(true); mesh.skeleton.update();
+    const src = mesh.geometry, pos = src.attributes.position, n = pos.count, out = new Float32Array(n * 3), v = new V3();
+    for (let i = 0; i < n; i++) { v.fromBufferAttribute(pos, i); mesh.applyBoneTransform(i, v); v.applyMatrix4(mesh.matrixWorld).multiplyScalar(BODY); out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z; }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(out, 3));
+    // The model's hundred small material groups become one group per material (one draw call each).
+    const srcIndex = src.index ? Array.from(src.index.array) : Array.from({ length: n }, (_, i) => i);
+    const byMat = new Map();
+    for (const g of src.groups) { const list = byMat.get(g.materialIndex) || []; for (let i = g.start; i < g.start + g.count; i++) list.push(srcIndex[i]); byMat.set(g.materialIndex, list); }
+    const index = []; for (const [mat, list] of byMat) { geo.addGroup(index.length, list.length, mat); index.push(...list); }
+    geo.setIndex(index);
+    geo.computeVertexNormals();
+    return { geo, material: mesh.material };
+  }
+  function bakeCrowd(list) {
+    const files = ["Casual_Male", "Casual_Female", "Casual2_Male", "Worker_Female"], shirts = [0xd4202f, 0xf1c40f, 0x1d3557, 0xf2f2f2], m = new THREE.Matrix4();
+    Promise.all(files.map((f) => loadModel(QCH(f)))).then(async (tpls) => {
+      const L = await getLoaders();
+      tpls.forEach((tpl, k) => {
+        if (!tpl) return;
+        const mine = list.filter((_, i) => i % tpls.length === k);
+        const fig = bakeFigure(tpl, L.cloneSkinned, palette({ casual: true, hairColor: VHAIR[k % VHAIR.length], trousers: [0x2f3338, 0x5b4636, 0x1f2a44, 0xc8b79a][k] }, shirts[k], k * 7919 + 13), 0.9 * k + 0.3);
+        if (!fig) return;
+        const im = new THREE.InstancedMesh(fig.geo, fig.material, mine.length);
+        mine.forEach(([x, y, z, ry], i) => { const s = 0.92 + ((i * 7) % 5) * 0.03; im.setMatrixAt(i, m.copy(at(x, y, z, ry, s, s, s))); });
+        im.castShadow = false; im.receiveShadow = false; scene3.add(im);
       });
     });
   }
