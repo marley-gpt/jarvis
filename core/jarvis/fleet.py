@@ -212,6 +212,10 @@ def silent_for(hb: dict, now: float) -> float:
 # ---------------------------------------------------------------- failover
 
 def _notify(text: str) -> None:
+    # Owner (2026-11-13): takeover and hand-back notices are noise; they stay in the fleet log unless
+    # failover.notify is set true in brain/config.json.
+    if not (paths.config().get("failover") or {}).get("notify", False):
+        return
     from . import telegram
     try:
         telegram.send(text)
